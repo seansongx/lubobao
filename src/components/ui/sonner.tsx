@@ -2,7 +2,7 @@ import { Toaster as Sonner, type ToasterProps } from "sonner"
 import { CircleCheckIcon, InfoIcon, TriangleAlertIcon, OctagonXIcon, Loader2Icon } from "lucide-react"
 
 const Toaster = ({ ...props }: ToasterProps) => {
-  // 明暗跟随系统，与 tokens.css 的 prefers-color-scheme 一致。
+
   return (
     <Sonner
       theme="system"

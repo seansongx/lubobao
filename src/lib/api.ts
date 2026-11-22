@@ -6,7 +6,7 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { openUrl as openerOpenUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
+import { openUrl as openerOpenUrl } from "@tauri-apps/plugin-opener";
 
 import { createMockBackend } from "@/lib/mock-api";
 
@@ -96,6 +96,8 @@ export interface TaskSnapshot {
   monitoring: Monitoring;
   live: LiveState;
   record: RecordState;
+  /** 用户手动停止了录制：本次直播不再自动录制，下播或重新启用监控后恢复。此时 display 为 notify。 */
+  recordHeld: boolean;
   display: DisplayStatus;
   displayReason: string | null;
 }
@@ -171,6 +173,8 @@ export type ActivityKind =
   | "record_start"
   | "record_end"
   | "failure"
+  /** 不影响录制、但用户应当知道的问题，例如代理协议不支持而改为直连。 */
+  | "warning"
   | "user_action";
 
 export interface ActivityEntry {
@@ -238,17 +242,107 @@ export interface Settings {
   folder_name_title: boolean;
   enable_proxy: boolean;
   proxy_address: string;
+  /**
+   * 检测和录制走代理的平台键，逗号分隔（中文逗号也可以，空格忽略，区分大小写），
+   * 例如 "tiktok, twitch"。默认与 StreamCap 相同，只有海外平台；不在列表里的平台直连。
+   * 代理只在 enable_proxy 为 true 且 proxy_address 非空时生效。
+   */
+  default_platform_with_proxy: string;
   execute_custom_script: boolean;
   custom_script_command: string;
+  /**
+   * 平台 Cookie：键为平台键（"douyin"、"kuaishou"……），值为 Cookie 字符串，空字符串表示不用。
+   * 对应 StreamCap cookies.json。更新时整个对象替换。值含换行等无法放进请求头的字符时，
+   * updateSettings 以 kind "config" 拒绝。
+   */
+  platform_cookies: Record<string, string>;
   system_notification_enabled: boolean;
   stream_start_notification_enabled: boolean;
   stream_end_notification_enabled: boolean;
-  /** 逗号分隔的平台键，只有列出的平台走代理。默认值沿用 StreamCap，只有海外平台。 */
-  default_platform_with_proxy: string;
-  /** 平台键（douyin、kuaishou）到 Cookie 字符串。 */
-  platform_cookies: Partial<Record<Platform, string>>;
 }
 
+// ---- 调度（src-tauri/src/scheduler/mod.rs） ----
+
+/** 状态栏用的调度概况，变化时通过 scheduler-status 事件推送。 */
+export interface SchedulerStatus {
+  /** 最近一次排定的检测（Unix 毫秒）；没有排定的检测时为 null（无监控任务，或都在检测、录制）。 */
+  nextCheckAt: number | null;
+  /** 正在请求平台的任务数。 */
+  checking: number;
+  /** 正在录制（含启动中、收尾中）的任务数。 */
+  recording: number;
+}
+
+// ---- 录像库（src-tauri/src/library） ----
+
+export type LibraryErrorKind =
+  | "root_missing"
+  | "root_not_directory"
+  | "permission_denied"
+  | "not_found"
+  | "invalid_path"
+  | "invalid_target"
+  | "open_failed"
+  | "io";
+
+/** 录像库命令失败时 Promise 以此对象 reject；root 为录像根目录的绝对路径。 */
+export interface LibraryError {
+  kind: LibraryErrorKind;
+  message: string;
+  root: string;
+}
+
+export function isLibraryError(value: unknown): value is LibraryError {
+  return isCommandError(value) && typeof (value as unknown as LibraryError).root === "string";
+}
+
+export interface LibraryEntry {
+  name: string;
+  /** 相对于录像根目录，`/` 分隔；传回 openLibraryFile 等命令。 */
+  path: string;
+  kind: "dir" | "file";
+  /** 字节，目录为 null。 */
+  size: number | null;
+  /** Unix 毫秒。 */
+  modifiedAt: number | null;
+  /** 目录下的子目录和录像文件数。 */
+  childCount: number | null;
+  /** 分段序号（`_000`）。 */
+  segment: number | null;
+  /** 同一次录制的分组键。 */
+  group: string | null;
+}
+
+export interface LibraryListing {
+  root: string;
+  /** 当前目录，根目录为 ""。 */
+  path: string;
+  /** 目录在前，文件按时间倒序，分段按序号。 */
+  entries: LibraryEntry[];
+}
+
+/** 根目录所在磁盘的空间；根目录不存在时取最近的已存在上级目录。很快，可以定时查询。 */
+export interface DiskSpace {
+  root: string;
+  rootExists: boolean;
+  availableBytes: number | null;
+  totalBytes: number | null;
+}
+
+export interface LibraryUsage {
+  usedBytes: number;
+  fileCount: number;
+}
+
+/** 根目录占用。Rust 缓存结果，同一时间只遍历一次；computing 时 usage 是上次的结果或 null。 */
+export interface UsageSnapshot {
+  root: string;
+  rootExists: boolean;
+  usage: LibraryUsage | null;
+  /** Unix 毫秒。 */
+  computedAt: number | null;
+  computing: boolean;
+}
 
 // ---- 后端接口 ----
 
@@ -264,7 +358,10 @@ export interface Backend {
   deleteTasks(ids: TaskId[]): Promise<TaskId[]>;
   /** 只改监控意图。 */
   setMonitoring(ids: TaskId[], enabled: boolean): Promise<TaskSnapshot[]>;
-  /** 录制引擎接入前返回 not_implemented。 */
+  /**
+   * 手动停止录制，立即返回；录制状态随后经 finishing 回到 idle（task-updated 推送）。
+   * 被停止的任务 recordHeld 为 true：本次直播不再自动录制。
+   */
   stopRecording(ids: TaskId[]): Promise<TaskSnapshot[]>;
   getSettings(): Promise<Settings>;
   /** 后端的默认值（settings.rs），“恢复默认值”用。保存目录是本机的默认目录。 */
@@ -272,16 +369,23 @@ export interface Backend {
   /** 部分更新，返回完整设置。任一项无效时整批不保存。 */
   updateSettings(values: Partial<Settings>): Promise<Settings>;
   listActivity(query?: ActivityQuery): Promise<ActivityPage>;
+  getSchedulerStatus(): Promise<SchedulerStatus>;
+  /** 列出录像根目录下的子目录；path 缺省为根目录。 */
+  listLibrary(path?: string): Promise<LibraryListing>;
+  getDiskSpace(): Promise<DiskSpace>;
+  /** refresh 为 true 时忽略缓存有效期（30 秒）。最多等待 2 秒，仍在统计时 computing 为 true。 */
+  getLibraryUsage(refresh?: boolean): Promise<UsageSnapshot>;
+  /** 用系统默认播放器打开录像文件。 */
+  openLibraryFile(path: string): Promise<void>;
+  /** 在系统文件管理器中打开文件夹本身；path 为 "" 时打开根目录。 */
+  openLibraryFolder(path: string): Promise<void>;
+  /** 在系统文件管理器中显示并选中；path 为 "" 时打开根目录。 */
+  revealLibraryItem(path: string): Promise<void>;
 
   /** 应用版本号（tauri.conf.json 的 version）。 */
   getAppVersion(): Promise<string>;
   /** 弹出系统目录选择框，取消时返回 null。 */
   pickDirectory(options?: { title?: string; defaultPath?: string }): Promise<string | null>;
-  /**
-   * 在系统文件管理器中显示文件或目录（打开所在文件夹并选中它）。只用 opener:default 自带的权限，
-   * 不开放 open-path：后者会让 webview 能用系统默认程序打开任意文件。
-   */
-  revealPath(path: string): Promise<void>;
   /** 用系统浏览器打开链接。 */
   openUrl(url: string): Promise<void>;
 
@@ -289,6 +393,7 @@ export interface Backend {
   onTaskUpdated(handler: (task: TaskSnapshot) => void): Promise<UnlistenFn>;
   onTaskRemoved(handler: (payload: { ids: TaskId[] }) => void): Promise<UnlistenFn>;
   onActivity(handler: (entry: ActivityEntry) => void): Promise<UnlistenFn>;
+  onSchedulerStatus(handler: (status: SchedulerStatus) => void): Promise<UnlistenFn>;
 }
 
 function on<T>(event: string, handler: (payload: T) => void): Promise<UnlistenFn> {
@@ -309,19 +414,26 @@ const tauriBackend: Backend = {
   getSettingDefaults: () => invoke("get_setting_defaults"),
   updateSettings: (values) => invoke("update_settings", { values }),
   listActivity: (query) => invoke("list_activity", { query: query ?? null }),
+  getSchedulerStatus: () => invoke("get_scheduler_status"),
+  listLibrary: (path) => invoke("list_library", { path: path ?? null }),
+  getDiskSpace: () => invoke("get_disk_space"),
+  getLibraryUsage: (refresh) => invoke("get_library_usage", { refresh: refresh ?? false }),
+  openLibraryFile: (path) => invoke("open_library_file", { path }),
+  openLibraryFolder: (path) => invoke("open_library_folder", { path }),
+  revealLibraryItem: (path) => invoke("reveal_library_item", { path }),
 
   getAppVersion: () => getVersion(),
   async pickDirectory(options) {
     const picked = await openDialog({ directory: true, multiple: false, ...options });
     return typeof picked === "string" ? picked : null;
   },
-  revealPath: (path) => revealItemInDir(path),
   openUrl: (url) => openerOpenUrl(url),
 
   onFfmpegStatus: (handler) => on("ffmpeg-status", handler),
   onTaskUpdated: (handler) => on("task-updated", handler),
   onTaskRemoved: (handler) => on("task-removed", handler),
   onActivity: (handler) => on("activity", handler),
+  onSchedulerStatus: (handler) => on("scheduler-status", handler),
 };
 
 /** 是否运行在浏览器假数据模式。 */

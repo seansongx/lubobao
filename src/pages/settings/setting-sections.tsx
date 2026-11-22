@@ -5,7 +5,7 @@ import { Eye, EyeOff, FolderOpen, FolderSearch } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { api, type Platform, type Settings } from "@/lib/api";
+import { api, isCommandError, type Platform, type Settings } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { FieldRow, NumberField, SelectField, SettingsCard, SwitchField, TextField, type SelectOption } from "@/pages/settings/fields";
 import type { SettingKey, SettingsController } from "@/pages/settings/use-settings";
@@ -88,12 +88,14 @@ export function RecordSection({ ctx }: SectionProps) {
       setPickError(`无法打开目录选择框：${String(error)}`);
     }
   };
-  const reveal = async () => {
+  // 复用录像库的命令：后端打开它自己保存的录像根目录（即保存目录），不给 webview 开放 open-path。
+  const openFolder = async () => {
     setPickError(null);
     try {
-      await api.revealPath(settings.live_save_path);
+      await api.openLibraryFolder("");
     } catch (error) {
-      setPickError(`无法显示目录，可能还没有创建：${String(error)}`);
+      const message = isCommandError(error) ? error.message : String(error);
+      setPickError(`无法打开保存目录：${message}`);
     }
   };
 
@@ -114,9 +116,9 @@ export function RecordSection({ ctx }: SectionProps) {
           <FolderSearch aria-hidden />
           选择文件夹
         </Button>
-        <Button type="button" variant="outline" onClick={() => void reveal()}>
+        <Button type="button" variant="outline" onClick={() => void openFolder()}>
           <FolderOpen aria-hidden />
-          在文件夹中显示
+          打开
         </Button>
       </FieldRow>
       <SelectField

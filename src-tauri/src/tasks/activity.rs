@@ -13,6 +13,8 @@ pub enum ActivityKind {
     RecordStart,
     RecordEnd,
     Failure,
+    /// 不影响录制、但用户应当知道的问题，例如代理协议不支持而改为直连。
+    Warning,
     UserAction,
 }
 
@@ -24,6 +26,7 @@ impl ActivityKind {
             ActivityKind::RecordStart => "record_start",
             ActivityKind::RecordEnd => "record_end",
             ActivityKind::Failure => "failure",
+            ActivityKind::Warning => "warning",
             ActivityKind::UserAction => "user_action",
         }
     }
@@ -35,6 +38,7 @@ impl ActivityKind {
             ActivityKind::RecordStart,
             ActivityKind::RecordEnd,
             ActivityKind::Failure,
+            ActivityKind::Warning,
             ActivityKind::UserAction,
         ]
         .into_iter()
