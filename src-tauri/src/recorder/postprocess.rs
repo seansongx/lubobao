@@ -7,18 +7,23 @@
 //!
 //! 行为参照 StreamCap `stream_manager.py` 的 `converts_mp4`，有意差异：
 //!
-//! - ffmpeg 参数：`-c copy -bsf:a aac_adtstoasc -movflags +faststart -f mp4`，另加
-//!   `-sn -dn`（TS 里的字幕、数据流 MP4 装不下，会让整个转换失败）。StreamCap 只用
-//!   `-c:v copy -c:a copy -f mp4`。
+//! - ffmpeg 参数：`-c copy -sn -dn -movflags +faststart -f mp4`，HEVC 视频另加
+//!   `-tag:v hvc1`。`-sn -dn` 去掉 MP4 装不下的字幕、数据流（否则整个转换失败）；
+//!   `+faststart` 把索引放到文件开头；`hvc1` 让 QuickTime、Safari、iOS 能播放 HEVC。
+//!   ADTS 格式的 AAC 由 MP4 封装器自动转换，不强制 `aac_adtstoasc`，MP3、AC-3 音频
+//!   也能转换。StreamCap 只用 `-c:v copy -c:a copy -f mp4`。
 //! - 先写到 `<名称>.mp4.part`，读得出时长后再改名为 `.mp4`；失败时删除 `.part`。
 //!   StreamCap 直接写目标文件，失败时留下不完整的 MP4。
 //! - 成功的判断除退出码为 0 外，还要求输出非空、能读出时长（`ffmpeg -i` 只读文件头）。
 //! - 不删除原件时，TS 留在原处。StreamCap 会把它移进同目录的 `original/` 子目录。
-//! - 同名 MP4 已存在时不覆盖，改名为 `_2`、`_3`。
+//! - 同名 MP4 已存在时不覆盖，改名为 `_2`、`_3`；转换期间出现的同名文件也不覆盖。
 //! - 同时只转换 [`DEFAULT_CONCURRENCY`] 个文件，其余排队，不与录制抢 CPU 和磁盘。
 //!   StreamCap 每个文件各开一个协程，分段多时同时转换。
-//! - 转换前检查磁盘剩余空间，不足以写下与原件同样大小的 MP4 时直接失败。
-//! - 退出时中止转换（StreamCap 交给后台服务继续转换）。下次启动不会补做。
+//! - 转换前检查磁盘剩余空间：要写得下与原件同样大小的 MP4，并且转完后仍留有录制的
+//!   磁盘阈值，否则直接失败。
+//! - 退出时中止转换（StreamCap 交给后台服务继续转换）。下次启动不会补做，但会用
+//!   [`clean_partial_files`] 删除上次留下的 `.mp4.part`。
+//! - 文件系统操作和事件回调放进 `spawn_blocking`，保存目录在网络盘上也不卡异步线程。
 
 use std::collections::VecDeque;
 use std::io;
@@ -45,6 +50,8 @@ const BYTES_PER_TIMEOUT_SEC: u64 = 10 * 1024 * 1024;
 const PROBE_TIMEOUT: Duration = Duration::from_secs(30);
 /// 磁盘余量：除了与原件同样大小的 MP4，再多留这么多。
 const SPACE_MARGIN_BYTES: u64 = 64 * 1024 * 1024;
+/// 启动时清理残留临时文件时向下查找的目录层数（录像根目录/平台/主播）。
+pub const CLEANUP_DEPTH: usize = 3;
 /// 保留的 stderr 字节数，用于失败说明。
 const STDERR_LIMIT: usize = 16 * 1024;
 
@@ -55,6 +62,9 @@ pub struct ConvertOptions {
     pub ffmpeg_path: PathBuf,
     /// 确认 MP4 有效后删除原件。StreamCap `delete_original` 默认 `false`。
     pub delete_original: bool,
+    /// 转换后磁盘上至少还要剩下的空间，通常是录制的磁盘阈值（`recording_space_threshold`），
+    /// 避免转换占满空间，让其他直播间的录制因磁盘不足停止。
+    pub reserve_bytes: u64,
 }
 
 /// 转换过程中的事件。serde 以 `type` 区分，字段用 camelCase。
@@ -77,10 +87,11 @@ pub enum ConvertEvent {
         original_deleted: bool,
         delete_error: Option<String>,
     },
-    /// 转换失败，原件保留，不完整的 MP4 已删除。
+    /// 转换失败，不完整的 MP4 已删除。`original_kept` 为原件是否还在（读不到原文件时为 false）。
     Failed {
         source: PathBuf,
         message: String,
+        original_kept: bool,
     },
     /// 应用退出时中止（`started` 为 `true`）或放弃排队中的转换，原件保留。
     Cancelled {
@@ -199,10 +210,14 @@ impl PostProcessor {
         };
         self.inner.cancel.send_replace(true);
         for job in dropped {
-            (job.listener)(&ConvertEvent::Cancelled {
-                source: job.source,
-                started: false,
-            });
+            emit(
+                &job.listener,
+                ConvertEvent::Cancelled {
+                    source: job.source,
+                    started: false,
+                },
+            )
+            .await;
         }
         let deadline = tokio::time::Instant::now() + timeout;
         loop {
@@ -259,12 +274,13 @@ impl Inner {
                 &job.listener,
             )
             .await;
-            (job.listener)(&event);
+            emit(&job.listener, event).await;
         }
     }
 }
 
-/// 转换一个文件，返回最终事件（开始事件在过程中发出）。
+/// 转换一个文件，返回最终事件（开始事件在过程中发出）。文件系统操作都放进
+/// `spawn_blocking`，保存目录在网络盘上时不会卡住异步线程。
 async fn convert_one(
     source: &Path,
     options: &ConvertOptions,
@@ -272,46 +288,45 @@ async fn convert_one(
     mut cancel: watch::Receiver<bool>,
     listener: &ConvertListener,
 ) -> ConvertEvent {
-    let failed = |message: String| ConvertEvent::Failed {
+    let cancelled = |started: bool| ConvertEvent::Cancelled {
         source: source.to_path_buf(),
-        message,
+        started,
     };
     if *cancel.borrow() {
-        return ConvertEvent::Cancelled {
-            source: source.to_path_buf(),
-            started: false,
-        };
+        return cancelled(false);
     }
-    let size = match std::fs::metadata(source) {
-        Ok(meta) if meta.is_file() && meta.len() > 0 => meta.len(),
-        Ok(_) => return failed("原文件为空".into()),
-        Err(error) => return failed(format!("读不到原文件：{error}")),
+    let prepared = {
+        let (source, probe, reserve) = (
+            source.to_path_buf(),
+            Arc::clone(space_probe),
+            options.reserve_bytes,
+        );
+        blocking(move || prepare(&source, &probe, reserve)).await
     };
-    let Some(dir) = source.parent() else {
-        return failed("原文件路径没有所在目录".into());
+    let (size, target) = match prepared {
+        Ok(Ok(prepared)) => prepared,
+        Ok(Err(message)) | Err(message) => return failed(source, message).await,
     };
-    match space_probe(dir) {
-        Ok(free) if free < size.saturating_add(SPACE_MARGIN_BYTES) => {
-            return failed(format!(
-                "磁盘剩余空间不足（剩余 {}，需要约 {}）",
-                format_mb(free),
-                format_mb(size + SPACE_MARGIN_BYTES)
-            ));
-        }
-        // 查询失败时照常转换，空间真的不够时 ffmpeg 会报错。
-        _ => {}
-    }
-    let target = unique_target(source);
     let temp = part_path(&target);
-    let _ = std::fs::remove_file(&temp);
-    listener(&ConvertEvent::Started {
-        source: source.to_path_buf(),
-        target: target.clone(),
-    });
+    emit(
+        listener,
+        ConvertEvent::Started {
+            source: source.to_path_buf(),
+            target: target.clone(),
+        },
+    )
+    .await;
 
+    // HEVC 复制进 MP4 时默认标为 hev1，QuickTime、Safari、iOS 打不开，改标 hvc1。
+    // 只有 HEVC 才能加这个参数，H.264 加了会报错。读不出编码时按非 HEVC 处理。
+    let hevc = match probe_header(&options.ffmpeg_path, source, &mut cancel).await {
+        Ok(header) => video_is_hevc(&header),
+        Err(_) if *cancel.borrow() => return cancelled(true),
+        Err(_) => false,
+    };
     let timeout = BASE_TIMEOUT + Duration::from_secs(size / BYTES_PER_TIMEOUT_SEC);
     #[allow(unused_mut)]
-    let mut args = convert_args(source, &temp);
+    let mut args = convert_args(source, &temp, hevc);
     #[cfg(test)]
     if tests::is_slow(source) {
         // 按实时速率读取，让测试有时间在转换中途退出。
@@ -320,11 +335,8 @@ async fn convert_one(
     let result = run_ffmpeg(&options.ffmpeg_path, &args, timeout, &mut cancel).await;
     let message = match result {
         Run::Cancelled => {
-            remove_quietly(&temp);
-            return ConvertEvent::Cancelled {
-                source: source.to_path_buf(),
-                started: true,
-            };
+            remove_part(&temp).await;
+            return cancelled(true);
         }
         Run::Exited { code: Some(0), .. } => None,
         Run::Exited { code, stderr } => Some(match last_line(&stderr) {
@@ -338,78 +350,207 @@ async fn convert_one(
         )),
     };
     if let Some(message) = message {
-        remove_quietly(&temp);
-        return failed(message);
+        remove_part(&temp).await;
+        return failed(source, message).await;
     }
 
-    let duration = match std::fs::metadata(&temp) {
-        Ok(meta) if meta.len() > 0 => {
-            probe_duration(&options.ffmpeg_path, &temp, &mut cancel).await
-        }
-        _ => Err("生成的 MP4 为空".into()),
+    let non_empty = {
+        let temp = temp.clone();
+        blocking(move || std::fs::metadata(&temp).is_ok_and(|meta| meta.len() > 0)).await
+    };
+    let duration = if non_empty == Ok(true) {
+        probe_header(&options.ffmpeg_path, &temp, &mut cancel)
+            .await
+            .and_then(|header| {
+                parse_duration(&header).ok_or_else(|| match last_line(&header) {
+                    Some(line) => format!("生成的 MP4 读不出时长：{line}"),
+                    None => "生成的 MP4 读不出时长".into(),
+                })
+            })
+    } else {
+        Err("生成的 MP4 为空".into())
     };
     let duration_secs = match duration {
         Ok(secs) => secs,
         Err(message) => {
-            remove_quietly(&temp);
+            remove_part(&temp).await;
             if *cancel.borrow() {
-                return ConvertEvent::Cancelled {
-                    source: source.to_path_buf(),
-                    started: true,
-                };
+                return cancelled(true);
             }
-            return failed(message);
+            return failed(source, message).await;
         }
     };
-    if let Err(error) = std::fs::rename(&temp, &target) {
-        remove_quietly(&temp);
-        return failed(format!("无法把临时文件改名为 MP4：{error}"));
-    }
 
-    let (original_deleted, delete_error) = if options.delete_original {
-        match std::fs::remove_file(source) {
-            Ok(()) => (true, None),
-            Err(error) => (false, Some(error.to_string())),
-        }
-    } else {
-        (false, None)
+    let finished = {
+        let (source, temp, target, delete) = (
+            source.to_path_buf(),
+            temp.clone(),
+            target.clone(),
+            options.delete_original,
+        );
+        blocking(move || {
+            let target = place_without_overwrite(&temp, &source, target)?;
+            let deleted = if delete {
+                match std::fs::remove_file(&source) {
+                    Ok(()) => (true, None),
+                    Err(error) => (false, Some(error.to_string())),
+                }
+            } else {
+                (false, None)
+            };
+            Ok::<_, String>((target, deleted))
+        })
+        .await
     };
-    ConvertEvent::Succeeded {
-        source: source.to_path_buf(),
-        target,
-        duration_secs,
-        original_deleted,
-        delete_error,
+    match finished {
+        Ok(Ok((target, (original_deleted, delete_error)))) => ConvertEvent::Succeeded {
+            source: source.to_path_buf(),
+            target,
+            duration_secs,
+            original_deleted,
+            delete_error,
+        },
+        Ok(Err(message)) | Err(message) => {
+            remove_part(&temp).await;
+            failed(source, message).await
+        }
     }
 }
 
-/// 转换用的 ffmpeg 参数。
-pub fn convert_args(source: &Path, temp: &Path) -> Vec<std::ffi::OsString> {
+/// 转换前的检查：原件存在且非空，磁盘空间够用，选好目标文件名并清掉旧的临时文件。
+fn prepare(
+    source: &Path,
+    space_probe: &SpaceProbe,
+    reserve: u64,
+) -> Result<(u64, PathBuf), String> {
+    let size = match std::fs::metadata(source) {
+        Ok(meta) if meta.is_file() && meta.len() > 0 => meta.len(),
+        Ok(_) => return Err("原文件为空".into()),
+        Err(error) => return Err(format!("读不到原文件：{error}")),
+    };
+    let dir = source.parent().ok_or("原文件路径没有所在目录")?;
+    // 转完还要留出录制的磁盘阈值，否则其他直播间的录制会因磁盘不足停止。
+    let needed = size
+        .saturating_add(reserve)
+        .saturating_add(SPACE_MARGIN_BYTES);
+    // 查询失败时照常转换，空间真的不够时 ffmpeg 会报错。
+    if let Ok(free) = space_probe(dir)
+        && free < needed
+    {
+        return Err(format!(
+            "磁盘剩余空间不足（剩余 {}，转换后仍需保留录制的磁盘阈值，共需约 {}）",
+            format_mb(free),
+            format_mb(needed)
+        ));
+    }
+    let target = unique_target(source);
+    let temp = part_path(&target);
+    match std::fs::remove_file(&temp) {
+        Ok(()) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(format!("无法清理旧的临时文件：{error}")),
+    }
+    Ok((size, target))
+}
+
+/// 把临时文件放到目标位置，不覆盖已有文件。转换期间同名文件被占用时改用下一个
+/// 可用的名字，返回最终路径。
+fn place_without_overwrite(
+    temp: &Path,
+    source: &Path,
+    mut target: PathBuf,
+) -> Result<PathBuf, String> {
+    for _ in 0..100 {
+        // 硬链接在目标已存在时失败，不会覆盖；成功后再删掉临时文件。
+        match std::fs::hard_link(temp, &target) {
+            Ok(()) => {
+                remove_quietly(temp);
+                return Ok(target);
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                target = unique_target(source);
+            }
+            // 文件系统不支持硬链接（FAT、部分网络盘）：确认目标不存在后再改名。
+            Err(_) => {
+                if target.exists() {
+                    target = unique_target(source);
+                    continue;
+                }
+                return std::fs::rename(temp, &target)
+                    .map(|()| target)
+                    .map_err(|error| format!("无法把临时文件改名为 MP4：{error}"));
+            }
+        }
+    }
+    Err("找不到可用的 MP4 文件名".into())
+}
+
+/// 转换失败：说明原件是否还在（读不到原文件时不说「已保留」）。
+async fn failed(source: &Path, message: String) -> ConvertEvent {
+    let path = source.to_path_buf();
+    let original_kept = blocking(move || path.is_file()).await.unwrap_or(false);
+    ConvertEvent::Failed {
+        source: source.to_path_buf(),
+        message,
+        original_kept,
+    }
+}
+
+/// 在阻塞线程池里调用监听器（调度的监听器会写 SQLite）。
+async fn emit(listener: &ConvertListener, event: ConvertEvent) {
+    let listener = Arc::clone(listener);
+    if let Err(error) = tokio::task::spawn_blocking(move || listener(&event)).await {
+        eprintln!("转换事件回调出错：{error}");
+    }
+}
+
+/// 在阻塞线程池里执行文件系统操作。
+async fn blocking<T: Send + 'static>(
+    work: impl FnOnce() -> T + Send + 'static,
+) -> Result<T, String> {
+    tokio::task::spawn_blocking(work)
+        .await
+        .map_err(|error| format!("内部错误：{error}"))
+}
+
+async fn remove_part(temp: &Path) {
+    let temp = temp.to_path_buf();
+    let _ = blocking(move || remove_quietly(&temp)).await;
+}
+
+/// 转换用的 ffmpeg 参数。`hevc` 为 true 时把视频标为 `hvc1`。
+///
+/// 不加 `-bsf:a aac_adtstoasc`：它只接受 AAC，遇到 MP3、AC-3 会报错；MP4 封装器遇到
+/// ADTS 格式的 AAC 会自动插入它。
+pub fn convert_args(source: &Path, temp: &Path, hevc: bool) -> Vec<std::ffi::OsString> {
     let mut args: Vec<std::ffi::OsString> =
         ["-hide_banner", "-nostdin", "-loglevel", "error", "-y", "-i"]
             .iter()
             .map(Into::into)
             .collect();
     args.push(source.as_os_str().to_owned());
-    for arg in [
-        "-c",
-        "copy",
-        "-sn",
-        "-dn",
-        "-bsf:a",
-        "aac_adtstoasc",
-        "-movflags",
-        "+faststart",
-        "-f",
-        "mp4",
-    ] {
+    for arg in ["-c", "copy", "-sn", "-dn"] {
+        args.push(arg.into());
+    }
+    if hevc {
+        args.extend(["-tag:v".into(), "hvc1".into()]);
+    }
+    for arg in ["-movflags", "+faststart", "-f", "mp4"] {
         args.push(arg.into());
     }
     args.push(temp.as_os_str().to_owned());
     args
 }
 
-/// 同目录下同名的 `.mp4`；已存在（或临时文件被占用）时追加 `_2`、`_3`。
+/// 第一路视频流是不是 HEVC（`ffmpeg -i` 输出里的 `Video: hevc`）。
+pub fn video_is_hevc(header: &str) -> bool {
+    header
+        .lines()
+        .find_map(|line| line.split_once("Video: "))
+        .is_some_and(|(_, codec)| codec.starts_with("hevc"))
+}
+
+/// 同目录下同名的 `.mp4`；已存在时追加 `_2`、`_3`。
 fn unique_target(source: &Path) -> PathBuf {
     let base = source.with_extension("mp4");
     if !base.exists() {
@@ -423,6 +564,39 @@ fn unique_target(source: &Path) -> PathBuf {
         .map(|n| source.with_file_name(format!("{stem}_{n}.mp4")))
         .find(|path| !path.exists())
         .unwrap_or(base)
+}
+
+/// 删除 `root` 下（最多 [`CLEANUP_DEPTH`] 层子目录）上次崩溃或退出超时留下的
+/// `*.mp4.part`，返回删除的个数。只删这一种扩展名，不跟随符号链接。启动时调用，
+/// 此时还没有转换在进行。
+pub fn clean_partial_files(root: &Path) -> usize {
+    fn walk(dir: &Path, depth: usize, removed: &mut usize) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let Ok(kind) = entry.file_type() else {
+                continue;
+            };
+            let path = entry.path();
+            if kind.is_dir() {
+                if depth < CLEANUP_DEPTH {
+                    walk(&path, depth + 1, removed);
+                }
+            } else if kind.is_file()
+                && path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.to_ascii_lowercase().ends_with(".mp4.part"))
+                && std::fs::remove_file(&path).is_ok()
+            {
+                *removed += 1;
+            }
+        }
+    }
+    let mut removed = 0;
+    walk(root, 0, &mut removed);
+    removed
 }
 
 /// 临时文件：`<名称>.mp4.part`，不在录像库的媒体扩展名里。
@@ -521,25 +695,20 @@ async fn run_ffmpeg(
     }
 }
 
-/// 用 `ffmpeg -i` 只读文件头，取 `Duration:` 行。不解码，几十毫秒即可完成。
-async fn probe_duration(
+/// 用 `ffmpeg -i` 只读文件头（不解码，几十毫秒即可完成），返回它的输出。
+async fn probe_header(
     ffmpeg: &Path,
     file: &Path,
     cancel: &mut watch::Receiver<bool>,
-) -> Result<f64, String> {
+) -> Result<String, String> {
     let args: Vec<std::ffi::OsString> =
         vec!["-hide_banner".into(), "-i".into(), file.as_os_str().into()];
     match run_ffmpeg(ffmpeg, &args, PROBE_TIMEOUT, cancel).await {
         // 没有输出文件时 ffmpeg 总是以 1 退出，只看输出内容。
-        Run::Exited { stderr, .. } => {
-            parse_duration(&stderr).ok_or_else(|| match last_line(&stderr) {
-                Some(line) => format!("生成的 MP4 读不出时长：{line}"),
-                None => "生成的 MP4 读不出时长".into(),
-            })
-        }
-        Run::TimedOut => Err("读取 MP4 时长超时".into()),
+        Run::Exited { stderr, .. } => Ok(stderr),
+        Run::TimedOut => Err("读取文件头超时".into()),
         Run::Cancelled => Err("已中止".into()),
-        Run::SpawnFailed(error) => Err(format!("无法启动 ffmpeg 读取时长：{error}")),
+        Run::SpawnFailed(error) => Err(format!("无法启动 ffmpeg 读取文件头：{error}")),
     }
 }
 

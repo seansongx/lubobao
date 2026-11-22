@@ -176,7 +176,7 @@ export type ActivityKind =
   /** 不影响录制、但用户应当知道的问题，例如代理协议不支持而改为直连。 */
   | "warning"
   | "user_action"
-  /** 录后转 MP4 的开始和完成。转换失败记为 failure（detail.kind 为 "convert"），退出时中止记为 warning。 */
+  /** 录后转 MP4 的开始和完成。转换失败记为 failure、未转换或中止记为 warning，二者 detail.kind 为 "convert"；按 convert 筛选时一并返回。 */
   | "convert";
 
 export interface ActivityEntry {

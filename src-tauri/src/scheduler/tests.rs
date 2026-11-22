@@ -1321,7 +1321,11 @@ async fn finished_recordings_are_converted_to_mp4_with_activity() {
         activity_of(&h, ActivityKind::RecordEnd)[0].id < entries.last().unwrap().id,
         "录制结束的动态应在转换之前"
     );
-    assert_eq!(h.scheduler.post_processor().pending(), 0);
+    // 最后一条动态写入后，工作协程才退出。
+    until(SHORT, "队列清空", || {
+        h.scheduler.post_processor().pending() == 0
+    })
+    .await;
 }
 
 #[tokio::test]
@@ -1347,7 +1351,15 @@ async fn no_conversion_when_disabled_or_the_disk_is_full() {
     })
     .await;
     sleep(Duration::from_millis(500)).await;
-    assert!(activity_of(&h, ActivityKind::Convert).is_empty());
+    // 关闭转换时什么也不记；因磁盘不足没有转换的记一条提醒，在「转为 MP4」筛选里也看得到。
+    let entries = activity_of(&h, ActivityKind::Convert);
+    assert_eq!(entries.len(), 1, "{entries:?}");
+    assert_eq!(entries[0].kind, ActivityKind::Warning);
+    assert_eq!(
+        entries[0].message,
+        "磁盘空间不足，未转为 MP4，原 TS 文件已保留"
+    );
+    assert_eq!(activity_of(&h, ActivityKind::Warning).len(), 1);
     assert_eq!(h.scheduler.post_processor().pending(), 0);
     for file in &files {
         assert!(file.exists());
@@ -1365,8 +1377,43 @@ async fn shutdown_closes_the_conversion_queue() {
         crate::recorder::postprocess::ConvertOptions {
             ffmpeg_path: PathBuf::from("ffmpeg.exe"),
             delete_original: false,
+            reserve_bytes: 0,
         },
         Arc::new(|_: &ConvertEvent| {}),
     );
     assert!(!accepted);
+}
+
+#[tokio::test]
+async fn a_recording_that_ends_during_shutdown_leaves_a_warning() {
+    let Some(ffmpeg) = test_ffmpeg() else { return };
+    let (h, files) = conversion_harness(&ffmpeg);
+    let (_, _) = h.add("2003", Reply::Live, false);
+    h.start();
+    until(SHORT, "开始录制", || h.engine.starts() == 1).await;
+    h.scheduler.shutdown().await;
+    let entries = activity_of(&h, ActivityKind::Convert);
+    assert_eq!(entries.len(), 1, "{entries:?}");
+    assert_eq!(
+        entries[0].message,
+        "应用正在退出，未转为 MP4，原 TS 文件已保留"
+    );
+    for file in &files {
+        assert!(file.exists());
+    }
+}
+
+#[tokio::test]
+async fn startup_removes_leftover_partial_mp4_files() {
+    let h = harness();
+    let dir = h._dir.path().join("videos").join("抖音").join("主播");
+    std::fs::create_dir_all(&dir).unwrap();
+    let part = dir.join("rec_000.mp4.part");
+    let ts = dir.join("rec_000.ts");
+    std::fs::write(&part, b"x").unwrap();
+    std::fs::write(&ts, b"x").unwrap();
+    h.start();
+    until(SHORT, "清理临时文件", || !part.exists()).await;
+    assert!(ts.exists());
+    h.scheduler.shutdown().await;
 }

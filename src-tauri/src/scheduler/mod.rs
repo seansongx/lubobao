@@ -9,7 +9,8 @@
 //!   处理的失败至少隔 10 分钟，修改设置后立即重试。StreamCap 按固定间隔重试。
 //! - 暂停监控与 StreamCap `stop_monitor_recording` 一样同时停止录制。
 //! - 录制结束后按设置把 TS 交给 [`PostProcessor`] 转 MP4（逐个排队）。因磁盘不足结束的
-//!   不转换，避免把磁盘写满；StreamCap 只要 ffmpeg 正常退出就转换。
+//!   不转换，避免把磁盘写满；StreamCap 只要 ffmpeg 正常退出就转换。没有转换的（磁盘
+//!   不足、正在退出、FFmpeg 不可用）记一条提醒。启动时删除上次留下的 `.mp4.part`。
 //!
 //! 平台请求和录制引擎都通过 [`LiveSource`]、[`RecordEngine`] 接入，测试中替换为假实现。
 //!
@@ -229,6 +230,7 @@ impl Core {
     }
 
     async fn run(self: Arc<Self>) {
+        self.clean_partial_conversions().await;
         loop {
             if self.lock().shutting_down {
                 break;
@@ -775,17 +777,32 @@ impl Core {
 
     /// 按设置把这次录制的 TS 排进转 MP4 队列。退出期间、因磁盘不足结束的不转换。
     fn convert_recording(&self, task: &TaskSnapshot, outcome: &RecordingOutcome) {
-        if outcome.reason == EndReason::DiskFull || self.lock().shutting_down {
-            return;
-        }
         let files = policy::convertible_files(&outcome.files);
         if files.is_empty() {
             return;
         }
-        let Some(ffmpeg) = self.engine.ffmpeg_path() else {
+        let settings = self.tasks.settings();
+        if !policy::wants_conversion(&settings) {
             return;
+        }
+        let skipped = |message: &str| {
+            self.record_conversion(
+                task,
+                ActivityKind::Warning,
+                format!("{message}，原 TS 文件已保留"),
+                serde_json::json!({ "filePath": files[0], "files": files, "kind": "convert" }),
+            );
         };
-        let Some(options) = policy::convert_options(&self.tasks.settings(), ffmpeg) else {
+        if outcome.reason == EndReason::DiskFull {
+            return skipped("磁盘空间不足，未转为 MP4");
+        }
+        if self.lock().shutting_down {
+            return skipped("应用正在退出，未转为 MP4");
+        }
+        let Some(ffmpeg) = self.engine.ffmpeg_path() else {
+            return skipped("FFmpeg 不可用，未转为 MP4");
+        };
+        let Some(options) = policy::convert_options(&settings, ffmpeg) else {
             return;
         };
         let tasks = Arc::clone(&self.tasks);
@@ -803,7 +820,47 @@ impl Core {
                 eprintln!("写入转换动态失败（任务 {task_id}）：{error}");
             }
         });
-        self.post.enqueue(files, options, listener);
+        if !self.post.enqueue(files.clone(), options, listener) {
+            // 退出已经开始，队列不再接收。
+            skipped("应用正在退出，未转为 MP4");
+        }
+    }
+
+    fn record_conversion(
+        &self,
+        task: &TaskSnapshot,
+        kind: ActivityKind,
+        message: String,
+        detail: serde_json::Value,
+    ) {
+        let entry = NewActivity {
+            task_id: Some(task.id),
+            anchor_name: task.config.anchor_name.clone(),
+            kind,
+            message,
+            detail: Some(detail),
+        };
+        if let Err(error) = self.tasks.record_activity(entry) {
+            eprintln!("写入转换动态失败（任务 {}）：{error}", task.id);
+        }
+    }
+
+    /// 删除录像目录里上次崩溃或退出超时留下的 `*.mp4.part`。启动时还没有转换在进行。
+    async fn clean_partial_conversions(&self) {
+        let settings = self.tasks.settings();
+        let root = match settings
+            .get("live_save_path")
+            .and_then(serde_json::Value::as_str)
+        {
+            Some(path) if !path.trim().is_empty() => PathBuf::from(path.trim()),
+            _ => self.default_save_dir(),
+        };
+        let removed = tokio::task::spawn_blocking(move || postprocess::clean_partial_files(&root))
+            .await
+            .unwrap_or(0);
+        if removed > 0 {
+            eprintln!("已删除 {removed} 个上次未完成的 MP4 临时文件");
+        }
     }
 
     async fn shutdown(&self) {
@@ -965,9 +1022,17 @@ fn describe_conversion(event: &ConvertEvent) -> (ActivityKind, String, serde_jso
                 }),
             )
         }
-        ConvertEvent::Failed { source, message } => (
+        ConvertEvent::Failed {
+            source,
+            message,
+            original_kept,
+        } => (
             ActivityKind::Failure,
-            format!("转为 MP4 失败：{message}。原 TS 文件已保留"),
+            if *original_kept {
+                format!("转为 MP4 失败：{message}。原 TS 文件已保留")
+            } else {
+                format!("转为 MP4 失败：{message}")
+            },
             json!({ "filePath": source, "kind": "convert" }),
         ),
         ConvertEvent::Cancelled { source, started } => (
@@ -977,7 +1042,7 @@ fn describe_conversion(event: &ConvertEvent) -> (ActivityKind, String, serde_jso
             } else {
                 "应用退出，未转为 MP4，原 TS 文件已保留".to_string()
             },
-            json!({ "filePath": source }),
+            json!({ "filePath": source, "kind": "convert" }),
         ),
     }
 }

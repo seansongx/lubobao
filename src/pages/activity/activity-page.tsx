@@ -70,7 +70,6 @@ const FAILURE_KIND_LABEL: Record<string, string> = {
   auth_required: "需要登录，请在设置中填写 Cookie",
   invalid_url: "链接无效",
   config: "配置有误",
-  convert: "转为 MP4",
 };
 
 const QUALITY_LABEL: Record<string, string> = { OD: "原画", UHD: "超清", HD: "高清", SD: "标清", LD: "流畅" };
@@ -91,6 +90,7 @@ function visual(entry: ActivityEntry): { icon: LucideIcon; tone: Tone; label: st
       return { icon: Square, tone: "muted", label: "录制结束" };
     case "failure": {
       const kind = str(entry.detail?.kind);
+      if (kind === "convert") return { icon: AlertTriangle, tone: "failure", label: "转为 MP4 失败" };
       return kind && RETRYABLE.has(kind)
         ? { icon: RotateCw, tone: "retrying", label: "检测失败，重试中" }
         : { icon: AlertTriangle, tone: "failure", label: "失败" };

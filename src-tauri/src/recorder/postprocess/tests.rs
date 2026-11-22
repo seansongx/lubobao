@@ -32,15 +32,19 @@ fn test_ffmpeg() -> Option<PathBuf> {
 
 /// 生成 TS 样本：320×240、25 fps 的 H.264，加 44.1 kHz 正弦波 AAC（TS 里是 ADTS）。
 fn make_ts(ffmpeg: &Path, path: &Path, secs: u32) {
+    make_ts_with(ffmpeg, path, secs, &["-c:v", "libx264"], &["-c:a", "aac"]);
+}
+
+fn make_ts_with(ffmpeg: &Path, path: &Path, secs: u32, video: &[&str], audio: &[&str]) {
     let output = std::process::Command::new(ffmpeg)
         .args(["-hide_banner", "-loglevel", "error", "-y"])
         .args(["-f", "lavfi", "-i", "testsrc=size=320x240:rate=25"])
         .args(["-f", "lavfi", "-i", "sine=frequency=440:sample_rate=44100"])
         .args(["-t", &secs.to_string()])
-        .args([
-            "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p", "-g", "25",
-        ])
-        .args(["-c:a", "aac", "-b:a", "96k", "-f", "mpegts"])
+        .args(video)
+        .args(["-preset", "veryfast", "-pix_fmt", "yuv420p", "-g", "25"])
+        .args(audio)
+        .args(["-b:a", "96k", "-f", "mpegts"])
         .arg(path)
         .output()
         .expect("run ffmpeg to create sample");
@@ -93,6 +97,7 @@ fn options(ffmpeg: &Path, delete_original: bool) -> ConvertOptions {
     ConvertOptions {
         ffmpeg_path: ffmpeg.to_path_buf(),
         delete_original,
+        reserve_bytes: 0,
     }
 }
 
@@ -133,20 +138,111 @@ fn parses_duration_from_ffmpeg_header_output() {
     assert_eq!(parse_duration("moov atom not found"), None);
 }
 
-#[test]
-fn convert_args_copy_streams_and_write_mp4_to_the_temp_file() {
-    let args = convert_args(Path::new("a b/录像.ts"), Path::new("a b/录像.mp4.part"));
+fn joined_args(hevc: bool) -> (String, Vec<String>) {
+    let args = convert_args(
+        Path::new("a b/录像.ts"),
+        Path::new("a b/录像.mp4.part"),
+        hevc,
+    );
     let args: Vec<String> = args
         .iter()
         .map(|arg| arg.to_string_lossy().into_owned())
         .collect();
-    let joined = args.join(" ");
+    (args.join(" "), args)
+}
+
+#[test]
+fn convert_args_copy_streams_and_write_mp4_to_the_temp_file() {
+    let (joined, args) = joined_args(false);
     assert!(joined.contains("-i a b/录像.ts"));
     assert!(joined.contains("-c copy"));
-    assert!(joined.contains("-bsf:a aac_adtstoasc"));
     assert!(joined.contains("-movflags +faststart"));
     assert!(joined.contains("-f mp4"));
+    // 不强制 AAC 专用的滤镜，H.264 不加 hvc1 标记。
+    assert!(!joined.contains("aac_adtstoasc"));
+    assert!(!joined.contains("hvc1"));
     assert_eq!(args.last().unwrap(), "a b/录像.mp4.part");
+    let (joined, _) = joined_args(true);
+    assert!(joined.contains("-tag:v hvc1"));
+}
+
+#[test]
+fn detects_hevc_from_the_header_output() {
+    assert!(video_is_hevc(
+        "  Stream #0:0[0x100]: Video: hevc (Main) ([36][0][0][0] / 0x0024), yuv420p"
+    ));
+    assert!(!video_is_hevc(
+        "  Stream #0:0[0x100]: Video: h264 (High) ([27][0][0][0] / 0x001B)"
+    ));
+    assert!(!video_is_hevc("  Stream #0:0: Audio: aac (LC)"));
+}
+
+#[test]
+fn placing_the_mp4_never_overwrites_a_file_that_appeared_meanwhile() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("rec.ts");
+    let part = temp.path().join("rec.mp4.part");
+    std::fs::write(&part, b"new").unwrap();
+    // 选名时 rec.mp4 还不存在，转换期间用户放进来一个同名文件。
+    std::fs::write(temp.path().join("rec.mp4"), b"user").unwrap();
+    let placed = place_without_overwrite(&part, &source, temp.path().join("rec.mp4")).unwrap();
+    assert_eq!(placed, temp.path().join("rec_2.mp4"));
+    assert_eq!(std::fs::read(temp.path().join("rec.mp4")).unwrap(), b"user");
+    assert_eq!(std::fs::read(&placed).unwrap(), b"new");
+    assert!(!part.exists());
+}
+
+#[test]
+fn startup_cleanup_removes_only_partial_mp4_files() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let anchor = root.join("抖音").join("主播 甲");
+    std::fs::create_dir_all(&anchor).unwrap();
+    let too_deep = anchor.join("a").join("b");
+    std::fs::create_dir_all(&too_deep).unwrap();
+    for name in [
+        "rec.mp4.part",
+        "upper.MP4.PART",
+        "rec.mp4",
+        "rec.ts",
+        "other.part",
+    ] {
+        std::fs::write(anchor.join(name), b"x").unwrap();
+    }
+    std::fs::write(root.join("top.mp4.part"), b"x").unwrap();
+    std::fs::write(too_deep.join("deep.mp4.part"), b"x").unwrap();
+
+    assert_eq!(clean_partial_files(root), 3);
+    let mut left: Vec<String> = std::fs::read_dir(&anchor)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    left.sort();
+    assert_eq!(left, ["a", "other.part", "rec.mp4", "rec.ts"]);
+    assert!(!root.join("top.mp4.part").exists());
+    assert!(
+        too_deep.join("deep.mp4.part").exists(),
+        "超过查找层数的不动"
+    );
+}
+
+#[tokio::test]
+async fn a_missing_original_is_not_reported_as_kept() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("gone.ts");
+    let processor = PostProcessor::default();
+    let (listener, events) = collector();
+    assert!(processor.enqueue(
+        vec![source],
+        options(Path::new("missing-ffmpeg"), false),
+        listener
+    ));
+    drain(&processor).await;
+    let events = lock(&events).clone();
+    assert!(
+        matches!(&events[..], [ConvertEvent::Failed { original_kept: false, message, .. }] if message.contains("读不到原文件")),
+        "{events:?}"
+    );
 }
 
 #[test]
@@ -159,6 +255,38 @@ fn target_name_does_not_overwrite_an_existing_mp4() {
     assert_eq!(
         part_path(&temp.path().join("rec_000_2.mp4")),
         temp.path().join("rec_000_2.mp4.part")
+    );
+}
+
+#[tokio::test]
+async fn conversion_must_leave_the_recording_disk_threshold_free() {
+    const GB: u64 = 1024 * 1024 * 1024;
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("rec.ts");
+    std::fs::write(&source, vec![0u8; 1024]).unwrap();
+    // 剩余 1.5 GB，写一个小文件绰绰有余，但转完达不到 2 GB 的录制阈值。
+    let processor = PostProcessor::with_space_probe(1, Arc::new(|_: &Path| Ok(GB * 3 / 2)));
+    let (listener, events) = collector();
+    let mut opts = options(Path::new("missing-ffmpeg"), true);
+    opts.reserve_bytes = 2 * GB;
+    assert!(processor.enqueue(vec![source.clone()], opts.clone(), listener));
+    drain(&processor).await;
+    let first = lock(&events).clone();
+    assert!(
+        matches!(&first[..], [ConvertEvent::Failed { message, original_kept: true, .. }] if message.contains("磁盘剩余空间不足")),
+        "{first:?}"
+    );
+    assert!(source.exists());
+
+    // 阈值放宽到 1 GB 后通过空间检查（之后因 ffmpeg 不存在而失败）。
+    opts.reserve_bytes = GB;
+    let (listener, events) = collector();
+    assert!(processor.enqueue(vec![source.clone()], opts, listener));
+    drain(&processor).await;
+    let second = lock(&events).clone();
+    assert!(
+        matches!(second.last(), Some(ConvertEvent::Failed { message, .. }) if message.contains("无法启动 ffmpeg")),
+        "{second:?}"
     );
 }
 
@@ -376,4 +504,65 @@ async fn shutdown_aborts_the_running_conversion_and_drops_the_queue() {
     // 关闭后不再接收。
     let (listener, _) = collector();
     assert!(!processor.enqueue(vec![slow], options(&ffmpeg, false), listener));
+}
+
+#[tokio::test]
+async fn converts_mp3_audio_without_the_aac_filter() {
+    let Some(ffmpeg) = test_ffmpeg() else { return };
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("mp3.ts");
+    make_ts_with(
+        &ffmpeg,
+        &source,
+        2,
+        &["-c:v", "libx264"],
+        &["-c:a", "libmp3lame"],
+    );
+    let processor = PostProcessor::default();
+    let (listener, events) = collector();
+    assert!(processor.enqueue(vec![source.clone()], options(&ffmpeg, false), listener));
+    drain(&processor).await;
+    let events = lock(&events).clone();
+    assert!(
+        matches!(finals(&events)[..], [ConvertEvent::Succeeded { .. }]),
+        "{events:?}"
+    );
+    let target = source.with_extension("mp4");
+    assert_playable(&ffmpeg, &target);
+    let header = header_of(&ffmpeg, &target);
+    assert!(header.contains("Audio: mp3"), "{header}");
+}
+
+#[tokio::test]
+async fn hevc_video_is_tagged_hvc1_and_aac_still_converts() {
+    let Some(ffmpeg) = test_ffmpeg() else { return };
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("hevc.ts");
+    make_ts_with(&ffmpeg, &source, 2, &["-c:v", "libx265"], &["-c:a", "aac"]);
+    let processor = PostProcessor::default();
+    let (listener, events) = collector();
+    assert!(processor.enqueue(vec![source.clone()], options(&ffmpeg, false), listener));
+    drain(&processor).await;
+    let events = lock(&events).clone();
+    assert!(
+        matches!(finals(&events)[..], [ConvertEvent::Succeeded { .. }]),
+        "{events:?}"
+    );
+    let target = source.with_extension("mp4");
+    assert_playable(&ffmpeg, &target);
+    let header = header_of(&ffmpeg, &target);
+    assert!(
+        header.contains("Video: hevc") && header.contains("hvc1"),
+        "{header}"
+    );
+    assert!(header.contains("Audio: aac"), "{header}");
+}
+
+fn header_of(ffmpeg: &Path, file: &Path) -> String {
+    let output = std::process::Command::new(ffmpeg)
+        .args(["-hide_banner", "-i"])
+        .arg(file)
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&output.stderr).into_owned()
 }

@@ -1127,7 +1127,10 @@ export function createMockBackend(): Backend {
         (entry) =>
           (query.taskId === undefined || entry.taskId === query.taskId) &&
           (query.before === undefined || entry.id < query.before) &&
-          (!query.kinds?.length || query.kinds.includes(entry.kind)),
+          (!query.kinds?.length ||
+            query.kinds.includes(entry.kind) ||
+            // 与 Rust 一致：「转为 MP4」也包括转换的失败和提醒。
+            (query.kinds.includes("convert") && entry.detail?.kind === "convert")),
       );
       const items = matching.slice(0, limit);
       return {

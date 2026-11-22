@@ -161,10 +161,17 @@ pub fn convert_options(
     settings: &Map<String, Value>,
     ffmpeg_path: PathBuf,
 ) -> Option<ConvertOptions> {
-    flag(settings, "convert_to_mp4", true).then(|| ConvertOptions {
+    wants_conversion(settings).then(|| ConvertOptions {
         ffmpeg_path,
         delete_original: flag(settings, "delete_original", false),
+        // 转换后仍要留出录制的磁盘阈值，与 `record_options` 用同一个值。
+        reserve_bytes: record_options(settings).disk_threshold_bytes,
     })
+}
+
+/// 设置 `convert_to_mp4`，缺省为 true（同 StreamCap）。
+pub fn wants_conversion(settings: &Map<String, Value>) -> bool {
+    flag(settings, "convert_to_mp4", true)
 }
 
 /// 一次录制里要转 MP4 的文件：磁盘上存在的 TS，保持原顺序。引擎目前只录 TS
