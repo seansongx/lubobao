@@ -22,8 +22,8 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             ffmpeg::init(app.handle())?;
-            tasks::init(app.handle())?;
-            scheduler::init(app.handle())?;
+            tasks::tauri_glue::init(app.handle())?;
+            scheduler::tauri_glue::init(app.handle())?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -38,14 +38,14 @@ pub fn run() {
             tasks::commands::get_settings,
             tasks::commands::update_settings,
             tasks::commands::list_activity,
-            scheduler::get_scheduler_status
+            scheduler::tauri_glue::get_scheduler_status
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app, event| {
             // 退出前停止调度和所有录制，等文件收尾。
             if let tauri::RunEvent::ExitRequested { api, .. } = &event {
-                scheduler::on_exit_requested(app, api);
+                scheduler::tauri_glue::on_exit_requested(app, api);
             }
         });
 }

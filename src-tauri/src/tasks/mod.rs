@@ -6,13 +6,11 @@
 //! 回写状态，由这里负责持久化、写动态和推送事件。
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, Weak};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
-use tauri::{Emitter, Manager};
-use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 
 use crate::platforms::{FetchOptions, LiveInfo, Platform, PlatformError, Quality, adapter_for};
 
@@ -22,6 +20,7 @@ pub mod dedup;
 pub mod model;
 pub mod settings;
 pub mod store;
+pub mod tauri_glue;
 
 #[cfg(test)]
 mod tests;
@@ -932,53 +931,20 @@ fn not_found(id: TaskId) -> CommandError {
     CommandError::new(ErrorKind::NotFound, format!("任务 {id} 不存在"))
 }
 
-/// 默认保存目录：系统「视频」目录下的 `录播宝`，取不到时用应用数据目录下的 `recordings`。
-fn default_save_dir(app: &tauri::AppHandle, data_dir: &Path) -> PathBuf {
-    app.path()
-        .video_dir()
-        .map(|dir| dir.join("录播宝"))
-        .unwrap_or_else(|_| data_dir.join("recordings"))
-}
+/// 数据库文件名，位于数据目录下。
+pub const DB_FILE: &str = "lubobao.db";
 
-fn open_manager(app: &tauri::AppHandle) -> Result<TaskManager, String> {
-    let data_dir = app
-        .path()
-        .app_local_data_dir()
-        .map_err(|error| format!("找不到应用数据目录：{error}"))?;
-    let db_path = data_dir.join("lubobao.db");
+/// 打开 `data_dir/lubobao.db`（不存在时创建）并恢复任务。`save_dir` 是默认录像保存目录
+/// （设置 `live_save_path` 的缺省值）。不依赖 Tauri，命令行程序也用它。失败时返回给用户
+/// 看的说明，含数据库路径。
+pub fn open_in(
+    data_dir: &Path,
+    save_dir: &Path,
+    listener: Listener,
+) -> Result<TaskManager, String> {
+    let db_path = data_dir.join(DB_FILE);
     let store =
         Store::open(&db_path).map_err(|error| format!("{error}\n数据库：{}", db_path.display()))?;
-    let handle = app.clone();
-    let listener: Listener = Box::new(move |event| {
-        let _ = match event {
-            TaskEvent::Updated(snapshot) => handle.emit(TASK_UPDATED_EVENT, *snapshot),
-            TaskEvent::Removed(ids) => handle.emit(TASK_REMOVED_EVENT, json!({ "ids": ids })),
-            TaskEvent::Activity(entry) => handle.emit(ACTIVITY_EVENT, entry),
-        };
-    });
-    TaskManager::open(store, &default_save_dir(app, &data_dir), listener)
+    TaskManager::open(store, save_dir, listener)
         .map_err(|error| format!("{}\n数据库：{}", error.message, db_path.display()))
-}
-
-/// 在 Tauri `setup` 中调用：打开数据库、恢复任务并登记 `Arc<TaskManager>`。
-///
-/// 打不开数据库（例如被更新版本的录播宝升级过）时不 panic：记日志，弹出错误对话框，
-/// 用户确认后退出。
-pub fn init(app: &tauri::AppHandle) -> tauri::Result<()> {
-    match open_manager(app) {
-        Ok(manager) => {
-            app.manage(Arc::new(manager));
-        }
-        Err(message) => {
-            eprintln!("录播宝无法打开任务数据：{message}");
-            let handle = app.clone();
-            app.dialog()
-                .message(format!("无法打开任务数据，录播宝将退出。\n\n{message}"))
-                .title("录播宝启动失败")
-                .kind(MessageDialogKind::Error)
-                .buttons(MessageDialogButtons::Ok)
-                .show(move |_| handle.exit(1));
-        }
-    }
-    Ok(())
 }

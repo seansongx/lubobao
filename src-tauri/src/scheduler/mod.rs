@@ -10,17 +10,26 @@
 //! - 暂停监控与 StreamCap `stop_monitor_recording` 一样同时停止录制。
 //!
 //! 平台请求和录制引擎都通过 [`LiveSource`]、[`RecordEngine`] 接入，测试中替换为假实现。
-//! Rust 持有全部状态；前端通过 [`get_scheduler_status`] 和 `scheduler-status` 事件取得
-//! 下次检测时间。
+//!
+//! 除 [`tauri_glue`] 外，本模块不依赖 Tauri，只用 Tokio，桌面应用和命令行程序共用：
+//!
+//! ```ignore
+//! let tasks = Arc::new(tasks::open_in(&data_dir, &save_dir, Box::new(|_event| {}))?);
+//! let ffmpeg = Arc::new(FfmpegManager::new(ManagerConfig::for_current_platform(root), listener));
+//! tokio::spawn({ let ffmpeg = Arc::clone(&ffmpeg); async move { ffmpeg.ensure().await; } });
+//! let scheduler = Scheduler::with_defaults(tasks, ffmpeg, Box::new(|_status| {}));
+//! let join = scheduler.spawn();   // 在 Tokio 运行时中开始轮询
+//! tokio::signal::ctrl_c().await?; // 收到退出信号后：
+//! scheduler.shutdown().await;     // 停止轮询，停止所有录制并等收尾
+//! join.await.ok();
+//! ```
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::Duration;
 
 use serde::Serialize;
-use tauri::{Emitter, Manager};
 use tokio::sync::Notify;
 use tokio::time::Instant;
 
@@ -34,6 +43,7 @@ use crate::tasks::{
 
 mod engine;
 pub mod policy;
+pub mod tauri_glue;
 
 #[cfg(test)]
 mod tests;
@@ -157,6 +167,25 @@ impl Scheduler {
         let hook: Weak<dyn SchedulerHook> = weak;
         core.tasks.set_scheduler_hook(hook);
         Arc::new(Scheduler { core })
+    }
+
+    /// 用真实的平台适配器和 FFmpeg 录制引擎创建调度器。
+    pub fn with_defaults(
+        tasks: Arc<TaskManager>,
+        ffmpeg: Arc<FfmpegManager>,
+        status_listener: StatusListener,
+    ) -> Arc<Scheduler> {
+        Scheduler::new(
+            tasks,
+            Arc::new(PlatformSource),
+            Arc::new(FfmpegEngine::new(ffmpeg)),
+            status_listener,
+        )
+    }
+
+    /// 在当前 Tokio 运行时中启动调度循环。
+    pub fn spawn(&self) -> tokio::task::JoinHandle<()> {
+        tokio::spawn(self.run())
     }
 
     /// 调度循环，直到 [`Scheduler::shutdown`]。在 Tokio 运行时中执行。
@@ -683,57 +712,4 @@ fn describe(outcome: &RecordingOutcome) -> String {
         Some(message) if !message.is_empty() => format!("{}：{message}", outcome.reason.label()),
         _ => outcome.reason.label().to_string(),
     }
-}
-
-/// 在 Tauri `setup` 中、`tasks::init` 和 `ffmpeg::init` 之后调用：创建调度器并在后台开始轮询。
-/// 任务数据没打开时（`tasks::init` 已提示退出）不启动。
-pub fn init(app: &tauri::AppHandle) -> tauri::Result<()> {
-    let Some(tasks) = app.try_state::<Arc<TaskManager>>() else {
-        return Ok(());
-    };
-    let ffmpeg = app.state::<Arc<FfmpegManager>>();
-    let handle = app.clone();
-    let scheduler = Scheduler::new(
-        Arc::clone(tasks.inner()),
-        Arc::new(PlatformSource),
-        Arc::new(FfmpegEngine::new(Arc::clone(ffmpeg.inner()))),
-        Box::new(move |status: &SchedulerStatus| {
-            let _ = handle.emit(STATUS_EVENT, status);
-        }),
-    );
-    tauri::async_runtime::spawn(scheduler.run());
-    app.manage(scheduler);
-    Ok(())
-}
-
-static EXIT_STARTED: AtomicBool = AtomicBool::new(false);
-static EXIT_READY: AtomicBool = AtomicBool::new(false);
-
-/// 处理 `RunEvent::ExitRequested`：第一次先阻止退出，停止调度和所有录制、等文件收尾后
-/// 再退出；收尾完成后的退出请求直接放行。
-pub fn on_exit_requested(app: &tauri::AppHandle, api: &tauri::ExitRequestApi) {
-    if EXIT_READY.load(Ordering::SeqCst) {
-        return;
-    }
-    api.prevent_exit();
-    if EXIT_STARTED.swap(true, Ordering::SeqCst) {
-        return;
-    }
-    let app = app.clone();
-    tauri::async_runtime::spawn(async move {
-        match app.try_state::<Arc<Scheduler>>() {
-            Some(scheduler) => scheduler.shutdown().await,
-            None => {
-                crate::recorder::stop_all().await;
-            }
-        }
-        EXIT_READY.store(true, Ordering::SeqCst);
-        app.exit(0);
-    });
-}
-
-/// 调度概况，供状态栏显示「下次检测」。变化时另有 `scheduler-status` 事件。
-#[tauri::command]
-pub fn get_scheduler_status(scheduler: tauri::State<'_, Arc<Scheduler>>) -> SchedulerStatus {
-    scheduler.status()
 }
