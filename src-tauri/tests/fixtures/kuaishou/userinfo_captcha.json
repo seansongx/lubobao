@@ -1,0 +1,1 @@
+{"data":{"result":400002,"jsSdkUrl":"//static.yximgs.com/udata/pkg/fe/indentity-verification.umd.f6645615.js","url":"https://captcha.zt.kuaishou.com/iframe/index.html?captchaSession=TEST_SESSION&type=1&bizName=ANTICRAWL_DEFAULT"},"error":[{"url":"webLiveAPI::/rest/k/user/info","errInfo":{"result":400002}}]}
