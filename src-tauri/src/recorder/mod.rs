@@ -2,7 +2,8 @@
 //!
 //! 调用 [`start`] 得到 [`RecordingHandle`]，用它停止录制、读取快照或等待结束；
 //! 过程中的状态通过 [`EventListener`] 回调发出（[`RecorderEvent`] 可直接用 serde 序列化）。
-//! 引擎不关心任务、调度和界面，只负责一次录制从启动到收尾。
+//! 引擎不关心任务、调度和界面，只负责一次录制从启动到收尾。应用退出前调用 [`stop_all`]
+//! 正常收尾所有录制；异常退出时由 [`process_guard`] 结束 ffmpeg。
 //!
 //! 行为参照 StreamCap `app/core/recording/stream_manager.py` 的 `start_ffmpeg` 与
 //! `app/core/media/ffmpeg_builders/`。有意的差异：
@@ -20,21 +21,24 @@
 //!   SIGINT），超时后强制结束。TS 即使被强制结束也能播放。
 //! - 增加看门狗：长时间没有新数据时主动停止并报告网络错误，避免进程挂起。
 //! - 文件名去掉 `%`（分段文件名会被当作格式串），名称截断到 60 个字符，避开 Windows
-//!   保留设备名；同一秒重复开始时追加序号，不覆盖已有录像。
+//!   保留设备名；同一秒重复开始时追加序号，不覆盖已有录像。保存目录里的 `%` 在交给
+//!   segment 封装器时转义为 `%%`。
 
 pub mod command;
 pub mod naming;
 pub mod outcome;
+pub mod process_guard;
 pub mod progress;
 
 #[cfg(test)]
 mod tests;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 use chrono::Local;
@@ -60,8 +64,11 @@ pub const DEFAULT_DISK_THRESHOLD_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 pub const DEFAULT_DISK_CHECK_INTERVAL_SECS: u64 = 10;
 /// 写入 `q` 后等待 ffmpeg 收尾的时间（秒），超时强制结束。
 pub const DEFAULT_STOP_TIMEOUT_SECS: u64 = 15;
-/// 多久没有新数据就判定为卡住（秒）。大于 `-rw_timeout` 与探测时长之和。
+/// 多久没有新数据就判定为卡住（秒）。
 pub const DEFAULT_STALL_TIMEOUT_SECS: u64 = 90;
+/// 看门狗时限的下限（秒）。FLV 开始写出数据前，ffmpeg 最多可能花 `-rw_timeout`（15 秒）
+/// 加 `-analyzeduration`（20 秒）连接和探测，低于这个值会误判正常的探测。
+pub const MIN_STALL_TIMEOUT_SECS: u64 = 40;
 
 /// 保留的 stderr 错误行数。
 const ERROR_TAIL_LINES: usize = 20;
@@ -95,6 +102,7 @@ pub struct RecordOptions {
     pub folder_by_anchor: bool,
     pub disk_check_interval_secs: u64,
     pub stop_timeout_secs: u64,
+    /// 看门狗时限（秒）。0 表示关闭；非 0 时不低于 [`MIN_STALL_TIMEOUT_SECS`]。
     pub stall_timeout_secs: u64,
 }
 
@@ -115,6 +123,11 @@ impl Default for RecordOptions {
     }
 }
 
+/// 实际生效的看门狗时限：0 表示关闭，其余值不低于 `minimum`。
+pub fn effective_stall_timeout(secs: u64, minimum: u64) -> Option<Duration> {
+    (secs > 0).then(|| Duration::from_secs(secs.max(minimum).max(1)))
+}
+
 /// 一次录制的全部输入。
 #[derive(Debug, Clone)]
 pub struct RecordingRequest {
@@ -125,7 +138,7 @@ pub struct RecordingRequest {
     pub source_format: SourceFormat,
     /// 取流请求头，通常是 `LiveInfo::stream_headers`。
     pub headers: BTreeMap<String, String>,
-    /// 录像根目录；引擎在其下按平台和主播建子目录。
+    /// 录像根目录；相对路径按当前工作目录转为绝对路径。引擎在其下按平台和主播建子目录。
     pub output_dir: PathBuf,
     /// 主播名，用于目录和文件名。
     pub anchor_name: String,
@@ -157,7 +170,7 @@ pub struct RecordingOutcome {
     pub message: Option<String>,
     /// ffmpeg 退出码；没有启动或被强制结束时可能为 `None`。
     pub exit_code: Option<i32>,
-    /// 生成的非空录像文件，按文件名排序。
+    /// 生成的非空录像文件；分段时按序号排序。
     pub files: Vec<PathBuf>,
     /// 所有录像文件的总字节数。
     pub bytes_written: u64,
@@ -176,14 +189,18 @@ pub struct RecordingOutcome {
 pub struct RecorderSnapshot {
     pub state: RecorderState,
     pub output_dir: Option<PathBuf>,
-    /// 交给 ffmpeg 的输出路径；分段时包含 `%03d`。
+    /// 录像文件路径；分段时为 `stem_%03d.ts` 形式的模板（目录中的 `%` 不转义）。
     pub output_path: Option<PathBuf>,
+    /// ffmpeg 进程号。
+    pub pid: Option<u32>,
     pub progress: Option<Progress>,
+    /// 当前生效的停止原因；停止期间用户停止会覆盖看门狗或磁盘停止。
+    pub stop_cause: Option<StopCause>,
     pub outcome: Option<RecordingOutcome>,
 }
 
-/// 录制过程中的事件，按发生顺序发出：`started` → 若干 `progress` →（`stopping`）→ `finished`。
-/// 启动前就失败时只有 `finished`。
+/// 录制过程中的事件，按发生顺序发出：`started` → 若干 `progress`/`warning` →
+/// （一到两次 `stopping`）→ `finished`。启动前就失败时只有 `finished`。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(
     tag = "type",
@@ -196,11 +213,17 @@ pub enum RecorderEvent {
         output_path: PathBuf,
         source_format: SourceFormat,
         segmented: bool,
+        pid: Option<u32>,
         started_at_ms: i64,
     },
     Progress {
         progress: Progress,
     },
+    /// 不影响录制、但用户应当知道的问题，例如无法查询磁盘空间。
+    Warning {
+        message: String,
+    },
+    /// 开始停止。引擎因看门狗或磁盘停止后，用户再点停止会以 `user` 再发一次。
     Stopping {
         cause: StopCause,
     },
@@ -228,7 +251,8 @@ pub struct RecordingHandle {
 }
 
 impl RecordingHandle {
-    /// 请求正常停止，立即返回。重复调用无副作用。
+    /// 请求正常停止，立即返回。重复调用无副作用。引擎已在因看门狗或磁盘不足停止时，
+    /// 结束原因改记为用户停止。
     pub fn stop(&self) {
         self.stop_tx.send_replace(true);
     }
@@ -274,6 +298,62 @@ impl RecordingHandle {
     }
 }
 
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// 正在运行的录制，供 [`stop_all`] 使用。
+static ACTIVE: Mutex<BTreeMap<u64, RecordingHandle>> = Mutex::new(BTreeMap::new());
+static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+
+/// 正在运行的录制数量。
+pub fn active_recordings() -> usize {
+    lock(&ACTIVE).len()
+}
+
+/// 停止所有正在运行的录制并等待收尾，返回各自的结果。应用在
+/// `RunEvent::ExitRequested` 中先 `prevent_exit`，等它完成后再退出。
+/// 每个录制最多等待 `stop_timeout_secs` 后被强制结束，所以总耗时有上限。
+pub async fn stop_all() -> Vec<RecordingOutcome> {
+    let handles: Vec<RecordingHandle> = lock(&ACTIVE).values().cloned().collect();
+    for handle in &handles {
+        handle.stop();
+    }
+    let mut outcomes = Vec::with_capacity(handles.len());
+    for handle in &handles {
+        outcomes.push(handle.wait().await);
+    }
+    outcomes
+}
+
+/// 进程内已分配但可能还没被 ffmpeg 创建的文件，防止同一秒开始的两次录制写进同一个文件。
+static RESERVED_FILES: Mutex<BTreeSet<PathBuf>> = Mutex::new(BTreeSet::new());
+
+/// 占用一个文件名，drop 时释放。
+struct NameReservation {
+    first_file: PathBuf,
+}
+
+impl Drop for NameReservation {
+    fn drop(&mut self) {
+        lock(&RESERVED_FILES).remove(&self.first_file);
+    }
+}
+
+/// 选一个既不在磁盘上、也没被本进程其他录制占用的文件名主体，并占用它。
+fn reserve_stem(dir: &Path, base: &str, segmented: bool) -> (String, NameReservation) {
+    let mut reserved = lock(&RESERVED_FILES);
+    let stem = naming::unique_stem(base, |candidate| {
+        let first = naming::first_file_path(dir, candidate, segmented);
+        reserved.contains(&first) || first.exists()
+    });
+    let first_file = naming::first_file_path(dir, &stem, segmented);
+    reserved.insert(first_file.clone());
+    (stem, NameReservation { first_file })
+}
+
 /// 开始录制。必须在 Tokio 运行时中调用（Tauri 的异步命令和 `tauri::async_runtime` 都可以）。
 ///
 /// 返回前会建好目录、检查磁盘并启动 ffmpeg；这些步骤失败时返回的句柄已经结束，
@@ -288,12 +368,23 @@ pub async fn start_with_probe(
     listener: EventListener,
     probe: SpaceProbe,
 ) -> RecordingHandle {
+    start_inner(request, listener, probe, MIN_STALL_TIMEOUT_SECS).await
+}
+
+async fn start_inner(
+    request: RecordingRequest,
+    listener: EventListener,
+    probe: SpaceProbe,
+    min_stall_secs: u64,
+) -> RecordingHandle {
     let (stop_tx, stop_rx) = watch::channel(false);
     let (snapshot_tx, snapshot_rx) = watch::channel(RecorderSnapshot {
         state: RecorderState::Starting,
         output_dir: None,
         output_path: None,
+        pid: None,
         progress: None,
+        stop_cause: None,
         outcome: None,
     });
     let handle = RecordingHandle {
@@ -326,8 +417,20 @@ pub async fn start_with_probe(
         }
     };
 
+    // 相对路径会让磁盘查询落到系统盘，先转为绝对路径。
+    let root = match std::path::absolute(&request.output_dir) {
+        Ok(root) => root,
+        Err(error) => {
+            early_failure(
+                EndReason::FfmpegFailed,
+                format!("录像目录无效 {}：{error}", request.output_dir.display()),
+                None,
+            );
+            return handle;
+        }
+    };
     let dir = naming::recording_dir(
-        &request.output_dir,
+        &root,
         &request.platform,
         &request.anchor_name,
         options.folder_by_platform,
@@ -342,30 +445,39 @@ pub async fn start_with_probe(
         return handle;
     }
 
-    if let Some(free) = low_space(&probe, &dir, options.disk_threshold_bytes).await {
-        early_failure(
-            EndReason::DiskFull,
-            format!(
-                "磁盘剩余 {}，低于阈值 {}，未开始录制",
-                format_gb(free),
-                format_gb(options.disk_threshold_bytes)
-            ),
-            Some(dir),
-        );
-        return handle;
+    // 查询根目录：同一块磁盘，路径更短。
+    let mut warnings = Vec::new();
+    match check_space(&probe, &root, options.disk_threshold_bytes).await {
+        SpaceCheck::Low(free) => {
+            early_failure(
+                EndReason::DiskFull,
+                format!(
+                    "磁盘剩余 {}，低于阈值 {}，未开始录制",
+                    format_gb(free),
+                    format_gb(options.disk_threshold_bytes)
+                ),
+                Some(dir),
+            );
+            return handle;
+        }
+        SpaceCheck::Failed(message) => warnings.push(message),
+        SpaceCheck::Enough | SpaceCheck::Skipped => {}
     }
 
     let segmented = options.segment_enabled;
     let base_stem = naming::file_stem(&request.anchor_name, started_at.naive_local());
-    let stem = naming::unique_stem(&base_stem, |candidate| {
-        naming::first_file_path(&dir, candidate, segmented).exists()
-    });
+    let (stem, reservation) = reserve_stem(&dir, &base_stem, segmented);
     let output_path = naming::output_path(&dir, &stem, segmented);
+    let ffmpeg_output = if segmented {
+        naming::ffmpeg_segment_pattern(&dir, &stem)
+    } else {
+        output_path.clone()
+    };
     let args = command::build_args(&CommandSpec {
         source_url: &request.source_url,
         source_format: request.source_format,
         headers: &request.headers,
-        output_path: &output_path,
+        output_path: &ffmpeg_output,
         segment_secs: segmented.then_some(options.segment_secs),
         proxy: proxy.as_deref(),
     });
@@ -382,6 +494,7 @@ pub async fn start_with_probe(
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         command.creation_flags(CREATE_NO_WINDOW);
     }
+    process_guard::configure(&mut command);
     let child = match command.spawn() {
         Ok(child) => child,
         Err(error) => {
@@ -396,25 +509,38 @@ pub async fn start_with_probe(
             return handle;
         }
     };
+    if let Err(message) = process_guard::attach(&child) {
+        warnings.push(message);
+    }
+    let pid = child.id();
 
+    let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+    lock(&ACTIVE).insert(id, handle.clone());
     snapshot_tx.send_modify(|snapshot| {
         snapshot.state = RecorderState::Recording;
         snapshot.output_dir = Some(dir.clone());
         snapshot.output_path = Some(output_path.clone());
+        snapshot.pid = pid;
     });
     listener(&RecorderEvent::Started {
         output_dir: dir.clone(),
         output_path: output_path.clone(),
         source_format: request.source_format,
         segmented,
+        pid,
         started_at_ms,
     });
+    for message in warnings {
+        listener(&RecorderEvent::Warning { message });
+    }
 
     let supervisor = Supervisor {
+        id,
         listener,
         probe,
         snapshot_tx,
         stop_rx,
+        root,
         dir,
         stem,
         output_path,
@@ -422,8 +548,9 @@ pub async fn start_with_probe(
         threshold: options.disk_threshold_bytes,
         disk_check_interval: Duration::from_secs(options.disk_check_interval_secs.max(1)),
         stop_timeout: Duration::from_secs(options.stop_timeout_secs.max(1)),
-        stall_timeout: Duration::from_secs(options.stall_timeout_secs.max(1)),
+        stall_timeout: effective_stall_timeout(options.stall_timeout_secs, min_stall_secs),
         started_at_ms,
+        _reservation: reservation,
     };
     tokio::spawn(supervisor.run(child));
     handle
@@ -446,18 +573,31 @@ fn finish(
     });
 }
 
-/// 剩余空间低于阈值时返回剩余字节数。查询失败时不阻止录制。
-async fn low_space(probe: &SpaceProbe, dir: &Path, threshold: u64) -> Option<u64> {
+enum SpaceCheck {
+    Enough,
+    /// 剩余字节数低于阈值。
+    Low(u64),
+    /// 查询失败，附说明。
+    Failed(String),
+    /// 阈值为 0，不检查。
+    Skipped,
+}
+
+async fn check_space(probe: &SpaceProbe, dir: &Path, threshold: u64) -> SpaceCheck {
     if threshold == 0 {
-        return None;
+        return SpaceCheck::Skipped;
     }
     let probe = probe.clone();
-    let dir = dir.to_path_buf();
-    let free = tokio::task::spawn_blocking(move || probe(&dir))
-        .await
-        .ok()?
-        .ok()?;
-    (free < threshold).then_some(free)
+    let path = dir.to_path_buf();
+    match tokio::task::spawn_blocking(move || probe(&path)).await {
+        Ok(Ok(free)) if free < threshold => SpaceCheck::Low(free),
+        Ok(Ok(_)) => SpaceCheck::Enough,
+        Ok(Err(error)) => SpaceCheck::Failed(format!(
+            "无法查询 {} 的磁盘剩余空间，磁盘不足时不会自动停止：{error}",
+            dir.display()
+        )),
+        Err(error) => SpaceCheck::Failed(format!("磁盘空间查询异常：{error}")),
+    }
 }
 
 fn format_gb(bytes: u64) -> String {
@@ -465,10 +605,12 @@ fn format_gb(bytes: u64) -> String {
 }
 
 struct Supervisor {
+    id: u64,
     listener: EventListener,
     probe: SpaceProbe,
     snapshot_tx: watch::Sender<RecorderSnapshot>,
     stop_rx: watch::Receiver<bool>,
+    root: PathBuf,
     dir: PathBuf,
     stem: String,
     output_path: PathBuf,
@@ -476,8 +618,10 @@ struct Supervisor {
     threshold: u64,
     disk_check_interval: Duration,
     stop_timeout: Duration,
-    stall_timeout: Duration,
+    stall_timeout: Option<Duration>,
     started_at_ms: i64,
+    /// 录制结束前一直占用文件名。
+    _reservation: NameReservation,
 }
 
 /// 运行中的统计。
@@ -490,6 +634,8 @@ struct RunState {
     tail: ErrorTail,
     /// 分段录制时磁盘上分段文件的总大小，每秒更新。
     segment_bytes: u64,
+    /// 上一次磁盘查询是否失败，失败只在状态变化时报告一次。
+    space_probe_failed: bool,
 }
 
 impl Supervisor {
@@ -509,6 +655,7 @@ impl Supervisor {
             last_advance: Instant::now(),
             tail: ErrorTail::new(ERROR_TAIL_LINES),
             segment_bytes: 0,
+            space_probe_failed: false,
         };
         let mut tick = tokio::time::interval(Duration::from_secs(1));
         tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
@@ -519,10 +666,13 @@ impl Supervisor {
             tokio::select! {
                 status = child.wait() => break status,
                 Some(line) = line_rx.recv() => self.handle_line(&mut state, line),
-                changed = self.stop_rx.changed(), if stop_channel_open && state.stop_cause.is_none() => {
+                // 引擎自己停止期间也要响应用户停止，让结束原因记为用户停止。
+                changed = self.stop_rx.changed(),
+                    if stop_channel_open && state.stop_cause != Some(StopCause::User) =>
+                {
                     match changed {
                         Ok(()) if *self.stop_rx.borrow_and_update() => {
-                            self.begin_stop(&mut state, &mut stdin, StopCause::User).await;
+                            self.user_stop(&mut state, &mut stdin).await;
                         }
                         Ok(()) => {}
                         // 所有句柄都已丢弃，录制继续，直到自然结束。
@@ -531,11 +681,12 @@ impl Supervisor {
                 }
                 _ = tick.tick() => {
                     if self.segmented {
-                        state.segment_bytes = collect_files(&self.dir, &self.stem, &self.output_path, true)
-                            .await
-                            .iter()
-                            .map(|(_, size)| size)
-                            .sum();
+                        state.segment_bytes =
+                            collect_files(&self.dir, &self.stem, &self.output_path, true)
+                                .await
+                                .iter()
+                                .map(|(_, size)| size)
+                                .sum();
                     }
                     if let Some(deadline) = state.kill_deadline
                         && Instant::now() >= deadline
@@ -544,13 +695,14 @@ impl Supervisor {
                         state.kill_deadline = None;
                     }
                     if state.stop_cause.is_none() {
-                        if state.last_advance.elapsed() >= self.stall_timeout {
+                        let stalled = self
+                            .stall_timeout
+                            .is_some_and(|limit| state.last_advance.elapsed() >= limit);
+                        if stalled {
                             self.begin_stop(&mut state, &mut stdin, StopCause::Stalled).await;
                         } else if last_disk_check.elapsed() >= self.disk_check_interval {
                             last_disk_check = Instant::now();
-                            if low_space(&self.probe, &self.dir, self.threshold).await.is_some() {
-                                self.begin_stop(&mut state, &mut stdin, StopCause::DiskFull).await;
-                            }
+                            self.check_disk(&mut state, &mut stdin).await;
                         }
                     }
                 }
@@ -593,6 +745,7 @@ impl Supervisor {
             started_at_ms: self.started_at_ms,
             ended_at_ms: Local::now().timestamp_millis(),
         };
+        lock(&ACTIVE).remove(&self.id);
         finish(&self.snapshot_tx, &self.listener, outcome);
     }
 
@@ -621,21 +774,52 @@ impl Supervisor {
         (self.listener)(&RecorderEvent::Progress { progress });
     }
 
+    async fn check_disk(&self, state: &mut RunState, stdin: &mut Option<ChildStdin>) {
+        match check_space(&self.probe, &self.root, self.threshold).await {
+            SpaceCheck::Low(_) => {
+                state.space_probe_failed = false;
+                self.begin_stop(state, stdin, StopCause::DiskFull).await;
+            }
+            SpaceCheck::Failed(message) => {
+                if !state.space_probe_failed {
+                    state.space_probe_failed = true;
+                    (self.listener)(&RecorderEvent::Warning { message });
+                }
+            }
+            SpaceCheck::Enough | SpaceCheck::Skipped => state.space_probe_failed = false,
+        }
+    }
+
+    /// 用户停止。引擎已经在停止时只改记原因，不再写 `q`，也不推迟强制结束的时间。
+    async fn user_stop(&self, state: &mut RunState, stdin: &mut Option<ChildStdin>) {
+        if state.stop_cause.is_none() {
+            self.begin_stop(state, stdin, StopCause::User).await;
+            return;
+        }
+        self.set_stop_cause(state, StopCause::User);
+    }
+
     async fn begin_stop(
         &self,
         state: &mut RunState,
         stdin: &mut Option<ChildStdin>,
         cause: StopCause,
     ) {
-        state.stop_cause = Some(cause);
         state.kill_deadline = Some(Instant::now() + self.stop_timeout);
         if let Some(stdin) = stdin.as_mut() {
             // ffmpeg 读到 `q` 后写完文件尾再退出。写失败说明进程已经在退出。
             let _ = stdin.write_all(b"q").await;
             let _ = stdin.flush().await;
         }
-        self.snapshot_tx
-            .send_modify(|snapshot| snapshot.state = RecorderState::Stopping);
+        self.set_stop_cause(state, cause);
+    }
+
+    fn set_stop_cause(&self, state: &mut RunState, cause: StopCause) {
+        state.stop_cause = Some(cause);
+        self.snapshot_tx.send_modify(|snapshot| {
+            snapshot.state = RecorderState::Stopping;
+            snapshot.stop_cause = Some(cause);
+        });
         (self.listener)(&RecorderEvent::Stopping { cause });
     }
 }
@@ -660,7 +844,7 @@ async fn read_stderr(mut stderr: ChildStderr, lines: mpsc::UnboundedSender<Strin
     }
 }
 
-/// 列出本次录制生成的非空文件及其大小。
+/// 列出本次录制生成的非空文件及其大小；分段文件按序号排序。
 async fn collect_files(
     dir: &Path,
     stem: &str,
@@ -671,32 +855,32 @@ async fn collect_files(
     let stem = stem.to_string();
     let output_path = output_path.to_path_buf();
     tokio::task::spawn_blocking(move || {
-        let candidates: Vec<PathBuf> = if segmented {
+        let mut candidates: Vec<(u64, PathBuf)> = if segmented {
             std::fs::read_dir(&dir)
                 .map(|entries| {
                     entries
                         .filter_map(Result::ok)
-                        .map(|entry| entry.path())
-                        .filter(|path| {
-                            path.file_name()
-                                .and_then(|name| name.to_str())
-                                .is_some_and(|name| naming::is_segment_of(name, &stem))
+                        .filter_map(|entry| {
+                            let index = entry
+                                .file_name()
+                                .to_str()
+                                .and_then(|name| naming::segment_index(name, &stem))?;
+                            Some((index, entry.path()))
                         })
                         .collect()
                 })
                 .unwrap_or_default()
         } else {
-            vec![output_path]
+            vec![(0, output_path)]
         };
-        let mut files: Vec<(PathBuf, u64)> = candidates
+        candidates.sort();
+        candidates
             .into_iter()
-            .filter_map(|path| {
+            .filter_map(|(_, path)| {
                 let size = std::fs::metadata(&path).ok()?.len();
                 (size > 0).then_some((path, size))
             })
-            .collect();
-        files.sort();
-        files
+            .collect()
     })
     .await
     .unwrap_or_default()

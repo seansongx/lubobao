@@ -117,6 +117,17 @@ pub fn output_path(dir: &Path, stem: &str, segmented: bool) -> PathBuf {
     }
 }
 
+/// 分段录制时实际交给 ffmpeg 的输出参数。segment 封装器把整条路径当作格式串，
+/// 目录里的 `%` 必须写成 `%%`，否则 `D:@% 录像` 这样的目录会让 ffmpeg 报错。
+/// 文件名部分已经由 [`clean_name`] 去掉了 `%`。非 UTF-8 路径无法安全改写，原样返回。
+pub fn ffmpeg_segment_pattern(dir: &Path, stem: &str) -> PathBuf {
+    let name = format!("{stem}_%03d.{TS_EXTENSION}");
+    match dir.to_str() {
+        Some(text) if text.contains('%') => PathBuf::from(text.replace('%', "%%")).join(name),
+        _ => dir.join(name),
+    }
+}
+
 /// 第一个文件的实际路径，用于判断是否与已有录像重名。
 pub fn first_file_path(dir: &Path, stem: &str, segmented: bool) -> PathBuf {
     if segmented {
@@ -138,18 +149,20 @@ pub fn unique_stem(base: &str, mut exists: impl FnMut(&str) -> bool) -> String {
         .expect("an unused suffix always exists")
 }
 
+/// 解析分段文件名 `stem_NNN.ts` 中的序号；不属于该次录制时返回 `None`。
+/// 超过 999 段后序号变成 4 位以上，按数字排序才不会乱。
+pub fn segment_index(file_name: &str, stem: &str) -> Option<u64> {
+    let rest = file_name.strip_prefix(stem)?.strip_prefix('_')?;
+    let index = rest.strip_suffix(&format!(".{TS_EXTENSION}"))?;
+    if index.len() < 3 || !index.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    index.parse().ok()
+}
+
 /// 判断目录中的文件名是否属于某次分段录制：`stem_NNN.ts`。
 pub fn is_segment_of(file_name: &str, stem: &str) -> bool {
-    let Some(rest) = file_name.strip_prefix(stem) else {
-        return false;
-    };
-    let Some(rest) = rest.strip_prefix('_') else {
-        return false;
-    };
-    let Some(index) = rest.strip_suffix(&format!(".{TS_EXTENSION}")) else {
-        return false;
-    };
-    index.len() >= 3 && index.bytes().all(|byte| byte.is_ascii_digit())
+    segment_index(file_name, stem).is_some()
 }
 
 /// 常见 emoji 所在的码位区间。StreamCap 用 `EMOJI_PATTERN` 正则移除 emoji，这里按区间近似。
@@ -275,5 +288,32 @@ mod tests {
         assert!(!is_segment_of("主播_2026_2_000.ts", "主播_2026"));
         assert!(!is_segment_of("主播_2026_00a.ts", "主播_2026"));
         assert!(!is_segment_of("主播_2026_000.mp4", "主播_2026"));
+    }
+
+    #[test]
+    fn segment_index_sorts_numerically_past_999() {
+        let stem = "主播_2026";
+        let mut names = vec!["主播_2026_1000.ts", "主播_2026_999.ts", "主播_2026_002.ts"];
+        names.sort_by_key(|name| segment_index(name, stem));
+        assert_eq!(
+            names,
+            vec!["主播_2026_002.ts", "主播_2026_999.ts", "主播_2026_1000.ts"]
+        );
+        assert_eq!(segment_index("主播_2026_1000.ts", stem), Some(1000));
+        assert_eq!(segment_index("主播_2026_01.ts", stem), None);
+    }
+
+    #[test]
+    fn segment_pattern_escapes_percent_in_directory() {
+        let dir = Path::new(r"D:\100% 录像\rec%d");
+        assert_eq!(
+            ffmpeg_segment_pattern(dir, "主播_1"),
+            PathBuf::from(r"D:\100%% 录像\rec%%d").join("主播_1_%03d.ts")
+        );
+        let plain = Path::new(r"D:\录像");
+        assert_eq!(
+            ffmpeg_segment_pattern(plain, "a"),
+            output_path(plain, "a", true)
+        );
     }
 }

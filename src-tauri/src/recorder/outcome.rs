@@ -96,6 +96,27 @@ const NETWORK_MARKERS: &[&str] = &[
     "[https @",
 ];
 
+/// 输出端或参数错误：录像目录不可写、磁盘满、选项无效等，需要用户处理。
+const OUTPUT_MARKERS: &[&str] = &[
+    "[out#",
+    "error opening output",
+    "no space left",
+    "unrecognized option",
+    "option not found",
+    "error splitting the argument list",
+    "unable to choose an output format",
+];
+
+/// 输入端错误：源站返回了空内容、HTML 页面或无法识别的数据。刚下播时 CDN 常这样响应。
+const INPUT_MARKERS: &[&str] = &[
+    "[in#",
+    "error opening input",
+    "error during demuxing",
+    "end of file",
+    "invalid data found",
+    "stream ends prematurely",
+];
+
 fn contains_any(lines: &[String], markers: &[&str]) -> bool {
     lines.iter().any(|line| {
         let line = format!("{} ", line.to_lowercase());
@@ -118,8 +139,9 @@ pub fn last_error(lines: &[String]) -> Option<String> {
 /// 1. 引擎主动停止的，按停止原因：用户停止、磁盘不足；看门狗停止记为网络错误。
 /// 2. 收到过数据后 ffmpeg 自行退出：错误里有读写超时记为网络错误，否则记为直播结束或断流
 ///    （源站正常关闭和连接被重置都属于断流，退出码不影响判断）。
-/// 3. 没收到数据就退出：有连接、HTTP 或 TLS 错误记为网络错误；正常退出记为直播结束；
-///    其余记为 ffmpeg 异常退出。
+/// 3. 没收到数据就退出：有连接、HTTP 或 TLS 错误记为网络错误；有输出端或参数错误记为
+///    ffmpeg 异常退出；只有输入端错误（空内容、HTML、无法识别的数据）或正常退出时记为
+///    直播结束，交给调度重新检测；其余记为 ffmpeg 异常退出。
 pub fn classify(summary: &ExitSummary<'_>) -> (EndReason, Option<String>) {
     let tail = summary.stderr_tail;
     match summary.stop_cause {
@@ -149,11 +171,15 @@ pub fn classify(summary: &ExitSummary<'_>) -> (EndReason, Option<String>) {
     if contains_any(tail, TIMEOUT_MARKERS) || contains_any(tail, NETWORK_MARKERS) {
         return (EndReason::NetworkError, detail);
     }
-    if summary.exit_code == Some(0) && tail.is_empty() {
-        return (
-            EndReason::StreamEnded,
-            Some("没有收到媒体数据，源站已结束推流".to_string()),
-        );
+    if contains_any(tail, OUTPUT_MARKERS) {
+        return (EndReason::FfmpegFailed, detail);
+    }
+    if contains_any(tail, INPUT_MARKERS) || (summary.exit_code == Some(0) && tail.is_empty()) {
+        let message = match detail {
+            Some(detail) => format!("源站没有返回可录制的直播流：{detail}"),
+            None => "没有收到媒体数据，源站已结束推流".to_string(),
+        };
+        return (EndReason::StreamEnded, Some(message));
     }
     let detail = detail.or_else(|| {
         Some(match summary.exit_code {
@@ -286,19 +312,54 @@ mod tests {
     }
 
     #[test]
-    fn early_non_network_failure_is_ffmpeg_failure() {
+    fn early_input_errors_are_stream_end() {
+        // CDN 刚下播时返回 HTML 页面或空内容。
         let invalid = lines(&[
             "[in#0 @ 0] Error opening input: Invalid data found when processing input",
+            "Error opening input file http://cdn.example.com/live.flv.",
             "Error opening input files: Invalid data found when processing input",
         ]);
+        let (reason, message) = classify(&ExitSummary {
+            stop_cause: None,
+            exit_code: Some(1),
+            received_media: false,
+            stderr_tail: &invalid,
+        });
+        assert_eq!(reason, EndReason::StreamEnded);
+        assert!(message.unwrap().contains("Invalid data found"));
+        let empty = lines(&[
+            "[in#0 @ 0] Error opening input: End of file",
+            "Error opening input files: End of file",
+        ]);
         assert_eq!(
-            classify_with(None, Some(1), false, &invalid),
-            EndReason::FfmpegFailed
+            classify_with(None, Some(1), false, &empty),
+            EndReason::StreamEnded
         );
+    }
+
+    #[test]
+    fn early_output_and_option_errors_are_ffmpeg_failure() {
         let disk =
             lines(&["[out#0/mpegts @ 0] Error opening output D:\\a.ts: No space left on device"]);
         assert_eq!(
             classify_with(None, Some(1), false, &disk),
+            EndReason::FfmpegFailed
+        );
+        let pattern = lines(&[
+            // 真实样本：保存目录含 % 时 segment 封装器的报错。
+            "[mpegts @ 0] Invalid segment filename template 'D:\\100% 录像\\a_%03d.ts'",
+            "[out#0/segment @ 0] Could not write header (incorrect codec parameters ?): Invalid argument",
+        ]);
+        assert_eq!(
+            classify_with(None, Some(1), false, &pattern),
+            EndReason::FfmpegFailed
+        );
+        let option = lines(&[
+            "Unrecognized option 'bogus'.",
+            "Error splitting the argument list: Option not found",
+        ]);
+        assert_eq!(
+            classify_with(None, Some(8), false, &option),
             EndReason::FfmpegFailed
         );
         let (reason, message) = classify(&ExitSummary {

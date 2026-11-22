@@ -2322,6 +2322,7 @@ dependencies = [
  "chrono",
  "flate2",
  "fs4",
+ "libc",
  "reqwest",
  "serde",
  "serde_json",
@@ -2332,6 +2333,7 @@ dependencies = [
  "tauri-plugin-opener",
  "tempfile",
  "tokio",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
