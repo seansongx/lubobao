@@ -277,35 +277,42 @@ pub fn write_record(binary: &Path, cache: &Path, sha256: &str, versions: Version
     }
 }
 
-/// 已安装的文件大小和 `binarySha256` 都一致时返回 `true`。不联网。
+/// 已安装的文件大小和 `binarySha256` 都一致时返回 `Ok(true)`，不一致或文件不存在时返回
+/// `Ok(false)`。不联网。
+///
+/// `skip_cache` 为 `true` 时不信任校验记录，一定重新计算哈希。文件存在、大小正确但读不出来
+/// （被占用、权限不足等）时返回 `Err`，由调用方决定如何处理；这种情况不删除校验记录。
 pub fn check_installed(
     binary: &Path,
     cache: &Path,
     package: &PlatformPackage,
     versions: Versions<'_>,
-) -> bool {
+    skip_cache: bool,
+) -> Result<bool, String> {
     let Ok(meta) = fs::metadata(binary) else {
-        return false;
+        return Ok(false);
     };
     if !meta.is_file() || meta.len() != package.binary_size {
-        return false;
+        return Ok(false);
     }
-    if let (Some(record), Some(modified)) = (read_record(cache), modified_nanos(&meta))
+    if !skip_cache
+        && let (Some(record), Some(modified)) = (read_record(cache), modified_nanos(&meta))
         && record.size == meta.len()
         && record.modified_nanos == modified
         && same_hash(&record.sha256, &package.binary_sha256)
     {
-        return true;
+        return Ok(true);
     }
     match sha256_file(binary) {
         Ok(hash) if same_hash(&hash, &package.binary_sha256) => {
             write_record(binary, cache, &package.binary_sha256, versions);
-            true
+            Ok(true)
         }
-        _ => {
+        Ok(_) => {
             let _ = fs::remove_file(cache);
-            false
+            Ok(false)
         }
+        Err(err) => Err(format!("无法读取 {}：{err}", binary.display())),
     }
 }
 
