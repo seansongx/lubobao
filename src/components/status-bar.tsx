@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatBytes } from "@/components/format";
-import { useLibraryStats } from "@/components/use-library-stats";
+import { useDiskSpace } from "@/components/use-library-space";
 import { api, type FfmpegStatus } from "@/lib/api";
 import { useFfmpegStatus, useTasks } from "@/lib/use-backend";
 import { cn } from "@/lib/utils";
@@ -132,7 +132,7 @@ function FfmpegItem() {
 const LOW_DISK_BYTES = 5 * 1024 ** 3;
 
 function DiskItem() {
-  const { stats, failed } = useLibraryStats();
+  const { space: stats, failed } = useDiskSpace();
   const available = stats?.availableBytes ?? null;
   const low = available !== null && available < LOW_DISK_BYTES;
   const hint = !stats

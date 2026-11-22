@@ -20,7 +20,8 @@ import type {
   LibraryEntry,
   LibraryError,
   LibraryListing,
-  LibraryStats,
+  DiskSpace,
+  UsageSnapshot,
   LiveState,
   Monitoring,
   RecordState,
@@ -284,6 +285,11 @@ function mockLibraryTree(): MockDir {
         "甜品研究所_2026-11-18_14-02-44_000.ts": [1.1 * GB, 6_100],
       },
       晚八点读书会: {},
+      // 大目录：800 个分段，用来检查虚拟滚动。
+      长时间主播: {
+        ...segments("长时间主播_2026-11-10_08-00-00", 500, 20_000, 1.2 * GB),
+        ...segments("长时间主播_2026-11-01_08-00-00", 300, 40_000, 1.2 * GB),
+      },
       阿星游戏: {
         "阿星游戏_2026-11-22_21-01-30_000.ts": [312 * MB, 22],
       },
@@ -552,6 +558,8 @@ export function createMockBackend(): Backend {
   }
 
   const libraryTree = mockLibraryTree();
+  let usageCache: { usage: { usedBytes: number; fileCount: number }; computedAt: number } | null = null;
+  let usageRunning = false;
   let libraryForcedMissing = new URLSearchParams(window.location.search).get("library") === "missing";
 
   const libraryExists = () =>
@@ -736,17 +744,41 @@ export function createMockBackend(): Backend {
       return { root: settings.live_save_path, path: found.parts.join("/"), entries: sortEntries(entries) };
     },
 
-    async getLibraryStats(): Promise<LibraryStats> {
-      await delay(100);
-      const exists = libraryExists();
-      const usage = exists ? walkMock(libraryTree) : { bytes: 0, files: 0 };
+    async getDiskSpace(): Promise<DiskSpace> {
+      await delay(80);
       return {
         root: settings.live_save_path,
-        rootExists: exists,
-        usedBytes: Math.round(usage.bytes),
-        fileCount: usage.files,
+        rootExists: libraryExists(),
         availableBytes: Math.round(186.4 * GB),
         totalBytes: Math.round(931.5 * GB),
+      };
+    },
+
+    async getLibraryUsage(refresh = false): Promise<UsageSnapshot> {
+      await delay(80);
+      const exists = libraryExists();
+      if (!exists) {
+        return { root: settings.live_save_path, rootExists: false, usage: null, computedAt: null, computing: false };
+      }
+      // 模拟 Rust 的缓存：过期或刷新时启动一次 1.5 秒的「遍历」，期间返回上次结果并标明统计中。
+      const stale = !usageCache || Date.now() - usageCache.computedAt > 30_000;
+      if (!usageRunning && (refresh || stale)) {
+        usageRunning = true;
+        setTimeout(() => {
+          const walked = walkMock(libraryTree);
+          usageCache = {
+            usage: { usedBytes: Math.round(walked.bytes), fileCount: walked.files },
+            computedAt: Date.now(),
+          };
+          usageRunning = false;
+        }, 1500);
+      }
+      return {
+        root: settings.live_save_path,
+        rootExists: true,
+        usage: usageCache?.usage ?? null,
+        computedAt: usageCache?.computedAt ?? null,
+        computing: usageRunning,
       };
     },
 

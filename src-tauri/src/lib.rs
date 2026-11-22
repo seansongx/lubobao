@@ -38,7 +38,8 @@ pub fn run() {
             tasks::commands::update_settings,
             tasks::commands::list_activity,
             library::commands::list_library,
-            library::commands::get_library_stats,
+            library::commands::get_disk_space,
+            library::commands::get_library_usage,
             library::commands::open_library_file,
             library::commands::open_library_folder,
             library::commands::reveal_library_item

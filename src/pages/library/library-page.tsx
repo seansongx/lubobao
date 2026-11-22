@@ -1,7 +1,7 @@
 // 录像库：按目录浏览保存目录（设置 live_save_path）。
 // 目录、文件、排序和越界检查都由 Rust（src-tauri/src/library）完成，这里只展示和收集操作。
 
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 import {
   AlertTriangle,
   ArrowUp,
@@ -28,8 +28,15 @@ import {
 } from "@/components/ui/breadcrumb";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { useLibraryStats } from "@/components/use-library-stats";
-import { api, isLibraryError, type LibraryEntry, type LibraryError, type LibraryListing } from "@/lib/api";
+import { useDiskSpace, useLibraryUsage } from "@/components/use-library-space";
+import {
+  api,
+  isLibraryError,
+  type LibraryEntry,
+  type LibraryError,
+  type LibraryListing,
+  type UsageSnapshot,
+} from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 interface LibraryPageProps {
@@ -55,40 +62,56 @@ type Row =
   | { type: "entry"; entry: LibraryEntry; nested: boolean }
   | { type: "group"; key: string; name: string; count: number; size: number; latest: number | null };
 
+/** 行高固定，虚拟滚动据此计算位置。 */
+const ENTRY_HEIGHT = 44;
+const GROUP_HEIGHT = 32;
+/** 可视区上下多渲染的高度。 */
+const OVERSCAN_PX = 400;
+
+const rowHeight = (row: Row) => (row.type === "group" ? GROUP_HEIGHT : ENTRY_HEIGHT);
+
 const collator = new Intl.Collator("zh-CN", { numeric: true });
 
 /**
- * 同一次录制的多个分段前插入一行分组标题，分段缩进显示。
- * 文件保持 Rust 给出的顺序；目录改用中文排序规则（Rust 按码位比较，「快手」会排在「抖音」前面）。
+ * 同一次录制的多个分段前插入一行分组标题，分段缩进显示。线性复杂度：先一遍汇总各组，再一遍生成行。
+ * 文件保持 Rust 给出的顺序（同组分段相邻）；目录改用中文排序规则（Rust 按码位比较，「快手」会排在「抖音」前）。
  */
 function buildRows(listed: LibraryEntry[]): Row[] {
   const dirs = listed.filter((entry) => entry.kind === "dir").sort((a, b) => collator.compare(a.name, b.name));
-  const entries = [...dirs, ...listed.filter((entry) => entry.kind === "file")];
-  const counts = new Map<string, number>();
-  for (const entry of entries) {
-    if (entry.kind === "file" && entry.segment !== null && entry.group) {
-      counts.set(entry.group, (counts.get(entry.group) ?? 0) + 1);
-    }
+  const files = listed.filter((entry) => entry.kind === "file");
+  const groups = new Map<string, { count: number; size: number; latest: number }>();
+  for (const file of files) {
+    if (file.segment === null || !file.group) continue;
+    const group = groups.get(file.group) ?? { count: 0, size: 0, latest: 0 };
+    group.count += 1;
+    group.size += file.size ?? 0;
+    group.latest = Math.max(group.latest, file.modifiedAt ?? 0);
+    groups.set(file.group, group);
   }
-  const rows: Row[] = [];
+  const rows: Row[] = dirs.map((entry) => ({ type: "entry", entry, nested: false }));
   let currentGroup: string | null = null;
-  for (const entry of entries) {
-    const group = entry.kind === "file" && entry.group && (counts.get(entry.group) ?? 0) > 1 ? entry.group : null;
-    if (group && group !== currentGroup) {
-      const members = entries.filter((item) => item.kind === "file" && item.group === group);
+  for (const file of files) {
+    const summary = file.group ? groups.get(file.group) : undefined;
+    const group = summary && summary.count > 1 ? file.group : null;
+    if (group && summary && group !== currentGroup) {
       rows.push({
         type: "group",
         key: `group:${group}`,
         name: group.replace(/\.[^.]+$/, ""),
-        count: members.length,
-        size: members.reduce((sum, item) => sum + (item.size ?? 0), 0),
-        latest: Math.max(...members.map((item) => item.modifiedAt ?? 0)) || null,
+        count: summary.count,
+        size: summary.size,
+        latest: summary.latest || null,
       });
     }
     currentGroup = group;
-    rows.push({ type: "entry", entry, nested: group !== null });
+    rows.push({ type: "entry", entry: file, nested: group !== null });
   }
   return rows;
+}
+
+/** 根目录本身的问题：只显示根目录面包屑，提示去设置修改。 */
+function isRootError(error: LibraryError, path: string): boolean {
+  return error.kind === "root_missing" || error.kind === "root_not_directory" || (path === "" && error.kind !== "not_found");
 }
 
 export function LibraryPage({ onNavigate }: LibraryPageProps) {
@@ -96,9 +119,11 @@ export function LibraryPage({ onNavigate }: LibraryPageProps) {
   const [load, setLoad] = useState<Load>({ state: "loading", previous: null });
   const [selected, setSelected] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const { stats, refresh: refreshStats } = useLibraryStats();
+  const { space } = useDiskSpace();
+  const { snapshot: usage, refresh: refreshUsage } = useLibraryUsage();
   const request = useRef(0);
   const listRef = useRef<HTMLDivElement>(null);
+  const [scroll, setScroll] = useState({ top: 0, height: 0 });
 
   const fetchListing = useCallback((target: string) => {
     const id = ++request.current;
@@ -129,15 +154,49 @@ export function LibraryPage({ onNavigate }: LibraryPageProps) {
   const reload = () => {
     setNotice(null);
     fetchListing(path);
-    refreshStats();
+    refreshUsage();
   };
 
   const listing = load.state === "ready" ? load.listing : load.state === "loading" ? load.previous : null;
   const rows = useMemo(() => buildRows(listing?.entries ?? []), [listing]);
-  const entries = useMemo(
-    () => rows.flatMap((row) => (row.type === "entry" ? [row.entry] : [])),
-    [rows],
-  );
+  // 每行的起始位置；entryRows 记录可选行在 rows 中的下标，供键盘导航。
+  const layout = useMemo(() => {
+    const offsets = new Array<number>(rows.length + 1);
+    offsets[0] = 0;
+    rows.forEach((row, index) => {
+      offsets[index + 1] = offsets[index] + rowHeight(row);
+    });
+    const entryRows = rows.flatMap((row, index) => (row.type === "entry" ? [index] : []));
+    return { offsets, entryRows };
+  }, [rows]);
+
+  // 切换目录时回到顶部；跟踪列表可视区的大小。
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    if (!list) return;
+    list.scrollTop = 0;
+    setScroll({ top: 0, height: list.clientHeight });
+    const observer = new ResizeObserver(() => setScroll({ top: list.scrollTop, height: list.clientHeight }));
+    observer.observe(list);
+    return () => observer.disconnect();
+  }, [listing?.path, rows.length > 0]);
+
+  // 只渲染可视区附近的行（二分查找起点）。
+  const visible = useMemo(() => {
+    const { offsets } = layout;
+    const from = Math.max(0, scroll.top - OVERSCAN_PX);
+    const to = scroll.top + scroll.height + OVERSCAN_PX;
+    let low = 0;
+    let high = rows.length;
+    while (low < high) {
+      const mid = (low + high) >> 1;
+      if (offsets[mid + 1] <= from) low = mid + 1;
+      else high = mid;
+    }
+    let end = low;
+    while (end < rows.length && offsets[end] < to) end += 1;
+    return { start: low, end };
+  }, [layout, rows.length, scroll]);
 
   const runAction = (action: Promise<void>) => {
     action.then(
@@ -165,24 +224,32 @@ export function LibraryPage({ onNavigate }: LibraryPageProps) {
       go(parentOf(path));
       return;
     }
-    if (entries.length === 0) return;
-    const index = entries.findIndex((entry) => entry.path === selected);
+    const { entryRows, offsets } = layout;
+    if (entryRows.length === 0) return;
+    const entryAt = (position: number) => (rows[entryRows[position]] as Extract<Row, { type: "entry" }>).entry;
+    const index = entryRows.findIndex((rowIndex) => (rows[rowIndex] as Extract<Row, { type: "entry" }>).entry.path === selected);
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
       const next =
-        event.key === "ArrowDown" ? Math.min(entries.length - 1, index + 1) : Math.max(0, index < 0 ? 0 : index - 1);
-      setSelected(entries[next].path);
-      listRef.current
-        ?.querySelector(`[data-path="${CSS.escape(entries[next].path)}"]`)
-        ?.scrollIntoView({ block: "nearest" });
+        event.key === "ArrowDown" ? Math.min(entryRows.length - 1, index + 1) : Math.max(0, index < 0 ? 0 : index - 1);
+      setSelected(entryAt(next).path);
+      // 行可能还没渲染，按计算的位置滚动到可见。
+      const list = listRef.current;
+      const rowIndex = entryRows[next];
+      if (list) {
+        const top = offsets[rowIndex];
+        const bottom = offsets[rowIndex + 1];
+        if (top < list.scrollTop) list.scrollTop = top;
+        else if (bottom > list.scrollTop + list.clientHeight) list.scrollTop = bottom - list.clientHeight;
+      }
     } else if (event.key === "Enter" && index >= 0) {
       event.preventDefault();
-      activate(entries[index]);
+      activate(entryAt(index));
     }
   };
 
-  const root = listing?.root ?? (load.state === "error" ? load.error.root : stats?.root) ?? "";
-  const rootBroken = load.state === "error" && load.error.kind !== "not_found";
+  const root = listing?.root ?? (load.state === "error" ? load.error.root : space?.root) ?? "";
+  const rootBroken = load.state === "error" && isRootError(load.error, path);
   // 根目录失效时只显示根目录，重新检查也从根目录开始。
   const parts = path && !rootBroken ? path.split("/") : [];
 
@@ -191,10 +258,9 @@ export function LibraryPage({ onNavigate }: LibraryPageProps) {
       <header className="flex items-center gap-3 px-5 pt-3.5">
         <h1 className="m-0 text-[17px] font-semibold">录像库</h1>
         <LibrarySummary
-          usedBytes={stats?.rootExists ? stats.usedBytes : null}
-          fileCount={stats?.rootExists ? stats.fileCount : null}
-          availableBytes={stats?.availableBytes ?? null}
-          totalBytes={stats?.totalBytes ?? null}
+          usage={usage?.rootExists ? usage : null}
+          availableBytes={space?.availableBytes ?? null}
+          totalBytes={space?.totalBytes ?? null}
         />
         <span className="flex-1" />
         <Tooltip>
@@ -260,7 +326,13 @@ export function LibraryPage({ onNavigate }: LibraryPageProps) {
 
       <div className="mx-5 mb-4 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border bg-card">
         {load.state === "error" ? (
-          <LibraryErrorView error={load.error} onNavigate={onNavigate} onRetry={rootBroken && path ? () => go("") : reload} onRoot={() => go("")} />
+          <LibraryErrorView
+            error={load.error}
+            atRoot={rootBroken}
+            onNavigate={onNavigate}
+            onRetry={rootBroken && path ? () => go("") : reload}
+            onRoot={() => go("")}
+          />
         ) : !listing ? (
           <div className="flex flex-1 items-center justify-center gap-2 text-muted-foreground">
             <Loader2 className="size-4 animate-spin" aria-hidden />
@@ -282,23 +354,31 @@ export function LibraryPage({ onNavigate }: LibraryPageProps) {
               aria-label="录像文件"
               tabIndex={0}
               onKeyDown={onKeyDown}
-              className="min-h-0 flex-1 overflow-y-auto outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset"
+              onScroll={(event) =>
+                setScroll({ top: event.currentTarget.scrollTop, height: event.currentTarget.clientHeight })
+              }
+              className="relative min-h-0 flex-1 overflow-y-auto outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset"
             >
-              {rows.map((row) =>
-                row.type === "group" ? (
-                  <GroupRow key={row.key} row={row} />
-                ) : (
-                  <EntryRow
-                    key={row.entry.path}
-                    entry={row.entry}
-                    nested={row.nested}
-                    selected={selected === row.entry.path}
-                    onSelect={() => setSelected(row.entry.path)}
-                    onActivate={() => activate(row.entry)}
-                    onReveal={() => reveal(row.entry.path)}
-                  />
-                ),
-              )}
+              <div style={{ height: layout.offsets[rows.length] }}>
+                {rows.slice(visible.start, visible.end).map((row, offset) => {
+                  const index = visible.start + offset;
+                  const style = { top: layout.offsets[index] };
+                  return row.type === "group" ? (
+                    <GroupRow key={row.key} row={row} style={style} />
+                  ) : (
+                    <EntryRow
+                      key={row.entry.path}
+                      entry={row.entry}
+                      nested={row.nested}
+                      style={style}
+                      selected={selected === row.entry.path}
+                      onSelect={() => setSelected(row.entry.path)}
+                      onActivate={() => activate(row.entry)}
+                      onReveal={() => reveal(row.entry.path)}
+                    />
+                  );
+                })}
+              </div>
             </div>
           </>
         )}
@@ -308,17 +388,36 @@ export function LibraryPage({ onNavigate }: LibraryPageProps) {
 }
 
 function LibrarySummary(props: {
-  usedBytes: number | null;
-  fileCount: number | null;
+  usage: UsageSnapshot | null;
   availableBytes: number | null;
   totalBytes: number | null;
 }) {
+  const { usage } = props;
   return (
     <span className="flex min-w-0 items-center gap-3 truncate text-xs text-muted-foreground tabular-nums">
-      {props.usedBytes !== null && (
-        <span>
-          已占用 <span className="text-foreground">{formatBytes(props.usedBytes)}</span>
-          {props.fileCount !== null && ` · ${props.fileCount} 个录像`}
+      {usage && (
+        <span
+          title={
+            usage.computedAt
+              ? `统计于 ${formatDateTime(usage.computedAt)}${usage.computing ? "，正在重新统计" : ""}`
+              : "正在统计"
+          }
+        >
+          已占用{" "}
+          {usage.usage ? (
+            <>
+              <span className="text-foreground">{formatBytes(usage.usage.usedBytes)}</span>
+              {` · ${usage.usage.fileCount} 个录像`}
+            </>
+          ) : (
+            "—"
+          )}
+          {usage.computing && (
+            <span className="ml-1.5 inline-flex items-center gap-1">
+              <Loader2 className="size-3 animate-spin" aria-hidden />
+              统计中
+            </span>
+          )}
         </span>
       )}
       {props.availableBytes !== null && (
@@ -364,9 +463,12 @@ function CrumbSegment(props: { label: string; current: boolean; onClick: () => v
   );
 }
 
-function GroupRow({ row }: { row: Extract<Row, { type: "group" }> }) {
+function GroupRow({ row, style }: { row: Extract<Row, { type: "group" }>; style: CSSProperties }) {
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)_88px_112px_64px] items-center gap-3 border-b bg-muted/50 px-3 py-1.5 text-xs text-muted-foreground">
+    <div
+      style={style}
+      className="absolute inset-x-0 grid h-8 grid-cols-[minmax(0,1fr)_88px_112px_64px] items-center gap-3 border-b bg-muted/50 px-3 text-xs text-muted-foreground"
+    >
       <span className="flex min-w-0 items-center gap-2">
         <Layers className="size-3.5 shrink-0" aria-hidden />
         <span className="truncate" title={row.name}>
@@ -384,24 +486,26 @@ function GroupRow({ row }: { row: Extract<Row, { type: "group" }> }) {
 interface EntryRowProps {
   entry: LibraryEntry;
   nested: boolean;
+  style: CSSProperties;
   selected: boolean;
   onSelect: () => void;
   onActivate: () => void;
   onReveal: () => void;
 }
 
-function EntryRow({ entry, nested, selected, onSelect, onActivate, onReveal }: EntryRowProps) {
+function EntryRow({ entry, nested, style, selected, onSelect, onActivate, onReveal }: EntryRowProps) {
   const isDir = entry.kind === "dir";
   return (
     <div
       role="option"
       aria-selected={selected}
       data-path={entry.path}
+      style={style}
       onClick={onSelect}
       onDoubleClick={onActivate}
       title={isDir ? "双击进入文件夹" : "双击用系统播放器打开"}
       className={cn(
-        "group grid h-(--task-row-height) cursor-default grid-cols-[minmax(0,1fr)_88px_112px_64px] items-center gap-3 border-b px-3 select-none last:border-b-0 hover:bg-accent",
+        "group absolute inset-x-0 grid h-11 cursor-default grid-cols-[minmax(0,1fr)_88px_112px_64px] items-center gap-3 border-b px-3 select-none hover:bg-accent",
         selected && "bg-accent",
       )}
     >
@@ -439,25 +543,22 @@ function EntryRow({ entry, nested, selected, onSelect, onActivate, onReveal }: E
   );
 }
 
+/** 行内按钮用原生 title 提示：列表可能有几千行，不给每行挂两个 Radix tooltip。 */
 function RowAction(props: { label: string; onClick: () => void; children: ReactNode }) {
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          aria-label={props.label}
-          onClick={(event) => {
-            event.stopPropagation();
-            props.onClick();
-          }}
-          onDoubleClick={(event) => event.stopPropagation()}
-        >
-          {props.children}
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>{props.label}</TooltipContent>
-    </Tooltip>
+    <Button
+      variant="ghost"
+      size="icon-xs"
+      aria-label={props.label}
+      title={props.label}
+      onClick={(event) => {
+        event.stopPropagation();
+        props.onClick();
+      }}
+      onDoubleClick={(event) => event.stopPropagation()}
+    >
+      {props.children}
+    </Button>
   );
 }
 
@@ -481,12 +582,14 @@ function EmptyFolder({ atRoot, root }: { atRoot: boolean; root: string }) {
 
 interface LibraryErrorViewProps {
   error: LibraryError;
+  /** 错误出在根目录本身；只有这时才建议到设置中换保存目录。 */
+  atRoot: boolean;
   onNavigate: Navigate;
   onRetry: () => void;
   onRoot: () => void;
 }
 
-function LibraryErrorView({ error, onNavigate, onRetry, onRoot }: LibraryErrorViewProps) {
+function LibraryErrorView({ error, atRoot, onNavigate, onRetry, onRoot }: LibraryErrorViewProps) {
   const view = (() => {
     switch (error.kind) {
       case "root_missing":
@@ -502,11 +605,17 @@ function LibraryErrorView({ error, onNavigate, onRetry, onRoot }: LibraryErrorVi
           settings: true,
         };
       case "permission_denied":
-        return {
-          title: "没有权限读取",
-          description: `${error.message}。请检查文件夹权限，或到设置中换一个保存目录。`,
-          settings: true,
-        };
+        return atRoot
+          ? {
+              title: "没有权限读取录像目录",
+              description: `${error.message}。请检查文件夹权限，或到设置中换一个保存目录。`,
+              settings: true,
+            }
+          : {
+              title: "没有权限读取这个文件夹",
+              description: `${error.message}。请检查这个文件夹的权限。`,
+              root: true,
+            };
       case "not_found":
         return { title: "这个文件夹已不存在", description: error.message, root: true };
       default:

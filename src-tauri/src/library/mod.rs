@@ -17,6 +17,7 @@
 //! 在文件夹中显示这类桌面功能，都放在胶水层 [`commands`]。
 
 pub mod commands;
+pub mod usage;
 
 #[cfg(test)]
 mod tests;
@@ -121,19 +122,26 @@ pub struct LibraryListing {
     pub entries: Vec<LibraryEntry>,
 }
 
+/// 根目录所在磁盘的空间。只调用一次系统接口，很快，给状态栏定时刷新用。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct LibraryStats {
+pub struct DiskSpace {
     pub root: String,
     pub root_exists: bool,
-    /// 根目录下全部文件的总大小（不跟随符号链接）；根目录不存在时为 0。
-    pub used_bytes: u64,
-    /// 录像文件个数。
-    pub file_count: u64,
-    /// 根目录所在磁盘的剩余空间；根目录不存在时取最近的已存在上级目录。查询失败时为 None。
+    /// 剩余空间；根目录不存在时取最近的已存在上级目录。查询失败时为 None。
     pub available_bytes: Option<u64>,
     /// 磁盘总容量，同上。
     pub total_bytes: Option<u64>,
+}
+
+/// 根目录的占用。需要递归遍历，可能很慢，桌面端由 [`usage::UsageCache`] 缓存，同一时间只遍历一次。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryUsage {
+    /// 根目录下全部文件的总大小（不跟随符号链接）。
+    pub used_bytes: u64,
+    /// 录像文件个数。
+    pub file_count: u64,
 }
 
 /// 根目录的绝对路径（相对路径按当前目录解析，与录制引擎一致）。
@@ -178,7 +186,8 @@ pub fn split_relative(relative: &str) -> Result<Vec<String>, String> {
 /// 解析出的目标。
 #[derive(Debug, Clone)]
 pub struct Resolved {
-    /// 根目录绝对路径拼接片段，不含 `\\?\` 前缀，用于显示和交给系统程序。
+    /// 规范化后的真实路径，能去掉时去掉 `\\?\` 前缀；用于读取、显示和交给系统程序。
+    /// 与越界检查是同一个目标，不会检查一个文件却打开另一个。
     pub path: PathBuf,
     /// 规范化后的真实路径，用于越界判断。
     pub canonical: PathBuf,
@@ -257,7 +266,7 @@ fn resolve_in(root: &Root, relative: &str) -> LibraryResult<Resolved> {
         ));
     }
     Ok(Resolved {
-        path,
+        path: dunce::simplified(&canonical).to_path_buf(),
         canonical,
         relative: parts.join("/"),
     })
@@ -266,6 +275,12 @@ fn resolve_in(root: &Root, relative: &str) -> LibraryResult<Resolved> {
 /// 解析录像根目录下的子路径，确认它存在且没有跳出根目录。
 pub fn resolve(root: &Path, relative: &str) -> LibraryResult<Resolved> {
     resolve_in(&open_root(root)?, relative)
+}
+
+/// 能列出、之后还能再定位的名称：不是隐藏项，也不含 `\` 和 `:`。
+/// Linux、macOS 的文件名可以含这两个字符，但 `split_relative` 会把它们当分隔符或拒绝。
+pub fn is_listable_name(name: &str) -> bool {
+    !name.starts_with('.') && !name.contains(['\\', ':', '\0'])
 }
 
 pub fn is_media_file(name: &str) -> bool {
@@ -306,36 +321,67 @@ fn modified_ms(metadata: &fs::Metadata) -> Option<i64> {
     i64::try_from(duration.as_millis()).ok()
 }
 
-/// 读取目录项时，符号链接和 junction 只在指向根目录之内时保留。
-fn entry_metadata(root: &Root, entry: &fs::DirEntry) -> Option<fs::Metadata> {
+/// 目录项的探测结果。
+enum Probe {
+    Dir(fs::Metadata),
+    Media(fs::Metadata),
+}
+
+/// 先用 `file_type()`（Windows 上来自目录枚举，不额外打开文件）和文件名过滤，只对目录、
+/// 录像文件和链接取元数据。符号链接和 junction 只在指向根目录之内时保留，并按目标判断类型；
+/// 链接到文件时，链接名和目标名都必须是录像扩展名。
+fn probe_entry(root: &Root, entry: &fs::DirEntry, name: &str) -> Option<Probe> {
     let file_type = entry.file_type().ok()?;
     if file_type.is_symlink() {
         let target = fs::canonicalize(entry.path()).ok()?;
         if !target.starts_with(&root.canonical) {
             return None;
         }
+        let metadata = fs::metadata(&target).ok()?;
+        if metadata.is_dir() {
+            return Some(Probe::Dir(metadata));
+        }
+        let target_name = target.file_name()?.to_str()?;
+        return (metadata.is_file() && is_media_file(name) && is_media_file(target_name))
+            .then_some(Probe::Media(metadata));
     }
-    fs::metadata(entry.path()).ok()
+    if file_type.is_dir() {
+        return entry.metadata().ok().map(Probe::Dir);
+    }
+    if file_type.is_file() && is_media_file(name) {
+        return entry.metadata().ok().map(Probe::Media);
+    }
+    None
 }
 
+/// 子目录和录像文件数。普通目录项只看 `file_type()` 和文件名，只有链接才解析目标。
 fn count_children(root: &Root, dir: &Path) -> Option<u64> {
     let mut count = 0;
     for entry in fs::read_dir(dir).ok()?.flatten() {
         let name = entry.file_name();
-        let name = name.to_string_lossy();
-        if name.starts_with('.') {
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        if !is_listable_name(name) {
             continue;
         }
-        match entry_metadata(root, &entry) {
-            Some(metadata) if metadata.is_dir() => count += 1,
-            Some(metadata) if metadata.is_file() && is_media_file(&name) => count += 1,
-            _ => {}
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        let counted = if file_type.is_symlink() {
+            probe_entry(root, &entry, name).is_some()
+        } else {
+            file_type.is_dir() || (file_type.is_file() && is_media_file(name))
+        };
+        if counted {
+            count += 1;
         }
     }
     Some(count)
 }
 
-/// 列出录像根目录下 `relative` 目录的子目录和录像文件。隐藏项（以 `.` 开头）不列出。
+/// 列出录像根目录下 `relative` 目录的子目录和录像文件。
+/// 隐藏项（以 `.` 开头）和含 `\`、`:` 的名称不列出，见 [`is_listable_name`]。
 pub fn list_dir(root: &Path, relative: &str) -> LibraryResult<LibraryListing> {
     let root = open_root(root)?;
     let target = resolve_in(&root, relative)?;
@@ -358,10 +404,10 @@ pub fn list_dir(root: &Path, relative: &str) -> LibraryResult<LibraryListing> {
             // 无法表示为 UTF-8 的文件名无法传回给前端再定位，跳过。
             continue;
         };
-        if name.starts_with('.') {
+        if !is_listable_name(&name) {
             continue;
         }
-        let Some(metadata) = entry_metadata(&root, &entry) else {
+        let Some(probe) = probe_entry(&root, &entry, &name) else {
             continue;
         };
         let path = if target.relative.is_empty() {
@@ -369,8 +415,8 @@ pub fn list_dir(root: &Path, relative: &str) -> LibraryResult<LibraryListing> {
         } else {
             format!("{}/{name}", target.relative)
         };
-        if metadata.is_dir() {
-            dirs.push(LibraryEntry {
+        match probe {
+            Probe::Dir(metadata) => dirs.push(LibraryEntry {
                 child_count: count_children(&root, &entry.path()),
                 name,
                 path,
@@ -379,19 +425,20 @@ pub fn list_dir(root: &Path, relative: &str) -> LibraryResult<LibraryListing> {
                 modified_at: modified_ms(&metadata),
                 segment: None,
                 group: None,
-            });
-        } else if metadata.is_file() && is_media_file(&name) {
-            let (group, segment) = split_segment(&name);
-            files.push(LibraryEntry {
-                name,
-                path,
-                kind: EntryKind::File,
-                size: Some(metadata.len()),
-                modified_at: modified_ms(&metadata),
-                child_count: None,
-                segment,
-                group: Some(group),
-            });
+            }),
+            Probe::Media(metadata) => {
+                let (group, segment) = split_segment(&name);
+                files.push(LibraryEntry {
+                    name,
+                    path,
+                    kind: EntryKind::File,
+                    size: Some(metadata.len()),
+                    modified_at: modified_ms(&metadata),
+                    child_count: None,
+                    segment,
+                    group: Some(group),
+                });
+            }
         }
     }
 
@@ -412,25 +459,43 @@ fn compare_names(a: &str, b: &str) -> Ordering {
 }
 
 /// 文件按同次录制分组：组按组内最新修改时间倒序，组内按分段序号升序。
-pub fn sort_files(files: &mut [LibraryEntry]) {
-    let mut latest: HashMap<String, i64> = HashMap::new();
+/// 排序键预先算好，比较时不再分配字符串。
+pub fn sort_files(files: &mut Vec<LibraryEntry>) {
+    fn group_of(file: &LibraryEntry) -> &str {
+        file.group.as_deref().unwrap_or(&file.name)
+    }
+    let mut latest: HashMap<&str, i64> = HashMap::new();
     for file in files.iter() {
-        let key = file.group.clone().unwrap_or_else(|| file.name.clone());
         let time = file.modified_at.unwrap_or(i64::MIN);
         latest
-            .entry(key)
+            .entry(group_of(file))
             .and_modify(|value| *value = (*value).max(time))
             .or_insert(time);
     }
-    let group_of = |file: &LibraryEntry| file.group.clone().unwrap_or_else(|| file.name.clone());
-    files.sort_by(|a, b| {
-        let (ga, gb) = (group_of(a), group_of(b));
-        latest[&gb]
-            .cmp(&latest[&ga])
-            .then_with(|| compare_names(&gb, &ga))
-            .then_with(|| a.segment.unwrap_or(0).cmp(&b.segment.unwrap_or(0)))
-            .then_with(|| compare_names(&a.name, &b.name))
+    let keys: Vec<(i64, String, u32, String)> = files
+        .iter()
+        .map(|file| {
+            let group = group_of(file);
+            (
+                latest[group],
+                group.to_lowercase(),
+                file.segment.unwrap_or(0),
+                file.name.to_lowercase(),
+            )
+        })
+        .collect();
+    let mut order: Vec<usize> = (0..files.len()).collect();
+    order.sort_by(|&a, &b| {
+        let (ka, kb) = (&keys[a], &keys[b]);
+        kb.0.cmp(&ka.0)
+            .then_with(|| kb.1.cmp(&ka.1))
+            .then_with(|| ka.2.cmp(&kb.2))
+            .then_with(|| ka.3.cmp(&kb.3))
+            .then_with(|| files[a].name.cmp(&files[b].name))
     });
+    let mut taken: Vec<Option<LibraryEntry>> =
+        std::mem::take(files).into_iter().map(Some).collect();
+    files.extend(order.into_iter().filter_map(|index| taken[index].take()));
 }
 
 /// 要打开或定位的文件：必须在根目录内且存在。`media_only` 时只接受录像文件。
@@ -438,10 +503,18 @@ pub fn resolve_file(root: &Path, relative: &str, media_only: bool) -> LibraryRes
     let root = open_root(root)?;
     let target = resolve_in(&root, relative)?;
     if media_only {
-        let metadata = fs::metadata(&target.path)
+        // 对解析后的真实目标做检查：根目录内名为 a.ts、实际指向 payload.exe 的链接会被拒绝。
+        let metadata = fs::metadata(&target.canonical)
             .map_err(|error| io_error(&error, &target.path, &root.path))?;
-        let name = target.path.file_name().map(|n| n.to_string_lossy());
-        if !metadata.is_file() || !name.is_some_and(|name| is_media_file(&name)) {
+        let requested = relative.rsplit(['/', '\\']).next().unwrap_or_default();
+        let real = target
+            .canonical
+            .file_name()
+            .map(|name| name.to_string_lossy());
+        if !metadata.is_file()
+            || !is_media_file(requested)
+            || !real.is_some_and(|name| is_media_file(&name))
+        {
             return Err(LibraryError::new(
                 LibraryErrorKind::InvalidTarget,
                 format!("{} 不是录像文件", target.path.display()),
@@ -452,30 +525,26 @@ pub fn resolve_file(root: &Path, relative: &str, media_only: bool) -> LibraryRes
     Ok(target)
 }
 
-/// 统计根目录占用并查询磁盘空间。根目录不存在时仍查询最近的已存在上级目录所在磁盘。
-pub fn stats(root: &Path) -> LibraryStats {
+/// 查询根目录所在磁盘的剩余和总空间。根目录不存在时查询最近的已存在上级目录所在磁盘。
+pub fn disk_space(root: &Path) -> DiskSpace {
     let path = absolute_root(root);
-    let root_exists = path.is_dir();
-    let (used_bytes, file_count) = if root_exists {
-        walk_usage(&path)
-    } else {
-        (0, 0)
-    };
     let probe = path.ancestors().find(|dir| dir.is_dir());
-    let available_bytes = probe.and_then(|dir| fs4::available_space(dir).ok());
-    let total_bytes = probe.and_then(|dir| fs4::total_space(dir).ok());
-    LibraryStats {
+    DiskSpace {
         root: display_path(&path),
-        root_exists,
-        used_bytes,
-        file_count,
-        available_bytes,
-        total_bytes,
+        root_exists: path.is_dir(),
+        available_bytes: probe.and_then(|dir| fs4::available_space(dir).ok()),
+        total_bytes: probe.and_then(|dir| fs4::total_space(dir).ok()),
     }
 }
 
+/// 递归统计根目录占用；根目录不存在时为 None。可能很慢，桌面端经 [`usage::UsageCache`] 调用。
+pub fn usage(root: &Path) -> Option<LibraryUsage> {
+    let path = absolute_root(root);
+    path.is_dir().then(|| walk_usage(&path))
+}
+
 /// 递归累计文件大小，不跟随符号链接和 junction，读不了的目录跳过。
-fn walk_usage(root: &Path) -> (u64, u64) {
+pub fn walk_usage(root: &Path) -> LibraryUsage {
     let mut used = 0u64;
     let mut count = 0u64;
     let mut stack = vec![root.to_path_buf()];
@@ -502,5 +571,8 @@ fn walk_usage(root: &Path) -> (u64, u64) {
             }
         }
     }
-    (used, count)
+    LibraryUsage {
+        used_bytes: used,
+        file_count: count,
+    }
 }

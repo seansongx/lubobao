@@ -290,13 +290,27 @@ export interface LibraryListing {
   entries: LibraryEntry[];
 }
 
-export interface LibraryStats {
+/** 根目录所在磁盘的空间；根目录不存在时取最近的已存在上级目录。很快，可以定时查询。 */
+export interface DiskSpace {
   root: string;
   rootExists: boolean;
-  usedBytes: number;
-  fileCount: number;
   availableBytes: number | null;
   totalBytes: number | null;
+}
+
+export interface LibraryUsage {
+  usedBytes: number;
+  fileCount: number;
+}
+
+/** 根目录占用。Rust 缓存结果，同一时间只遍历一次；computing 时 usage 是上次的结果或 null。 */
+export interface UsageSnapshot {
+  root: string;
+  rootExists: boolean;
+  usage: LibraryUsage | null;
+  /** Unix 毫秒。 */
+  computedAt: number | null;
+  computing: boolean;
 }
 
 // ---- 后端接口 ----
@@ -319,7 +333,9 @@ export interface Backend {
   listActivity(query?: ActivityQuery): Promise<ActivityPage>;
   /** 列出录像根目录下的子目录；path 缺省为根目录。 */
   listLibrary(path?: string): Promise<LibraryListing>;
-  getLibraryStats(): Promise<LibraryStats>;
+  getDiskSpace(): Promise<DiskSpace>;
+  /** refresh 为 true 时忽略缓存有效期（30 秒）。最多等待 2 秒，仍在统计时 computing 为 true。 */
+  getLibraryUsage(refresh?: boolean): Promise<UsageSnapshot>;
   /** 用系统默认播放器打开录像文件。 */
   openLibraryFile(path: string): Promise<void>;
   /** 在系统文件管理器中打开文件夹本身；path 为 "" 时打开根目录。 */
@@ -350,7 +366,8 @@ const tauriBackend: Backend = {
   updateSettings: (values) => invoke("update_settings", { values }),
   listActivity: (query) => invoke("list_activity", { query: query ?? null }),
   listLibrary: (path) => invoke("list_library", { path: path ?? null }),
-  getLibraryStats: () => invoke("get_library_stats"),
+  getDiskSpace: () => invoke("get_disk_space"),
+  getLibraryUsage: (refresh) => invoke("get_library_usage", { refresh: refresh ?? false }),
   openLibraryFile: (path) => invoke("open_library_file", { path }),
   openLibraryFolder: (path) => invoke("open_library_folder", { path }),
   revealLibraryItem: (path) => invoke("reveal_library_item", { path }),

@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::Write;
 use std::path::Path;
 use std::time::{Duration, SystemTime};
 
@@ -8,13 +9,9 @@ fn write_file(path: &Path, bytes: usize, age_secs: u64) {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).unwrap();
     }
-    fs::write(path, vec![0u8; bytes]).unwrap();
-    let time = SystemTime::now() - Duration::from_secs(age_secs);
-    fs::File::options()
-        .write(true)
-        .open(path)
-        .unwrap()
-        .set_modified(time)
+    let mut file = fs::File::create(path).unwrap();
+    file.write_all(&vec![0u8; bytes]).unwrap();
+    file.set_modified(SystemTime::now() - Duration::from_secs(age_secs))
         .unwrap();
 }
 
@@ -102,7 +99,7 @@ fn resolve_rejects_link_that_escapes_root() {
     let listing = list_dir(&root, "").unwrap();
     assert!(names(&listing).is_empty(), "{:?}", names(&listing));
     // 占用统计不跟随链接。
-    assert_eq!(stats(&root).used_bytes, 0);
+    assert_eq!(usage(&root).unwrap().used_bytes, 0);
 }
 
 #[test]
@@ -111,6 +108,11 @@ fn link_inside_root_is_listed() {
     let root = dir.path();
     write_file(&root.join("真实目录").join("a.ts"), 1, 0);
     link_dir(&root.join("真实目录"), &root.join("快捷方式"));
+    // 根目录列表里出现这个链接，按目标当作目录。
+    let top = list_dir(root, "").unwrap();
+    assert_eq!(names(&top), ["快捷方式", "真实目录"]);
+    assert!(top.entries.iter().all(|entry| entry.kind == EntryKind::Dir));
+    assert_eq!(top.entries[0].child_count, Some(1));
     let listing = list_dir(root, "快捷方式").unwrap();
     assert_eq!(names(&listing), ["a.ts"]);
     assert_eq!(listing.entries[0].path, "快捷方式/a.ts");
@@ -228,11 +230,11 @@ fn missing_root_returns_root_missing() {
     assert!(error.root.ends_with("不存在的目录"));
     assert!(error.message.contains("不存在的目录"));
 
-    let stats = stats(&root);
-    assert!(!stats.root_exists);
-    assert_eq!(stats.used_bytes, 0);
+    assert_eq!(usage(&root), None);
+    let space = disk_space(&root);
+    assert!(!space.root_exists);
     // 根目录不存在时仍能查询上级目录所在磁盘的剩余空间。
-    assert!(stats.available_bytes.is_some());
+    assert!(space.available_bytes.is_some());
 }
 
 #[test]
@@ -277,18 +279,22 @@ fn resolve_file_only_opens_media_files() {
 }
 
 #[test]
-fn stats_sums_all_files_and_counts_media() {
+fn usage_sums_all_files_and_counts_media() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
     write_file(&root.join("抖音").join("甲").join("a.ts"), 100, 0);
     write_file(&root.join("抖音").join("乙").join("b.mp4"), 50, 0);
     write_file(&root.join("readme.txt"), 7, 0);
-    let stats = stats(root);
-    assert!(stats.root_exists);
-    assert_eq!(stats.used_bytes, 157);
-    assert_eq!(stats.file_count, 2);
-    assert!(stats.available_bytes.is_some());
-    assert!(stats.total_bytes.unwrap() >= stats.available_bytes.unwrap());
+    assert_eq!(
+        usage(root),
+        Some(LibraryUsage {
+            used_bytes: 157,
+            file_count: 2
+        })
+    );
+    let space = disk_space(root);
+    assert!(space.root_exists);
+    assert!(space.total_bytes.unwrap() >= space.available_bytes.unwrap());
 }
 
 #[test]
@@ -297,4 +303,262 @@ fn library_error_serializes_kind_in_snake_case() {
     let value = serde_json::to_value(&error).unwrap();
     assert_eq!(value["kind"], "root_missing");
     assert_eq!(value["root"], "D:/录播宝");
+}
+
+#[test]
+fn canonical_check_rejects_nested_path_through_escaping_link() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("root");
+    let outside = dir.path().join("outside");
+    write_file(&outside.join("leak.ts"), 1, 0);
+    fs::create_dir_all(root.join("内层")).unwrap();
+    link_dir(&outside, &root.join("内层").join("escape"));
+
+    // 路径本身合法，只有规范化后的越界检查能拦住。
+    let path = "内层/escape/leak.ts";
+    assert!(split_relative(path).is_ok());
+    for media_only in [true, false] {
+        let error = resolve_file(&root, path, media_only).unwrap_err();
+        assert_eq!(error.kind, LibraryErrorKind::InvalidPath);
+        assert!(error.message.contains("之外"), "{}", error.message);
+    }
+    assert_eq!(
+        list_dir(&root, "内层/escape").unwrap_err().kind,
+        LibraryErrorKind::InvalidPath
+    );
+    assert!(list_dir(&root, "内层").unwrap().entries.is_empty());
+    // 越界的链接也不计入子项数。
+    assert_eq!(count_in(&root, ""), Some(0));
+}
+
+/// 根目录下第一个目录的子项数。
+fn count_in(root: &Path, relative: &str) -> Option<u64> {
+    list_dir(root, relative).unwrap().entries[0].child_count
+}
+
+/// 建文件符号链接。Windows 上需要开发者模式或管理员权限，没有时返回 false，调用方跳过。
+fn link_file(target: &Path, link: &Path) -> bool {
+    #[cfg(windows)]
+    let result = std::os::windows::fs::symlink_file(target, link);
+    #[cfg(unix)]
+    let result = std::os::unix::fs::symlink(target, link);
+    match result {
+        Ok(()) => true,
+        Err(error) => {
+            eprintln!("无法创建文件符号链接，跳过：{error}");
+            false
+        }
+    }
+}
+
+#[test]
+fn media_check_uses_real_target_of_file_link() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write_file(&root.join("payload.exe"), 1, 0);
+    write_file(&root.join("真实录像.ts"), 1, 0);
+    if !link_file(&root.join("payload.exe"), &root.join("a.ts"))
+        || !link_file(&root.join("真实录像.ts"), &root.join("b.ts"))
+    {
+        return;
+    }
+    // 名为 a.ts、实际指向 exe 的链接：不列出，也不能打开。
+    let error = resolve_file(root, "a.ts", true).unwrap_err();
+    assert_eq!(error.kind, LibraryErrorKind::InvalidTarget);
+    let listing = list_dir(root, "").unwrap();
+    assert!(!names(&listing).contains(&"a.ts"), "{:?}", names(&listing));
+    // 指向录像的链接可以打开，交给系统的是真实路径。
+    assert!(names(&listing).contains(&"b.ts"));
+    let resolved = resolve_file(root, "b.ts", true).unwrap();
+    assert!(
+        resolved.path.ends_with("真实录像.ts"),
+        "{:?}",
+        resolved.path
+    );
+}
+
+#[test]
+fn media_extension_check_is_case_insensitive_and_exact() {
+    assert!(is_media_file("VIDEO.TS"));
+    assert!(is_media_file("录像.Mp4"));
+    assert!(!is_media_file("video.ts.exe"));
+    assert!(!is_media_file("video.tsx"));
+    assert!(!is_media_file("ts"));
+
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write_file(&root.join("VIDEO.TS"), 1, 0);
+    write_file(&root.join("video.ts.exe"), 1, 0);
+    assert_eq!(names(&list_dir(root, "").unwrap()), ["VIDEO.TS"]);
+    assert!(resolve_file(root, "VIDEO.TS", true).is_ok());
+    assert_eq!(
+        resolve_file(root, "video.ts.exe", true).unwrap_err().kind,
+        LibraryErrorKind::InvalidTarget
+    );
+}
+
+#[test]
+fn resolved_path_is_the_real_path_without_verbatim_prefix() {
+    let dir = tempfile::tempdir().unwrap();
+    write_file(&dir.path().join("录像").join("a.ts"), 1, 0);
+    let resolved = resolve_file(dir.path(), "录像/a.ts", true).unwrap();
+    assert!(!resolved.path.to_string_lossy().starts_with(r"\\?\"));
+    assert_eq!(
+        fs::canonicalize(&resolved.path).unwrap(),
+        resolved.canonical
+    );
+}
+
+#[test]
+fn names_with_backslash_or_colon_are_not_listable() {
+    assert!(is_listable_name("主播_000.ts"));
+    for name in [".hidden.ts", r"a\b.ts", "a:b.ts"] {
+        assert!(!is_listable_name(name), "{name}");
+    }
+    // Linux、macOS 上真的能建出这种文件名：列表里跳过，避免列出后无法进入或打开。
+    #[cfg(unix)]
+    {
+        let dir = tempfile::tempdir().unwrap();
+        write_file(&dir.path().join(r"a\b.ts"), 1, 0);
+        write_file(&dir.path().join("a:b.ts"), 1, 0);
+        fs::create_dir(dir.path().join(r"x\y")).unwrap();
+        write_file(&dir.path().join("ok.ts"), 1, 0);
+        assert_eq!(names(&list_dir(dir.path(), "").unwrap()), ["ok.ts"]);
+    }
+}
+
+#[test]
+fn large_directory_lists_correctly_in_reasonable_time() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let anchor = root.join("抖音").join("主播");
+    // 三次录制各 1000 段，另有 2000 个非录像文件（只按文件名过滤，不取元数据）。
+    for (recording, age) in [("A", 30_000u64), ("B", 20_000), ("C", 10_000)] {
+        for index in 0..1000u64 {
+            write_file(
+                &anchor.join(format!("主播_{recording}_{index:03}.ts")),
+                0,
+                age - index,
+            );
+        }
+    }
+    for index in 0..2000 {
+        write_file(&anchor.join(format!("缩略图_{index}.jpg")), 0, 0);
+    }
+
+    let started = std::time::Instant::now();
+    let listing = list_dir(root, "抖音/主播").unwrap();
+    let top = list_dir(root, "抖音").unwrap();
+    let elapsed = started.elapsed();
+
+    assert_eq!(listing.entries.len(), 3000);
+    assert_eq!(top.entries[0].child_count, Some(3000));
+    // 最近一次录制（C）在前，组内按序号升序。
+    let expected: Vec<String> = ["C", "B", "A"]
+        .iter()
+        .flat_map(|recording| (0..1000).map(move |i| format!("主播_{recording}_{i:03}.ts")))
+        .collect();
+    assert_eq!(names(&listing), expected);
+    assert!(
+        elapsed < Duration::from_secs(5),
+        "列出 5000 个目录项耗时 {elapsed:?}"
+    );
+    eprintln!("列出 5000 个目录项（3000 个录像）两次，耗时 {elapsed:?}");
+}
+
+mod usage_cache {
+    use std::path::Path;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
+
+    use super::super::LibraryUsage;
+    use super::super::usage::UsageCache;
+
+    const RESULT: LibraryUsage = LibraryUsage {
+        used_bytes: 42,
+        file_count: 1,
+    };
+
+    static SINGLE_FLIGHT_WALKS: AtomicUsize = AtomicUsize::new(0);
+    fn slow_walker(_: &Path) -> LibraryUsage {
+        SINGLE_FLIGHT_WALKS.fetch_add(1, Ordering::SeqCst);
+        std::thread::sleep(Duration::from_millis(300));
+        RESULT
+    }
+
+    #[test]
+    fn runs_one_walk_at_a_time_and_caches_the_result() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = Arc::new(UsageCache::with_walker(
+            slow_walker,
+            Duration::from_secs(60),
+        ));
+
+        // 遍历进行中的并发请求立即返回「统计中」，不会再启动遍历。
+        let handles: Vec<_> = (0..8)
+            .map(|_| {
+                let cache = Arc::clone(&cache);
+                let root = dir.path().to_path_buf();
+                std::thread::spawn(move || cache.request(&root, false, Duration::ZERO))
+            })
+            .collect();
+        for handle in handles {
+            let snapshot = handle.join().unwrap();
+            assert!(snapshot.computing);
+            assert_eq!(snapshot.usage, None);
+        }
+
+        // 等待后拿到结果；有效期内再请求直接用缓存。
+        let done = cache.request(dir.path(), false, Duration::from_secs(5));
+        assert!(!done.computing);
+        assert_eq!(done.usage, Some(RESULT));
+        assert!(done.computed_at.is_some());
+        let cached = cache.request(dir.path(), false, Duration::ZERO);
+        assert_eq!(cached, done);
+        assert_eq!(SINGLE_FLIGHT_WALKS.load(Ordering::SeqCst), 1);
+
+        // 刷新：返回上次结果并标明正在统计，之后再遍历一次。
+        let refreshing = cache.request(dir.path(), true, Duration::ZERO);
+        assert!(refreshing.computing);
+        assert_eq!(refreshing.usage, Some(RESULT));
+        let refreshed = cache.request(dir.path(), false, Duration::from_secs(5));
+        assert!(!refreshed.computing);
+        assert_eq!(SINGLE_FLIGHT_WALKS.load(Ordering::SeqCst), 2);
+    }
+
+    static MISSING_WALKS: AtomicUsize = AtomicUsize::new(0);
+    fn counting_walker(_: &Path) -> LibraryUsage {
+        MISSING_WALKS.fetch_add(1, Ordering::SeqCst);
+        RESULT
+    }
+
+    #[test]
+    fn missing_root_is_reported_without_walking() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = Arc::new(UsageCache::with_walker(
+            counting_walker,
+            Duration::from_secs(60),
+        ));
+        let snapshot = cache.request(&dir.path().join("不存在"), true, Duration::from_secs(1));
+        assert!(!snapshot.root_exists);
+        assert!(!snapshot.computing);
+        assert_eq!(snapshot.usage, None);
+        assert_eq!(MISSING_WALKS.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn real_walker_counts_files() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.ts"), [0u8; 10]).unwrap();
+        let cache = Arc::new(UsageCache::default());
+        let snapshot = cache.request(dir.path(), false, Duration::from_secs(5));
+        assert_eq!(
+            snapshot.usage,
+            Some(LibraryUsage {
+                used_bytes: 10,
+                file_count: 1
+            })
+        );
+    }
 }

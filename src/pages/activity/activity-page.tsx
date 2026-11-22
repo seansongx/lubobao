@@ -227,13 +227,14 @@ export function ActivityPage({ onNavigate }: ActivityPageProps) {
     [tasks],
   );
 
+  // 列表按 id 排序、按 at 分组：时钟回拨时同一天可能出现两段，key 用首条 id 保证唯一。
   const days = useMemo(() => {
-    const groups: { day: number; entries: ActivityEntry[] }[] = [];
+    const groups: { key: number; day: number; entries: ActivityEntry[] }[] = [];
     for (const entry of items) {
       const day = dayKey(entry.at);
       const last = groups[groups.length - 1];
       if (last && last.day === day) last.entries.push(entry);
-      else groups.push({ day, entries: [entry] });
+      else groups.push({ key: entry.id, day, entries: [entry] });
     }
     return groups;
   }, [items]);
@@ -310,7 +311,7 @@ export function ActivityPage({ onNavigate }: ActivityPageProps) {
         ) : (
           <>
             {days.map((group) => (
-              <div key={group.day}>
+              <div key={group.key}>
                 <div className="sticky top-0 z-10 border-b bg-background px-3.5 py-2 text-xs font-semibold text-muted-foreground">
                   {formatDay(group.day)}
                 </div>
