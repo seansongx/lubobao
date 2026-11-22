@@ -2355,6 +2355,7 @@ name = "lubobao"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "dunce",
  "flate2",
  "fs4",
  "libc",
