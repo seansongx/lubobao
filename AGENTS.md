@@ -39,7 +39,7 @@ Run commands from the repository root. Install Node.js, npm, and stable Rust. On
 
 桌面 CSS token 统一维护在 `src/tokens.css`。通用颜色沿用 shadcn/ui 语义名称，任务状态使用 `--status-recording`、`--status-waiting`、`--status-checking`、`--status-retrying`、`--status-notify`，需处理行底色使用 `--status-recording-soft`，任务行高使用 `--task-row-height`。接入 Tailwind 时将主题映射到同一组变量。
 
-Use two spaces in TypeScript, HTML, and CSS. Follow the existing camelCase TypeScript names and kebab-case HTML IDs, such as `greetInputEl` and `greet-input`. Strict TypeScript checks include unused locals and parameters. Use four spaces and snake_case function names in Rust.
+Use two spaces in TypeScript, HTML, and CSS. Name React components in PascalCase and other TypeScript identifiers in camelCase; use kebab-case file names, such as `AppSidebar` in `src/components/app-sidebar.tsx`. Strict TypeScript checks include unused locals and parameters. Use four spaces and snake_case function names in Rust.
 
 ## Testing
 
