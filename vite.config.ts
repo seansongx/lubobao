@@ -23,7 +23,8 @@ export default defineConfig(() => ({
   server: {
     port: 1420,
     strictPort: true,
-    host: host || false,
+    // 默认绑定 IPv4 回环：有的机器上 localhost 解析为 ::1 却连不通，Tauri 会一直等不到前端。
+    host: host || "127.0.0.1",
     hmr: host
       ? {
           protocol: "ws",

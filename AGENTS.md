@@ -29,7 +29,7 @@ LuBoBao (录播宝) is a Tauri 2 desktop app for live-stream recording. The fron
 Run commands from the repository root. Install Node.js, npm, and stable Rust. On Windows, install WebView2 Runtime and Microsoft C++ Build Tools with the desktop C++ workload and Windows SDK.
 
 - `npm ci` installs the dependencies pinned in `package-lock.json`.
-- `npm run dev` starts Vite at `http://localhost:1420` for browser-based layout work.
+- `npm run dev` starts Vite at `http://127.0.0.1:1420` for browser-based layout work. The dev server binds to IPv4 loopback because `localhost` can resolve to an unreachable `::1`, which leaves `tauri dev` waiting for the frontend.
 - `npm run tauri dev` starts Vite and opens the desktop app with native commands available.
 - `npm run build` type-checks with `tsc -b` and builds the frontend into `dist/`.
 - `cargo check --manifest-path src-tauri/Cargo.toml` checks the Rust side without building the app.
@@ -45,7 +45,7 @@ Use two spaces in TypeScript, HTML, and CSS. Name React components in PascalCase
 
 The project has no automated test cases, frontend test runner, or coverage threshold yet. Before committing, run `npm run build` and `cargo check --manifest-path src-tauri/Cargo.toml`. Place new Rust unit tests beside the implementation in a `#[cfg(test)]` module, name each test after the behavior it checks, and run `cargo test --manifest-path src-tauri/Cargo.toml`.
 
-To check the shell manually, run `npm run dev` and open `http://localhost:1420`. Switch between the four pages, check the sidebar, content area, and status bar in both light and dark system themes, and confirm that a 1024px-wide window has no horizontal scrollbar.
+To check the shell manually, run `npm run dev` and open `http://127.0.0.1:1420`. Switch between the four pages, check the sidebar, content area, and status bar in both light and dark system themes, and confirm that a 1024px-wide window has no horizontal scrollbar.
 
 ## Commits and Pull Requests
 
