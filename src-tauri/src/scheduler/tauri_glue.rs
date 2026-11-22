@@ -10,7 +10,7 @@ use super::{STATUS_EVENT, Scheduler, SchedulerStatus};
 use crate::ffmpeg::FfmpegManager;
 use crate::tasks::TaskManager;
 
-/// 在 Tauri `setup` 中、`tasks::tauri_glue::init` 和 `ffmpeg::init` 之后调用：创建调度器并在
+/// 在 Tauri `setup` 中、`tasks::tauri_glue::init` 和 `ffmpeg::tauri_glue::init` 之后调用：创建调度器并在
 /// 后台开始轮询。任务数据没打开时（已提示退出）不启动。
 pub fn init(app: &tauri::AppHandle) -> tauri::Result<()> {
     let Some(tasks) = app.try_state::<Arc<TaskManager>>() else {

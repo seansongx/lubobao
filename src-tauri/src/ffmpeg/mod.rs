@@ -3,12 +3,15 @@
 //! 安装位置：`<app_local_data_dir>/components/ffmpeg/<ffmpegVersion>-<packageVersion>/ffmpeg(.exe)`，
 //! 下载和解压的临时文件放在同一目录下的 `.tmp/`，保证最后一步改名在同一块磁盘上。
 //! 安装期间持有 `.tmp/lock` 的系统文件锁，同时打开多个录播宝时只有一个进程在下载和写入。
+//!
+//! 本模块不依赖 Tauri，命令行程序直接使用 [`FfmpegManager`]；Tauri 的初始化和命令见 [`tauri_glue`]。
 
 pub mod download;
 mod error;
 mod install;
 pub mod manifest;
 mod status;
+pub mod tauri_glue;
 #[cfg(test)]
 mod tests;
 
@@ -16,8 +19,6 @@ use std::fs::{File, OpenOptions, TryLockError};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-
-use tauri::{Emitter, Manager};
 
 pub use download::DownloadOptions;
 pub use error::InstallError;
@@ -145,15 +146,26 @@ impl FfmpegManager {
     /// 检查本地版本，必要时下载安装。同一进程内同一时间只运行一个；已在运行时直接返回当前状态。
     /// 失败后再次调用即为重试，已下载的部分会续传。
     pub async fn ensure(&self) -> FfmpegStatus {
+        self.run_exclusive(false).await
+    }
+
+    /// 忽略校验缓存，重新计算当前版本的哈希。期间状态为“校验中”；通过后为 `Ready`，
+    /// 不通过时与 [`Self::ensure`] 一样重新下载安装，安装失败时退回仍可用的旧版本。
+    /// 已有检查或安装在运行时直接返回当前状态。
+    pub async fn reverify(&self) -> FfmpegStatus {
+        self.run_exclusive(true).await
+    }
+
+    async fn run_exclusive(&self, force: bool) -> FfmpegStatus {
         let Ok(_guard) = self.install_lock.try_lock() else {
             return self.status();
         };
-        let status = self.run().await;
+        let status = self.run(force).await;
         self.set(status.clone());
         status
     }
 
-    async fn run(&self) -> FfmpegStatus {
+    async fn run(&self, force: bool) -> FfmpegStatus {
         let component = match &self.component {
             Ok(component) => component.clone(),
             Err(reason) => {
@@ -163,9 +175,17 @@ impl FfmpegManager {
                 };
             }
         };
-        self.set_progress(FfmpegStatus::Checking);
-        if self.check_current(&component).await {
-            return self.ready_current(&component);
+        if force {
+            self.set(FfmpegStatus::Verifying);
+        } else {
+            self.set_progress(FfmpegStatus::Checking);
+        }
+        match self.check_current(&component, force).await {
+            Ok(true) => return self.ready_current(&component),
+            // 强制校验时读不出文件（被占用、权限等）不能说明文件坏了，保留当前版本可用，
+            // 不因此掉到旧版本或重新下载。普通检查沿用原来的处理：当作不可用。
+            Err(_) if force => return self.ready_current(&component),
+            Ok(false) | Err(_) => {}
         }
 
         // 当前版本不可用：没有旧版本时如实显示未安装；有旧版本时先切到旧版本，下载期间也能用。
@@ -185,7 +205,7 @@ impl FfmpegManager {
         let result = match self.lock_install_dir().await {
             Ok(_lock) => {
                 // 等锁期间另一个进程可能已经装好了。
-                if self.check_current(&component).await {
+                if self.check_current(&component, false).await == Ok(true) {
                     return self.ready_current(&component);
                 }
                 self.install(&component).await
@@ -225,7 +245,8 @@ impl FfmpegManager {
         }
     }
 
-    async fn check_current(&self, component: &Component) -> bool {
+    /// 校验当前版本。`force` 时忽略校验记录重新计算哈希；文件读不出来时返回 `Err`。
+    async fn check_current(&self, component: &Component, force: bool) -> Result<bool, String> {
         let binary = self.binary_path(component);
         let record = self.install_dir(component).join(VERIFIED_RECORD);
         let component = component.clone();
@@ -238,10 +259,11 @@ impl FfmpegManager {
                     ffmpeg: &component.ffmpeg_version,
                     package: &component.package_version,
                 },
+                force,
             )
         })
         .await
-        .unwrap_or(false)
+        .unwrap_or(Ok(false))
     }
 
     async fn find_fallback(&self, component: &Component) -> Option<InstalledVersion> {
@@ -416,40 +438,4 @@ async fn remove_stale_stages(temp: &Path) {
             let _ = tokio::fs::remove_dir_all(entry.path()).await;
         }
     }
-}
-
-/// 在 Tauri `setup` 中调用：登记状态并在后台开始检查，不阻塞窗口。
-pub fn init(app: &tauri::AppHandle) -> tauri::Result<()> {
-    let root = app
-        .path()
-        .app_local_data_dir()?
-        .join("components")
-        .join("ffmpeg");
-    let handle = app.clone();
-    let manager = Arc::new(FfmpegManager::new(
-        ManagerConfig::for_current_platform(root),
-        Box::new(move |status: &FfmpegStatus| {
-            let _ = handle.emit(STATUS_EVENT, status);
-        }),
-    ));
-    app.manage(Arc::clone(&manager));
-    tauri::async_runtime::spawn(async move {
-        manager.ensure().await;
-    });
-    Ok(())
-}
-
-#[tauri::command]
-pub fn get_ffmpeg_status(manager: tauri::State<'_, Arc<FfmpegManager>>) -> FfmpegStatus {
-    manager.status()
-}
-
-/// 重新检查并安装。已在运行时不会再启动一个任务。返回调用时的状态，后续变化通过事件推送。
-#[tauri::command]
-pub fn retry_ffmpeg_install(manager: tauri::State<'_, Arc<FfmpegManager>>) -> FfmpegStatus {
-    let task = Arc::clone(manager.inner());
-    tauri::async_runtime::spawn(async move {
-        task.ensure().await;
-    });
-    manager.status()
 }

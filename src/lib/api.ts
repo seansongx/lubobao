@@ -3,7 +3,10 @@
 // 不在 Tauri 环境里（npm run dev 在浏览器打开）时改用 mock-api.ts 的内存假数据。
 
 import { invoke, isTauri } from "@tauri-apps/api/core";
+import { getVersion } from "@tauri-apps/api/app";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { openUrl as openerOpenUrl } from "@tauri-apps/plugin-opener";
 
 import { createMockBackend } from "@/lib/mock-api";
 
@@ -346,6 +349,8 @@ export interface UsageSnapshot {
 export interface Backend {
   getFfmpegStatus(): Promise<FfmpegStatus>;
   retryFfmpegInstall(): Promise<FfmpegStatus>;
+  /** 忽略校验缓存重新计算哈希，不通过时重新安装。返回调用时的状态，后续变化走事件。 */
+  reverifyFfmpeg(): Promise<FfmpegStatus>;
   listTasks(): Promise<TaskSnapshot[]>;
   addTask(input: AddTaskInput): Promise<TaskMutation>;
   updateTask(input: UpdateTaskInput): Promise<TaskMutation>;
@@ -359,6 +364,8 @@ export interface Backend {
    */
   stopRecording(ids: TaskId[]): Promise<TaskSnapshot[]>;
   getSettings(): Promise<Settings>;
+  /** 后端的默认值（settings.rs），“恢复默认值”用。保存目录是本机的默认目录。 */
+  getSettingDefaults(): Promise<Settings>;
   /** 部分更新，返回完整设置。任一项无效时整批不保存。 */
   updateSettings(values: Partial<Settings>): Promise<Settings>;
   listActivity(query?: ActivityQuery): Promise<ActivityPage>;
@@ -375,6 +382,13 @@ export interface Backend {
   /** 在系统文件管理器中显示并选中；path 为 "" 时打开根目录。 */
   revealLibraryItem(path: string): Promise<void>;
 
+  /** 应用版本号（tauri.conf.json 的 version）。 */
+  getAppVersion(): Promise<string>;
+  /** 弹出系统目录选择框，取消时返回 null。 */
+  pickDirectory(options?: { title?: string; defaultPath?: string }): Promise<string | null>;
+  /** 用系统浏览器打开链接。 */
+  openUrl(url: string): Promise<void>;
+
   onFfmpegStatus(handler: (status: FfmpegStatus) => void): Promise<UnlistenFn>;
   onTaskUpdated(handler: (task: TaskSnapshot) => void): Promise<UnlistenFn>;
   onTaskRemoved(handler: (payload: { ids: TaskId[] }) => void): Promise<UnlistenFn>;
@@ -389,6 +403,7 @@ function on<T>(event: string, handler: (payload: T) => void): Promise<UnlistenFn
 const tauriBackend: Backend = {
   getFfmpegStatus: () => invoke("get_ffmpeg_status"),
   retryFfmpegInstall: () => invoke("retry_ffmpeg_install"),
+  reverifyFfmpeg: () => invoke("reverify_ffmpeg"),
   listTasks: () => invoke("list_tasks"),
   addTask: (input) => invoke("add_task", { input }),
   updateTask: (input) => invoke("update_task", { input }),
@@ -396,6 +411,7 @@ const tauriBackend: Backend = {
   setMonitoring: (ids, enabled) => invoke("set_monitoring", { ids, enabled }),
   stopRecording: (ids) => invoke("stop_recording", { ids }),
   getSettings: () => invoke("get_settings"),
+  getSettingDefaults: () => invoke("get_setting_defaults"),
   updateSettings: (values) => invoke("update_settings", { values }),
   listActivity: (query) => invoke("list_activity", { query: query ?? null }),
   getSchedulerStatus: () => invoke("get_scheduler_status"),
@@ -405,6 +421,13 @@ const tauriBackend: Backend = {
   openLibraryFile: (path) => invoke("open_library_file", { path }),
   openLibraryFolder: (path) => invoke("open_library_folder", { path }),
   revealLibraryItem: (path) => invoke("reveal_library_item", { path }),
+
+  getAppVersion: () => getVersion(),
+  async pickDirectory(options) {
+    const picked = await openDialog({ directory: true, multiple: false, ...options });
+    return typeof picked === "string" ? picked : null;
+  },
+  openUrl: (url) => openerOpenUrl(url),
 
   onFfmpegStatus: (handler) => on("ffmpeg-status", handler),
   onTaskUpdated: (handler) => on("task-updated", handler),

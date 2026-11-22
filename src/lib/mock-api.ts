@@ -11,6 +11,7 @@
 //       缺省时模拟一次下载：下载中 → 校验 → 可用。
 //   ?library=missing   录像根目录不存在；把设置 live_save_path 改成其他路径也视为不存在。
 //   ?tasks=slow        任务列表延迟 1.5 秒返回（演示加载中）。
+//   ?saveDelay=1500    设置保存延迟（毫秒，默认 150），用来复现连续修改的先后顺序。
 //   ?tasks=fail        前两次读取任务列表失败（状态栏和直播间各一次，演示失败和重试）。
 //
 // 添加任务的演示链接（见 resolveMock）
@@ -317,6 +318,42 @@ const defaultSettings: Settings = {
   stream_start_notification_enabled: false,
   stream_end_notification_enabled: false,
 };
+
+/** 与 src-tauri/src/tasks/settings.rs 的 ENUM_SETTINGS 一致。 */
+const enumSettings: Partial<Record<keyof Settings, readonly string[]>> = {
+  record_quality: ["OD", "UHD", "HD", "SD", "LD"],
+  video_format: ["TS", "MP4", "FLV", "MKV", "MOV", "NUT", "WAV", "MP3", "WMA", "M4A", "AAC"],
+  default_live_source: ["FLV", "HLS"],
+};
+
+/** 复刻 settings.rs 的 validate：类型一致、数值为正、整数项必须为整数、枚举项取合法值。 */
+function validateSetting(key: string, value: unknown): string | null {
+  if (!(key in defaultSettings)) return `未知的设置项：${key}`;
+  const fallback = defaultSettings[key as keyof Settings];
+  const shown = JSON.stringify(value);
+  if (typeof fallback === "number") {
+    if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+      return `设置项 ${key} 的值无效：${shown}`;
+    }
+    if (Number.isInteger(fallback) && key !== "recording_space_threshold" && !Number.isInteger(value)) {
+      return `设置项 ${key} 需要正整数：${shown}`;
+    }
+  } else if (typeof fallback === "object") {
+    const valid =
+      typeof value === "object" &&
+      value !== null &&
+      !Array.isArray(value) &&
+      Object.values(value).every((item) => typeof item === "string");
+    if (!valid) return `设置项 ${key} 的值无效：${shown}`;
+  } else if (typeof value !== typeof fallback) {
+    return `设置项 ${key} 的值无效：${shown}`;
+  }
+  const allowed = enumSettings[key as keyof Settings];
+  if (allowed && !allowed.includes(value as string)) {
+    return `设置项 ${key} 只能是 ${allowed.join("、")} 之一：${shown}`;
+  }
+  return null;
+}
 
 // ---- 录像库 ----
 
@@ -652,6 +689,7 @@ export function createMockBackend(): Backend {
   let tasks = seedTasks(now);
   let nextId = tasks.length + 1;
   let settings = { ...defaultSettings };
+  const saveDelay = Number(new URLSearchParams(window.location.search).get("saveDelay") ?? 150) || 150;
   const activity: ActivityEntry[] = [];
   let nextActivityId = 1;
   // 与 Rust 一致，停止录制默认可用；setStopSupported(false) 演示 not_implemented。
@@ -893,6 +931,18 @@ export function createMockBackend(): Backend {
       simulateDownload();
       return Promise.resolve(ffmpeg);
     },
+    reverifyFfmpeg: () => {
+      const before = ffmpeg;
+      if (before.state === "failed") {
+        simulateDownload();
+      } else if (before.state === "ready") {
+        // 与后端一致：校验中 → 可用；旧版本加安装失败时重新安装仍失败，回到原状态。
+        clearInterval(simulation);
+        setFfmpeg({ state: "verifying" });
+        setTimeout(() => setFfmpeg(before), 1500);
+      }
+      return Promise.resolve(before);
+    },
     async listTasks() {
       if (tasksMode === "slow") await delay(1500);
       if (failuresLeft > 0) {
@@ -1039,7 +1089,13 @@ export function createMockBackend(): Backend {
     },
 
     getSettings: () => Promise.resolve(settings),
+    getSettingDefaults: () => Promise.resolve({ ...defaultSettings }),
     async updateSettings(values) {
+      await delay(saveDelay);
+      for (const [key, value] of Object.entries(values)) {
+        const message = validateSetting(key, value);
+        if (message) return reject("config", message);
+      }
       // 与 Rust 一致：Cookie 不能含换行等控制字符（制表符除外）。
       for (const [platform, cookie] of Object.entries(values.platform_cookies ?? {})) {
         // eslint-disable-next-line no-control-regex
@@ -1152,6 +1208,16 @@ export function createMockBackend(): Backend {
     async revealLibraryItem(path) {
       libraryLookup(path);
       console.info("[mock] 在文件夹中显示", path || "（根目录）");
+    },
+
+    getAppVersion: () => Promise.resolve("0.1.0"),
+    pickDirectory: async (options) => {
+      // 浏览器里没有系统目录选择框，用输入框代替。
+      const picked = window.prompt(options?.title ?? "选择文件夹", options?.defaultPath ?? "");
+      return picked && picked.trim() ? picked.trim() : null;
+    },
+    openUrl: async (url) => {
+      window.open(url, "_blank", "noopener");
     },
 
     onFfmpegStatus: (handler) => ffmpegChannel.subscribe(handler),

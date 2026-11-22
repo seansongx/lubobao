@@ -12,6 +12,7 @@ import { PagePlaceholder } from "@/pages/page-placeholder";
 import { pages, type PageId } from "@/pages/pages";
 import { RoomsPage } from "@/pages/rooms/rooms-page";
 import { initialRoomsView, type RoomsView } from "@/pages/rooms/rooms-view";
+import { SettingsPage } from "@/pages/settings/settings-page";
 
 export default function App() {
   const [current, setCurrent] = useState<PageId>("rooms");
@@ -39,6 +40,8 @@ export default function App() {
         return <LibraryPage onNavigate={navigate} />;
       case "activity":
         return <ActivityPage onNavigate={navigate} />;
+      case "settings":
+        return <SettingsPage />;
       default:
         return <PagePlaceholder key={page.id} page={page} />;
     }
