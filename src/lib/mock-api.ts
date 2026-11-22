@@ -16,6 +16,7 @@ import type {
   FfmpegStatus,
   LiveState,
   Monitoring,
+  Platform,
   RecordState,
   Settings,
   TaskId,
@@ -95,20 +96,27 @@ function displayReason(status: DisplayStatus, live: LiveState, record: RecordSta
 }
 
 type MockSeed = Pick<TaskSnapshot, "anchorName" | "roomId" | "monitoring" | "live" | "record"> &
-  Partial<Pick<TaskSnapshot, "notifyOnly" | "quality" | "note">>;
+  Partial<Pick<TaskSnapshot, "notifyOnly" | "quality" | "note" | "platform">>;
+
+const mockPlatforms: Record<Platform, { name: string; roomUrl: (roomId: string) => string }> = {
+  douyin: { name: "抖音", roomUrl: (roomId) => `https://live.douyin.com/${roomId}` },
+  kuaishou: { name: "快手直播", roomUrl: (roomId) => `https://live.kuaishou.com/u/${roomId}` },
+};
 
 function snapshot(id: TaskId, seed: MockSeed, createdAt: number): TaskSnapshot {
   const notifyOnly = seed.notifyOnly ?? false;
   const display = deriveDisplay(seed.monitoring, seed.live, seed.record, notifyOnly);
+  const platform = seed.platform ?? "douyin";
+  const roomUrl = mockPlatforms[platform].roomUrl(seed.roomId);
   return {
     id,
-    url: `https://live.douyin.com/${seed.roomId}`,
-    platform: "douyin",
-    platformName: "抖音",
+    url: roomUrl,
+    platform,
+    platformName: mockPlatforms[platform].name,
     roomId: seed.roomId,
-    anchorId: `MS4wLjABAAAA-mock-${id}`,
+    anchorId: platform === "kuaishou" ? String(100_000_000 + id) : `MS4wLjABAAAA-mock-${id}`,
     anchorName: seed.anchorName,
-    liveUrl: `https://live.douyin.com/${seed.roomId}`,
+    liveUrl: roomUrl,
     quality: seed.quality ?? "OD",
     notifyOnly,
     note: seed.note ?? "",
@@ -143,6 +151,29 @@ function seedTasks(now: number): TaskSnapshot[] {
       monitoring: "enabled",
       quality: "HD",
       live: { state: "checking", since: now - 1_000 },
+      record: { state: "idle" },
+    },
+    {
+      anchorName: "峡谷练习生",
+      roomId: "canyon_trainee",
+      platform: "kuaishou",
+      monitoring: "enabled",
+      live: { state: "live", checkedAt: now - 40_000, title: null },
+      record: {
+        state: "recording",
+        filePath: "D:\\Records\\快手直播\\峡谷练习生\\峡谷练习生_2026-11-22_21-02-10.ts",
+        startedAt: now - 26 * minute,
+        bytesWritten: 1_634_000_000,
+        bitrateKbps: 8400,
+      },
+    },
+    {
+      anchorName: "乡村厨房",
+      roomId: "3xcountrykitchen",
+      platform: "kuaishou",
+      monitoring: "enabled",
+      quality: "HD",
+      live: { state: "offline", checkedAt: now - 3 * minute },
       record: { state: "idle" },
     },
     {

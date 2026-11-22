@@ -6,7 +6,7 @@ LuBoBao (录播宝) is licensed under the MIT License (see [LICENSE](LICENSE)). 
 
 - Project: https://github.com/ihmily/streamget (v4.0.10, commit `e57e548`)
 - License: MIT
-- Used in: `src-tauri/src/platforms/sign.rs` is a Rust port of `streamget/platforms/douyin/ab_sign.py`. The Douyin adapter in `src-tauri/src/platforms/douyin.rs` follows StreamGet's request flow, headers, default cookies and quality handling.
+- Used in: `src-tauri/src/platforms/sign.rs` is a Rust port of `streamget/platforms/douyin/ab_sign.py`. The Douyin adapter in `src-tauri/src/platforms/douyin.rs` follows StreamGet's request flow, headers, default cookies and quality handling. The Kuaishou adapter in `src-tauri/src/platforms/kuaishou.rs` is ported from `streamget/platforms/kuaishou/live_stream.py` (`KwaiLiveStream`): the cookie-only user-info check, page headers, reading `window.__INITIAL_STATE__` from the room page, and the bitrate-based quality mapping.
 
 ```
 MIT License
