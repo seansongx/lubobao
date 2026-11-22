@@ -33,8 +33,13 @@ export default defineConfig(() => ({
         }
       : undefined,
     watch: {
-      // 3. tell Vite to ignore watching `src-tauri`, and the session worktrees under `.claude/`
-      ignored: ["**/src-tauri/**", "**/.claude/**"],
+      // 3. tell Vite to ignore watching `src-tauri`, and the session worktrees under this
+      // project's own `.claude/`. Anchor it to the project root: worktrees live inside
+      // `.claude/worktrees/`, so a bare `**/.claude/**` would also hide their own sources.
+      ignored: [
+        "**/src-tauri/**",
+        `${path.resolve(import.meta.dirname, ".claude").replaceAll("\\", "/")}/**`,
+      ],
     },
   },
   // Only scan the app entry for dependencies, not HTML files in docs/, website/ or worktrees.
