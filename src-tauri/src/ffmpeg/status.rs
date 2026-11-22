@@ -15,6 +15,8 @@ pub enum FfmpegStatus {
     Checking,
     /// 本地没有可用版本，即将下载。
     NotInstalled,
+    /// 另一个录播宝进程正在安装，等它完成后再检查。
+    Waiting,
     /// 正在下载平台包。
     Downloading {
         downloaded: u64,
@@ -24,11 +26,14 @@ pub enum FfmpegStatus {
     },
     /// 正在校验和安装下载好的文件。
     Verifying,
-    /// 可用。
+    /// 可用。`outdated` 为 `true` 时用的是旧版本，`install_error` 是当前版本安装失败的原因，
+    /// 此时仍可调用重试。
     Ready {
         path: PathBuf,
         ffmpeg_version: String,
         package_version: String,
+        outdated: bool,
+        install_error: Option<String>,
     },
     /// 失败。`reason` 是给用户看的中文说明。
     Failed { reason: String, retryable: bool },
@@ -68,6 +73,8 @@ mod tests {
             path: PathBuf::from("ffmpeg"),
             ffmpeg_version: "9.0.2".into(),
             package_version: "9.0.1".into(),
+            outdated: false,
+            install_error: None,
         };
         assert_eq!(
             serde_json::to_value(&ready).unwrap(),
@@ -75,7 +82,9 @@ mod tests {
                 "state": "ready",
                 "path": "ffmpeg",
                 "ffmpegVersion": "9.0.2",
-                "packageVersion": "9.0.1"
+                "packageVersion": "9.0.1",
+                "outdated": false,
+                "installError": null
             })
         );
         let failed = FfmpegStatus::Failed {

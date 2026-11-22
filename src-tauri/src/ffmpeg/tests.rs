@@ -58,6 +58,12 @@ fn component_for(tgz: &[u8], urls: Vec<String>) -> Component {
     }
 }
 
+fn with_versions(mut component: Component, ffmpeg: &str, package: &str) -> Component {
+    component.ffmpeg_version = ffmpeg.into();
+    component.package_version = package.into();
+    component
+}
+
 #[derive(Clone, Default)]
 struct ProbeLog(Arc<AtomicUsize>);
 
@@ -128,6 +134,7 @@ impl Harness {
     fn temp_files(&self) -> Vec<String> {
         let mut names = Vec::new();
         collect_files(&self.root.join(".tmp"), &mut names);
+        names.retain(|name| !name.ends_with("lock"));
         names
     }
 }
@@ -157,6 +164,37 @@ enum Route {
     CutThenFail { body: Vec<u8>, cut: usize },
     /// 固定返回某个状态码。
     Status(u16),
+    /// 第 n 次请求按 `steps[n - 1]` 响应，超出后重复最后一步。
+    Script { body: Vec<u8>, steps: Vec<Step> },
+}
+
+#[derive(Debug, Clone, Copy)]
+enum Step {
+    /// 正常提供，支持 Range。
+    Serve,
+    /// 从请求的位置开始只发送 `n` 个字节就断开。
+    Cut(usize),
+    /// 返回某个状态码。
+    Status(u16),
+    /// 忽略 Range，返回 200 和完整文件。
+    IgnoreRange,
+    /// 返回 206，但 Content-Range 的起点比请求的位置多 1。
+    WrongStart,
+    /// 返回 200，Content-Length 比文件少 1。
+    ShortLength,
+}
+
+impl Route {
+    fn step(&self, hit: usize) -> (&[u8], Step) {
+        let pick = |steps: &[Step]| steps[(hit - 1).min(steps.len() - 1)];
+        match self {
+            Route::File(body) => (body, Step::Serve),
+            Route::CutOnce { body, cut } => (body, pick(&[Step::Cut(*cut), Step::Serve])),
+            Route::CutThenFail { body, cut } => (body, pick(&[Step::Cut(*cut), Step::Status(500)])),
+            Route::Status(code) => (&[], Step::Status(*code)),
+            Route::Script { body, steps } => (body, pick(steps)),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -246,43 +284,66 @@ async fn serve(
         *count
     };
 
-    let (body, cut) = match routes.get(&path) {
-        None => return respond_status(&mut stream, 404).await,
-        Some(Route::Status(code)) => return respond_status(&mut stream, *code).await,
-        Some(Route::File(body)) => (body, None),
-        Some(Route::CutOnce { body, cut }) => (body, (hit == 1).then_some(*cut)),
-        Some(Route::CutThenFail { body, cut }) => {
-            if hit > 1 {
-                return respond_status(&mut stream, 500).await;
-            }
-            (body, Some(*cut))
-        }
+    let Some(route) = routes.get(&path) else {
+        return respond_status(&mut stream, 404).await;
     };
-
-    let start = range
+    let (body, step) = route.step(hit);
+    let requested = range
         .as_deref()
         .and_then(|r| r.strip_prefix("bytes="))
         .and_then(|r| r.strip_suffix('-'))
         .and_then(|r| r.parse::<usize>().ok());
+    let (start, cut) = match step {
+        Step::Status(code) => return respond_status(&mut stream, code).await,
+        Step::IgnoreRange | Step::ShortLength => (None, None),
+        Step::Cut(cut) => (requested, Some(cut)),
+        Step::Serve | Step::WrongStart => (requested, None),
+    };
     let head = match start {
         Some(start) if start >= body.len() => return respond_status(&mut stream, 416).await,
-        Some(start) => format!(
-            "HTTP/1.1 206 Partial Content\r\nContent-Length: {}\r\nContent-Range: bytes {}-{}/{}\r\nConnection: close\r\n\r\n",
-            body.len() - start,
-            start,
-            body.len() - 1,
-            body.len()
-        ),
-        None => format!(
-            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nAccept-Ranges: bytes\r\nConnection: close\r\n\r\n",
-            body.len()
-        ),
+        Some(start) => {
+            let claimed = if matches!(step, Step::WrongStart) {
+                start + 1
+            } else {
+                start
+            };
+            format!(
+                "HTTP/1.1 206 Partial Content
+Content-Length: {}
+Content-Range: bytes {}-{}/{}
+Connection: close
+
+",
+                body.len() - start,
+                claimed,
+                body.len() - 1,
+                body.len()
+            )
+        }
+        None => {
+            let length = if matches!(step, Step::ShortLength) {
+                body.len() - 1
+            } else {
+                body.len()
+            };
+            format!(
+                "HTTP/1.1 200 OK
+Content-Length: {length}
+Accept-Ranges: bytes
+Connection: close
+
+"
+            )
+        }
     };
     let start = start.unwrap_or(0);
-    let end = match cut {
+    let mut end = match cut {
         Some(cut) => (start + cut).min(body.len()),
         None => body.len(),
     };
+    if matches!(step, Step::ShortLength) {
+        end -= 1;
+    }
     stream.write_all(head.as_bytes()).await?;
     stream.write_all(&body[start..end]).await?;
     stream.flush().await?;
@@ -521,9 +582,14 @@ async fn retry_after_failure_resumes_from_partial_file() {
     let server = TestServer::start(vec![
         (
             "/flaky.tgz",
-            Route::CutThenFail {
+            Route::Script {
                 body: tgz.clone(),
-                cut,
+                steps: vec![
+                    Step::Cut(cut),
+                    Step::Status(500),
+                    Step::Status(500),
+                    Step::Serve,
+                ],
             },
         ),
         ("/good.tgz", Route::File(tgz.clone())),
@@ -531,6 +597,7 @@ async fn retry_after_failure_resumes_from_partial_file() {
     .await;
     let harness = Harness::new();
 
+    // 第一次：A 源下了一半后失败。
     let first = harness.manager(component_for(&tgz, vec![server.url("/flaky.tgz")]));
     let status = first.ensure().await;
     match status {
@@ -544,20 +611,59 @@ async fn retry_after_failure_resumes_from_partial_file() {
     let part = harness.root.join(".tmp").join("ffmpeg-test-9.0.1.tgz.part");
     assert_eq!(std::fs::metadata(&part).unwrap().len(), cut as u64);
 
-    let second = harness.manager(component_for(&tgz, vec![server.url("/good.tgz")]));
+    // 重试时 A 源恢复：优先回到 A 源续传，不从 B 源重新开始。
+    let second = harness.manager(component_for(
+        &tgz,
+        vec![server.url("/good.tgz"), server.url("/flaky.tgz")],
+    ));
     let status = second.ensure().await;
 
     assert!(status.is_ready(), "{status:?}");
-    let good: Vec<Request> = server
+    let flaky: Vec<Request> = server
         .requests()
         .into_iter()
-        .filter(|r| r.path == "/good.tgz")
+        .filter(|r| r.path == "/flaky.tgz")
         .collect();
-    assert_eq!(good.len(), 1);
+    let last = flaky.last().unwrap();
     assert_eq!(
-        good[0].range.as_deref(),
+        last.range.as_deref(),
         Some(format!("bytes={cut}-").as_str())
     );
+    assert!(server.requests().iter().all(|r| r.path != "/good.tgz"));
+    assert_eq!(std::fs::read(harness.installed()).unwrap(), BINARY);
+}
+
+#[tokio::test]
+async fn partial_file_from_another_source_is_not_resumed() {
+    let tgz = sample_tgz();
+    let cut = tgz.len() / 2;
+    let server = TestServer::start(vec![
+        (
+            "/a.tgz",
+            Route::CutThenFail {
+                body: tgz.clone(),
+                cut,
+            },
+        ),
+        ("/b.tgz", Route::File(tgz.clone())),
+    ])
+    .await;
+    let harness = Harness::new();
+    let first = harness.manager(component_for(&tgz, vec![server.url("/a.tgz")]));
+    assert!(matches!(first.ensure().await, FfmpegStatus::Failed { .. }));
+
+    // 下一次只有 B 源：A 源留下的前半段不能拼上 B 源的后半段。
+    let second = harness.manager(component_for(&tgz, vec![server.url("/b.tgz")]));
+    let status = second.ensure().await;
+
+    assert!(status.is_ready(), "{status:?}");
+    let b: Vec<Request> = server
+        .requests()
+        .into_iter()
+        .filter(|r| r.path == "/b.tgz")
+        .collect();
+    assert_eq!(b.len(), 1);
+    assert_eq!(b[0].range, None);
 }
 
 #[tokio::test]
@@ -588,26 +694,38 @@ async fn reuses_installed_version_without_network() {
     let first = harness.manager(component_for(&tgz, vec![server.url("/pkg.tgz")]));
     assert!(first.ensure().await.is_ready());
     let requests_after_install = server.requests().len();
+    harness.events.lock().unwrap().clear();
 
-    // 第二次启动：下载地址无效，也不应发出任何请求。
-    let offline = harness.manager(component_for(
-        &tgz,
-        vec!["http://127.0.0.1:9/unreachable.tgz".into()],
-    ));
-    let status = offline.ensure().await;
+    // 第二次启动，下载地址仍指向测试服务器：已安装时不应发出任何请求。
+    let second = harness.manager(component_for(&tgz, vec![server.url("/pkg.tgz")]));
+    let status = second.ensure().await;
 
     assert!(status.is_ready(), "{status:?}");
     assert_eq!(server.requests().len(), requests_after_install);
+    let events = harness.events.lock().unwrap().clone();
     assert!(
-        !harness
-            .events
-            .lock()
-            .unwrap()
+        events
             .iter()
-            .skip_while(|s| !s.is_ready())
-            .any(|s| matches!(s, FfmpegStatus::Downloading { .. })),
-        "offline check must not download"
+            .all(|s| matches!(s, FfmpegStatus::Ready { .. })),
+        "{events:?}"
     );
+    assert_eq!(harness.probe.calls(), 1);
+}
+
+#[tokio::test]
+async fn retry_when_ready_stays_ready() {
+    let tgz = sample_tgz();
+    let server = TestServer::start(vec![("/pkg.tgz", Route::File(tgz.clone()))]).await;
+    let harness = Harness::new();
+    let manager = harness.manager(component_for(&tgz, vec![server.url("/pkg.tgz")]));
+    assert!(manager.ensure().await.is_ready());
+    harness.events.lock().unwrap().clear();
+
+    let status = manager.ensure().await;
+
+    assert!(status.is_ready(), "{status:?}");
+    assert!(harness.events.lock().unwrap().is_empty());
+    assert_eq!(manager.ffmpeg_path(), Some(harness.installed()));
 }
 
 #[tokio::test]
@@ -636,7 +754,11 @@ async fn verified_record_is_invalidated_when_file_changes() {
     assert!(!install::check_installed(
         &binary,
         &record,
-        &component.package
+        &component.package,
+        install::Versions {
+            ffmpeg: "9.0.2",
+            package: "9.0.1",
+        },
     ));
 
     // 再次检查会重新下载并替换被改动的文件。
@@ -713,6 +835,280 @@ async fn unsupported_platform_fails_without_retry() {
             retryable: false,
         }
     );
+}
+
+#[tokio::test]
+async fn resume_restarts_when_server_ignores_range() {
+    let tgz = sample_tgz();
+    let cut = tgz.len() / 3;
+    let server = TestServer::start(vec![(
+        "/pkg.tgz",
+        Route::Script {
+            body: tgz.clone(),
+            steps: vec![Step::Cut(cut), Step::IgnoreRange],
+        },
+    )])
+    .await;
+    let harness = Harness::new();
+    let manager = harness.manager(component_for(&tgz, vec![server.url("/pkg.tgz")]));
+
+    let status = manager.ensure().await;
+
+    assert!(status.is_ready(), "{status:?}");
+    let requests = server.requests();
+    assert_eq!(requests.len(), 2, "{requests:?}");
+    assert!(requests[1].range.is_some());
+    assert_eq!(std::fs::read(harness.installed()).unwrap(), BINARY);
+}
+
+#[tokio::test]
+async fn resume_restarts_after_416() {
+    let tgz = sample_tgz();
+    let cut = tgz.len() / 3;
+    let server = TestServer::start(vec![(
+        "/pkg.tgz",
+        Route::Script {
+            body: tgz.clone(),
+            steps: vec![Step::Cut(cut), Step::Status(416), Step::Serve],
+        },
+    )])
+    .await;
+    let harness = Harness::new();
+    let manager = harness.manager(component_for(&tgz, vec![server.url("/pkg.tgz")]));
+
+    let status = manager.ensure().await;
+
+    assert!(status.is_ready(), "{status:?}");
+    let requests = server.requests();
+    assert_eq!(requests.len(), 3, "{requests:?}");
+    assert!(requests[1].range.is_some());
+    assert_eq!(requests[2].range, None);
+}
+
+#[tokio::test]
+async fn resume_rejects_wrong_content_range_start() {
+    let tgz = sample_tgz();
+    let cut = tgz.len() / 3;
+    let server = TestServer::start(vec![(
+        "/pkg.tgz",
+        Route::Script {
+            body: tgz.clone(),
+            steps: vec![Step::Cut(cut), Step::WrongStart, Step::Serve],
+        },
+    )])
+    .await;
+    let harness = Harness::new();
+    let manager = harness.manager(component_for(&tgz, vec![server.url("/pkg.tgz")]));
+
+    let status = manager.ensure().await;
+
+    assert!(status.is_ready(), "{status:?}");
+    let requests = server.requests();
+    assert_eq!(requests.len(), 3, "{requests:?}");
+    let expected = format!("bytes={cut}-");
+    assert_eq!(requests[1].range.as_deref(), Some(expected.as_str()));
+    assert_eq!(requests[2].range.as_deref(), Some(expected.as_str()));
+    assert_eq!(std::fs::read(harness.installed()).unwrap(), BINARY);
+}
+
+#[tokio::test]
+async fn wrong_content_length_switches_source_early() {
+    let tgz = sample_tgz();
+    let server = TestServer::start(vec![
+        (
+            "/mirror.tgz",
+            Route::Script {
+                body: tgz.clone(),
+                steps: vec![Step::ShortLength],
+            },
+        ),
+        ("/backup.tgz", Route::File(tgz.clone())),
+    ])
+    .await;
+    let harness = Harness::new();
+    let manager = harness.manager(component_for(
+        &tgz,
+        vec![server.url("/mirror.tgz"), server.url("/backup.tgz")],
+    ));
+
+    let status = manager.ensure().await;
+
+    assert!(status.is_ready(), "{status:?}");
+    let paths: Vec<String> = server.requests().into_iter().map(|r| r.path).collect();
+    assert_eq!(paths, ["/mirror.tgz", "/mirror.tgz", "/backup.tgz"]);
+}
+
+#[tokio::test]
+async fn tarball_mismatch_redownloads_from_next_source() {
+    let tgz = sample_tgz();
+    let mut corrupted = tgz.clone();
+    let middle = corrupted.len() / 2;
+    corrupted[middle] ^= 0xff;
+    let server = TestServer::start(vec![
+        ("/mirror.tgz", Route::File(corrupted)),
+        ("/backup.tgz", Route::File(tgz.clone())),
+    ])
+    .await;
+    let harness = Harness::new();
+    let manager = harness.manager(component_for(
+        &tgz,
+        vec![server.url("/mirror.tgz"), server.url("/backup.tgz")],
+    ));
+
+    let status = manager.ensure().await;
+
+    assert!(status.is_ready(), "{status:?}");
+    let requests = server.requests();
+    let paths: Vec<&str> = requests.iter().map(|r| r.path.as_str()).collect();
+    assert_eq!(paths, ["/mirror.tgz", "/backup.tgz"]);
+    assert_eq!(requests[1].range, None);
+    assert_eq!(std::fs::read(harness.installed()).unwrap(), BINARY);
+    assert_eq!(harness.probe.calls(), 1);
+}
+
+#[tokio::test]
+async fn tarball_mismatch_on_every_source_fails() {
+    let tgz = sample_tgz();
+    let mut corrupted = tgz.clone();
+    corrupted[10] ^= 0xff;
+    let server = TestServer::start(vec![
+        ("/a.tgz", Route::File(corrupted.clone())),
+        ("/b.tgz", Route::File(corrupted)),
+    ])
+    .await;
+    let harness = Harness::new();
+    let manager = harness.manager(component_for(
+        &tgz,
+        vec![server.url("/a.tgz"), server.url("/b.tgz")],
+    ));
+
+    let status = manager.ensure().await;
+
+    assert!(
+        matches!(&status, FfmpegStatus::Failed { reason, .. } if reason.contains("校验不一致")),
+        "{status:?}"
+    );
+    assert_eq!(server.requests().len(), 2);
+    assert_eq!(harness.probe.calls(), 0);
+    assert!(
+        harness.temp_files().is_empty(),
+        "{:?}",
+        harness.temp_files()
+    );
+}
+
+#[tokio::test]
+async fn local_write_failure_reports_io_error_without_switching_source() {
+    let tgz = sample_tgz();
+    let server = TestServer::start(vec![("/pkg.tgz", Route::File(tgz.clone()))]).await;
+    let harness = Harness::new();
+    // 部分文件的位置被一个目录占住，写入必然失败。
+    std::fs::create_dir_all(harness.root.join(".tmp").join("ffmpeg-test-9.0.1.tgz.part")).unwrap();
+    let manager = harness.manager(component_for(
+        &tgz,
+        vec![server.url("/pkg.tgz"), server.url("/pkg.tgz")],
+    ));
+
+    let status = manager.ensure().await;
+
+    match status {
+        FfmpegStatus::Failed { reason, .. } => {
+            assert!(reason.starts_with("写入下载的临时文件失败"), "{reason}");
+            assert!(!reason.contains("无法连接"), "{reason}");
+        }
+        other => panic!("unexpected {other:?}"),
+    }
+    assert_eq!(server.requests().len(), 1);
+}
+
+#[tokio::test]
+async fn failed_install_falls_back_to_older_verified_version() {
+    let tgz = sample_tgz();
+    let server = TestServer::start(vec![("/pkg.tgz", Route::File(tgz.clone()))]).await;
+    let harness = Harness::new();
+    let old = with_versions(
+        component_for(&tgz, vec![server.url("/pkg.tgz")]),
+        "9.0.1",
+        "9.0.0",
+    );
+    assert!(harness.manager(old).ensure().await.is_ready());
+    let old_path = harness.root.join("9.0.1-9.0.0").join("ffmpeg");
+
+    let mut current = component_for(&tgz, vec![server.url("/pkg.tgz")]);
+    current.package.binary_sha256 = "b".repeat(64);
+    let manager = harness.manager(current.clone());
+    let status = manager.ensure().await;
+
+    match &status {
+        FfmpegStatus::Ready {
+            path,
+            ffmpeg_version,
+            package_version,
+            outdated,
+            install_error,
+        } => {
+            assert_eq!(path, &old_path);
+            assert_eq!(ffmpeg_version, "9.0.1");
+            assert_eq!(package_version, "9.0.0");
+            assert!(*outdated);
+            let error = install_error.as_deref().unwrap();
+            assert!(error.contains("校验不一致"), "{error}");
+        }
+        other => panic!("unexpected {other:?}"),
+    }
+    assert_eq!(manager.ffmpeg_path(), Some(old_path.clone()));
+    assert!(!harness.installed().exists());
+
+    // 旧版本被改动后不再当作可用。
+    let mut tampered = BINARY.to_vec();
+    tampered[1] ^= 0xff;
+    std::fs::write(&old_path, &tampered).unwrap();
+    let manager = harness.manager(current);
+    let status = manager.ensure().await;
+    assert!(matches!(status, FfmpegStatus::Failed { .. }), "{status:?}");
+    assert_eq!(manager.ffmpeg_path(), None);
+}
+
+#[tokio::test]
+async fn two_instances_sharing_a_data_dir_install_once() {
+    let tgz = sample_tgz();
+    let server = TestServer::start(vec![("/pkg.tgz", Route::File(tgz.clone()))]).await;
+    let harness = Harness::new();
+    // 两个管理器各有自己的进程内锁，只能靠文件锁互斥，相当于两个进程。
+    let a = harness.manager(component_for(&tgz, vec![server.url("/pkg.tgz")]));
+    let b = harness.manager(component_for(&tgz, vec![server.url("/pkg.tgz")]));
+
+    let (first, second) = tokio::join!(a.ensure(), b.ensure());
+
+    assert!(first.is_ready(), "{first:?}");
+    assert!(second.is_ready(), "{second:?}");
+    assert_eq!(server.requests().len(), 1);
+    assert_eq!(harness.probe.calls(), 1);
+    assert_eq!(std::fs::read(harness.installed()).unwrap(), BINARY);
+    assert!(
+        harness.temp_files().is_empty(),
+        "{:?}",
+        harness.temp_files()
+    );
+}
+
+#[tokio::test]
+async fn removes_partial_files_of_other_packages() {
+    let tgz = sample_tgz();
+    let server = TestServer::start(vec![("/pkg.tgz", Route::File(tgz.clone()))]).await;
+    let harness = Harness::new();
+    let temp = harness.root.join(".tmp");
+    std::fs::create_dir_all(&temp).unwrap();
+    std::fs::write(temp.join("ffmpeg-test-9.0.0.tgz.part"), b"old").unwrap();
+    std::fs::write(temp.join("ffmpeg-test-9.0.0.tgz.part.src"), b"http://old").unwrap();
+    std::fs::write(temp.join("keep.txt"), b"x").unwrap();
+    let manager = harness.manager(component_for(&tgz, vec![server.url("/pkg.tgz")]));
+
+    assert!(manager.ensure().await.is_ready());
+
+    assert!(!temp.join("ffmpeg-test-9.0.0.tgz.part").exists());
+    assert!(!temp.join("ffmpeg-test-9.0.0.tgz.part.src").exists());
+    assert!(temp.join("keep.txt").exists());
 }
 
 #[test]

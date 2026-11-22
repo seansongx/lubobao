@@ -2,6 +2,7 @@
 //!
 //! 安装位置：`<app_local_data_dir>/components/ffmpeg/<ffmpegVersion>-<packageVersion>/ffmpeg(.exe)`，
 //! 下载和解压的临时文件放在同一目录下的 `.tmp/`，保证最后一步改名在同一块磁盘上。
+//! 安装期间持有 `.tmp/lock` 的系统文件锁，同时打开多个录播宝时只有一个进程在下载和写入。
 
 pub mod download;
 mod error;
@@ -11,6 +12,7 @@ mod status;
 #[cfg(test)]
 mod tests;
 
+use std::fs::{File, OpenOptions, TryLockError};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -19,7 +21,7 @@ use tauri::{Emitter, Manager};
 
 pub use download::DownloadOptions;
 pub use error::InstallError;
-pub use install::run_version;
+pub use install::{InstalledVersion, run_version};
 pub use manifest::{Component, Manifest, PlatformPackage};
 pub use status::FfmpegStatus;
 
@@ -28,6 +30,7 @@ pub const STATUS_EVENT: &str = "ffmpeg-status";
 
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(200);
 const VERIFIED_RECORD: &str = "verified.json";
+const LOCK_FILE: &str = "lock";
 
 /// 试运行安装前的可执行文件，返回 `-version` 的第一行。测试中可替换。
 pub type Probe = Arc<dyn Fn(&Path) -> Result<String, String> + Send + Sync>;
@@ -61,6 +64,8 @@ pub struct FfmpegManager {
     probe: Probe,
     client: reqwest::Client,
     status: Mutex<FfmpegStatus>,
+    /// 当前可以使用的版本。下载新版本期间仍指向旧版本。
+    usable: Mutex<Option<InstalledVersion>>,
     install_lock: tokio::sync::Mutex<()>,
     listener: Listener,
 }
@@ -74,6 +79,7 @@ impl FfmpegManager {
             download: config.download,
             probe: config.probe,
             status: Mutex::new(FfmpegStatus::Checking),
+            usable: Mutex::new(None),
             install_lock: tokio::sync::Mutex::new(()),
             listener,
         }
@@ -86,12 +92,13 @@ impl FfmpegManager {
             .clone()
     }
 
-    /// 可用时返回 FFmpeg 的绝对路径。
+    /// 可用版本的绝对路径。重新检查或下载新版本期间仍返回旧版本。
     pub fn ffmpeg_path(&self) -> Option<PathBuf> {
-        match self.status() {
-            FfmpegStatus::Ready { path, .. } => Some(path),
-            _ => None,
-        }
+        self.usable
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .map(|version| version.path.clone())
     }
 
     pub fn install_dir(&self, component: &Component) -> PathBuf {
@@ -123,7 +130,19 @@ impl FfmpegManager {
         (self.listener)(&status);
     }
 
-    /// 检查本地版本，必要时下载安装。同一时间只运行一个；已在运行时直接返回当前状态。
+    /// 已可用时重新检查不切换到“检查中”，检查期间保持 `Ready`。
+    fn set_progress(&self, status: FfmpegStatus) {
+        if status == FfmpegStatus::Checking && self.status().is_ready() {
+            return;
+        }
+        self.set(status);
+    }
+
+    fn set_usable(&self, version: Option<InstalledVersion>) {
+        *self.usable.lock().unwrap_or_else(|e| e.into_inner()) = version;
+    }
+
+    /// 检查本地版本，必要时下载安装。同一进程内同一时间只运行一个；已在运行时直接返回当前状态。
     /// 失败后再次调用即为重试，已下载的部分会续传。
     pub async fn ensure(&self) -> FfmpegStatus {
         let Ok(_guard) = self.install_lock.try_lock() else {
@@ -135,7 +154,6 @@ impl FfmpegManager {
     }
 
     async fn run(&self) -> FfmpegStatus {
-        self.set(FfmpegStatus::Checking);
         let component = match &self.component {
             Ok(component) => component.clone(),
             Err(reason) => {
@@ -145,40 +163,128 @@ impl FfmpegManager {
                 };
             }
         };
-        let ready = FfmpegStatus::Ready {
-            path: self.binary_path(&component),
-            ffmpeg_version: component.ffmpeg_version.clone(),
-            package_version: component.package_version.clone(),
-        };
-
-        let binary = self.binary_path(&component);
-        let record = self.install_dir(&component).join(VERIFIED_RECORD);
-        let package = component.package.clone();
-        let installed = blocking(move || install::check_installed(&binary, &record, &package))
-            .await
-            .unwrap_or(false);
-        if installed {
-            return ready;
+        self.set_progress(FfmpegStatus::Checking);
+        if self.check_current(&component).await {
+            return self.ready_current(&component);
         }
 
-        self.set(FfmpegStatus::NotInstalled);
-        match self.install(&component).await {
-            Ok(()) => ready,
-            Err(err) => FfmpegStatus::Failed {
+        // 当前版本不可用：没有旧版本时如实显示未安装；有旧版本时先切到旧版本，下载期间也能用。
+        let fallback = self.find_fallback(&component).await;
+        self.set_usable(fallback.clone());
+        match &fallback {
+            None => self.set(FfmpegStatus::NotInstalled),
+            Some(old) => self.set(FfmpegStatus::Ready {
+                path: old.path.clone(),
+                ffmpeg_version: old.ffmpeg_version.clone(),
+                package_version: old.package_version.clone(),
+                outdated: true,
+                install_error: None,
+            }),
+        }
+
+        let result = match self.lock_install_dir().await {
+            Ok(_lock) => {
+                // 等锁期间另一个进程可能已经装好了。
+                if self.check_current(&component).await {
+                    return self.ready_current(&component);
+                }
+                self.install(&component).await
+            }
+            Err(err) => Err(err),
+        };
+
+        match (result, fallback) {
+            (Ok(()), _) => self.ready_current(&component),
+            (Err(err), Some(old)) => FfmpegStatus::Ready {
+                path: old.path,
+                ffmpeg_version: old.ffmpeg_version,
+                package_version: old.package_version,
+                outdated: true,
+                install_error: Some(err.to_string()),
+            },
+            (Err(err), None) => FfmpegStatus::Failed {
                 reason: err.to_string(),
                 retryable: true,
             },
         }
     }
 
-    async fn install(&self, component: &Component) -> Result<(), InstallError> {
+    fn ready_current(&self, component: &Component) -> FfmpegStatus {
+        let version = InstalledVersion {
+            path: self.binary_path(component),
+            ffmpeg_version: component.ffmpeg_version.clone(),
+            package_version: component.package_version.clone(),
+        };
+        self.set_usable(Some(version.clone()));
+        FfmpegStatus::Ready {
+            path: version.path,
+            ffmpeg_version: version.ffmpeg_version,
+            package_version: version.package_version,
+            outdated: false,
+            install_error: None,
+        }
+    }
+
+    async fn check_current(&self, component: &Component) -> bool {
+        let binary = self.binary_path(component);
+        let record = self.install_dir(component).join(VERIFIED_RECORD);
+        let component = component.clone();
+        blocking(move || {
+            install::check_installed(
+                &binary,
+                &record,
+                &component.package,
+                install::Versions {
+                    ffmpeg: &component.ffmpeg_version,
+                    package: &component.package_version,
+                },
+            )
+        })
+        .await
+        .unwrap_or(false)
+    }
+
+    async fn find_fallback(&self, component: &Component) -> Option<InstalledVersion> {
+        let root = self.root.clone();
+        let skip = component.version_dir();
+        let binary = component.package.binary_file_name();
+        blocking(move || install::find_fallback(&root, &skip, &binary, VERIFIED_RECORD))
+            .await
+            .ok()
+            .flatten()
+    }
+
+    /// 取得 `.tmp/lock` 的系统文件锁。另一个进程持有时显示“等待”，直到它释放。
+    async fn lock_install_dir(&self) -> Result<File, InstallError> {
         let temp = self.temp_dir();
         tokio::fs::create_dir_all(&temp)
             .await
             .map_err(|err| InstallError::io("创建临时目录", err))?;
-        remove_stale_stages(&temp).await;
+        let file = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(temp.join(LOCK_FILE))
+            .map_err(|err| InstallError::io("打开安装锁", err))?;
+        match file.try_lock() {
+            Ok(()) => Ok(file),
+            Err(TryLockError::WouldBlock) => {
+                self.set_progress(FfmpegStatus::Waiting);
+                blocking(move || file.lock().map(|()| file))
+                    .await?
+                    .map_err(|err| InstallError::io("等待安装锁", err))
+            }
+            Err(TryLockError::Error(err)) => Err(InstallError::io("锁定安装目录", err)),
+        }
+    }
 
+    /// 在持有文件锁时调用。
+    async fn install(&self, component: &Component) -> Result<(), InstallError> {
+        let temp = self.temp_dir();
+        remove_stale_stages(&temp).await;
         let part = self.part_path(component);
+        download::remove_foreign_parts(&temp, &part).await;
+
         let package = &component.package;
         let mut last_emit: Option<Instant> = None;
         let mut last_source = String::new();
@@ -188,32 +294,46 @@ impl FfmpegManager {
             if due || downloaded == total || source != last_source {
                 last_emit = Some(now);
                 last_source = source.to_string();
-                self.set(FfmpegStatus::Downloading {
+                self.set_progress(FfmpegStatus::Downloading {
                     downloaded,
                     total,
                     source: source.to_string(),
                 });
             }
         };
-        download::download(
-            &self.client,
-            &self.download,
-            &package.urls,
-            &part,
-            package.size,
-            &mut on_progress,
-        )
-        .await?;
 
-        self.set(FfmpegStatus::Verifying);
-        let stage = temp.join(format!("stage-{}", unique_suffix()));
-        let result = self.verify_and_install(component, &part, &stage).await;
-        let _ = tokio::fs::remove_dir_all(&stage).await;
-        // 本地读写失败时保留已下载的文件，其余情况（包括成功）删除。
-        if !matches!(result, Err(InstallError::Io { .. })) {
-            let _ = tokio::fs::remove_file(&part).await;
+        let mut order = package.urls.clone();
+        let mut switched = false;
+        loop {
+            let used = download::download(
+                &self.client,
+                &self.download,
+                &order,
+                &part,
+                package.size,
+                &mut on_progress,
+            )
+            .await?;
+
+            self.set_progress(FfmpegStatus::Verifying);
+            let stage = temp.join(format!("stage-{}", unique_suffix()));
+            let result = self.verify_and_install(component, &part, &stage).await;
+            let _ = tokio::fs::remove_dir_all(&stage).await;
+            // 本地读写失败时保留已下载的文件，其余情况（包括成功）删除。
+            if !matches!(result, Err(InstallError::Io { .. })) {
+                download::discard_part(&part).await;
+            }
+
+            // 内容不一致时换到下一个地址从头再下载一次。
+            if matches!(result, Err(InstallError::TarballMismatch)) && !switched && order.len() > 1
+            {
+                switched = true;
+                let index = order.iter().position(|url| *url == used).unwrap_or(0);
+                order.rotate_left(index + 1);
+                continue;
+            }
+            return result;
         }
-        result
     }
 
     async fn verify_and_install(
@@ -251,8 +371,19 @@ impl FfmpegManager {
             .map_err(|err| InstallError::io("安装 FFmpeg", err))?;
 
         let record = dir.join(VERIFIED_RECORD);
-        let sha256 = component.package.binary_sha256.clone();
-        blocking(move || install::write_record(&target, &record, &sha256)).await?;
+        let component = component.clone();
+        blocking(move || {
+            install::write_record(
+                &target,
+                &record,
+                &component.package.binary_sha256,
+                install::Versions {
+                    ffmpeg: &component.ffmpeg_version,
+                    package: &component.package_version,
+                },
+            )
+        })
+        .await?;
         Ok(())
     }
 }
@@ -275,7 +406,7 @@ fn unique_suffix() -> String {
     format!("{}-{nanos}", std::process::id())
 }
 
-/// 清理上次异常退出时留下的解压目录。下载的 `.part` 文件保留以便续传。
+/// 清理上次异常退出时留下的解压目录。只在持有文件锁时调用，不会删到别的进程正在用的目录。
 async fn remove_stale_stages(temp: &Path) {
     let Ok(mut entries) = tokio::fs::read_dir(temp).await else {
         return;

@@ -2,9 +2,9 @@
 
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::{Duration, Instant, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use flate2::read::GzDecoder;
 use serde::{Deserialize, Serialize};
@@ -214,12 +214,24 @@ pub fn run_version(path: &Path) -> Result<String, String> {
 }
 
 /// 已校验文件的记录。文件的大小或修改时间变了就重新计算哈希。
+/// 版本号用于在当前版本安装失败时找回旧版本。
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 struct VerifiedRecord {
     size: u64,
     modified_nanos: u64,
     sha256: String,
+    #[serde(default)]
+    ffmpeg_version: Option<String>,
+    #[serde(default)]
+    package_version: Option<String>,
+}
+
+/// 记录中的版本号。
+#[derive(Debug, Clone, Copy)]
+pub struct Versions<'a> {
+    pub ffmpeg: &'a str,
+    pub package: &'a str,
 }
 
 fn modified_nanos(meta: &fs::Metadata) -> Option<u64> {
@@ -233,8 +245,16 @@ fn read_record(cache: &Path) -> Option<VerifiedRecord> {
     serde_json::from_str(&text).ok()
 }
 
+fn unique_suffix() -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("{}-{nanos}", std::process::id())
+}
+
 /// 记录 `binary` 已通过校验。写入失败只会让下次启动重新计算哈希。
-pub fn write_record(binary: &Path, cache: &Path, sha256: &str) {
+pub fn write_record(binary: &Path, cache: &Path, sha256: &str, versions: Versions<'_>) {
     let Ok(meta) = fs::metadata(binary) else {
         return;
     };
@@ -245,17 +265,25 @@ pub fn write_record(binary: &Path, cache: &Path, sha256: &str) {
         size: meta.len(),
         modified_nanos,
         sha256: sha256.to_ascii_lowercase(),
+        ffmpeg_version: Some(versions.ffmpeg.to_string()),
+        package_version: Some(versions.package.to_string()),
     };
     if let Ok(text) = serde_json::to_string(&record) {
-        let tmp = cache.with_extension("json.tmp");
-        if fs::write(&tmp, text).is_ok() && fs::rename(&tmp, cache).is_err() {
+        // 多个进程可能同时写，临时文件名要各不相同。
+        let tmp = cache.with_extension(format!("json.{}.tmp", unique_suffix()));
+        if fs::write(&tmp, text).is_err() || fs::rename(&tmp, cache).is_err() {
             let _ = fs::remove_file(&tmp);
         }
     }
 }
 
 /// 已安装的文件大小和 `binarySha256` 都一致时返回 `true`。不联网。
-pub fn check_installed(binary: &Path, cache: &Path, package: &PlatformPackage) -> bool {
+pub fn check_installed(
+    binary: &Path,
+    cache: &Path,
+    package: &PlatformPackage,
+    versions: Versions<'_>,
+) -> bool {
     let Ok(meta) = fs::metadata(binary) else {
         return false;
     };
@@ -271,7 +299,7 @@ pub fn check_installed(binary: &Path, cache: &Path, package: &PlatformPackage) -
     }
     match sha256_file(binary) {
         Ok(hash) if same_hash(&hash, &package.binary_sha256) => {
-            write_record(binary, cache, &package.binary_sha256);
+            write_record(binary, cache, &package.binary_sha256, versions);
             true
         }
         _ => {
@@ -279,6 +307,65 @@ pub fn check_installed(binary: &Path, cache: &Path, package: &PlatformPackage) -
             false
         }
     }
+}
+
+/// 通过校验的旧版本。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InstalledVersion {
+    pub path: PathBuf,
+    pub ffmpeg_version: String,
+    pub package_version: String,
+}
+
+/// 目录名 `9.0.2-9.0.1` 按数字比较的排序键。
+fn version_key(name: &str) -> Vec<u64> {
+    name.split(['-', '.'])
+        .map(|part| part.parse().unwrap_or(0))
+        .collect()
+}
+
+/// 在 `root` 下找最新的旧版本：二进制与它的 `verified.json` 一致（重新计算哈希）。
+/// 跳过 `skip_dir`（当前版本）和以 `.` 开头的目录。
+pub fn find_fallback(
+    root: &Path,
+    skip_dir: &str,
+    binary_name: &str,
+    record_name: &str,
+) -> Option<InstalledVersion> {
+    let mut dirs: Vec<(Vec<u64>, String, PathBuf)> = fs::read_dir(root)
+        .ok()?
+        .flatten()
+        .filter(|entry| entry.path().is_dir())
+        .filter_map(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            (name != skip_dir && !name.starts_with('.'))
+                .then(|| (version_key(&name), name, entry.path()))
+        })
+        .collect();
+    dirs.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| b.1.cmp(&a.1)));
+
+    dirs.into_iter().find_map(|(_, name, dir)| {
+        let binary = dir.join(binary_name);
+        let record = read_record(&dir.join(record_name))?;
+        let meta = fs::metadata(&binary).ok()?;
+        if !meta.is_file() || meta.len() != record.size {
+            return None;
+        }
+        let hash = sha256_file(&binary).ok()?;
+        if !same_hash(&hash, &record.sha256) {
+            return None;
+        }
+        let (dir_ffmpeg, dir_package) = name.split_once('-').unwrap_or((&name, ""));
+        Some(InstalledVersion {
+            path: binary,
+            ffmpeg_version: record
+                .ffmpeg_version
+                .unwrap_or_else(|| dir_ffmpeg.to_string()),
+            package_version: record
+                .package_version
+                .unwrap_or_else(|| dir_package.to_string()),
+        })
+    })
 }
 
 #[cfg(test)]
