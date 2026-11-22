@@ -194,7 +194,7 @@ fn undefined_to_null(state: &str) -> String {
             continue;
         }
         let is_ident = |b: u8| b.is_ascii_alphanumeric() || b == b'_' || b == b'$';
-        if state[index..].starts_with(TOKEN)
+        if bytes[index..].starts_with(TOKEN.as_bytes())
             && (index == 0 || !is_ident(bytes[index - 1]))
             && bytes
                 .get(index + TOKEN.len())
@@ -319,26 +319,31 @@ fn build_variants(
         url: String,
         bitrate: Option<u64>,
     }
-    let mut parsed = entries
+    // Entries without a URL are skipped; the room fails only when none is usable.
+    let mut parsed: Vec<Entry> = entries
         .iter()
-        .map(|entry| {
+        .filter_map(|entry| {
             let url = entry
                 .get("url")
                 .and_then(Value::as_str)
-                .filter(|url| !url.is_empty())
-                .ok_or_else(|| PlatformError::Parse("流地址缺少 url".to_string()))?;
+                .filter(|url| !url.is_empty())?;
             let name = entry
                 .get("qualityType")
                 .or_else(|| entry.get("name"))
                 .and_then(Value::as_str)
                 .unwrap_or_default();
-            Ok(Entry {
+            Some(Entry {
                 name: name.to_string(),
                 url: url.to_string(),
                 bitrate: entry.get("bitrate").and_then(Value::as_u64),
             })
         })
-        .collect::<Result<Vec<_>, PlatformError>>()?;
+        .collect();
+    if parsed.is_empty() {
+        return Err(PlatformError::Parse(
+            "直播中但所有档位都缺少流地址".to_string(),
+        ));
+    }
 
     // StreamGet checks `'bitrate' in flv_url_list[0]`; requiring it on every
     // entry keeps the sort well-defined.
@@ -384,6 +389,47 @@ fn build_variants(
     Ok((variants, bitrates))
 }
 
+/// `liveroom.playList[0]` from the page state. The whole state is tried
+/// first; when an unrelated module holds something JSON cannot express
+/// (`NaN`, `new Date(…)`, a regex), only the first `playList` entry is read,
+/// and as a last resort StreamGet's `{"liveStream"…` to `,"gameInfo"` slice.
+fn play_list_entry(state: &str) -> Result<Value, PlatformError> {
+    let whole_error = match serde_json::from_str::<Value>(state) {
+        Ok(value) => {
+            return value
+                .pointer("/liveroom/playList/0")
+                .cloned()
+                .ok_or_else(|| PlatformError::Parse("快手页面数据缺少 playList".to_string()));
+        }
+        Err(error) => error,
+    };
+
+    const PLAY_LIST: &str = "\"playList\":[";
+    if let Some(start) = state.find(PLAY_LIST)
+        && let Some(Ok(entry)) =
+            serde_json::Deserializer::from_str(&state[start + PLAY_LIST.len()..])
+                .into_iter::<Value>()
+                .next()
+        && entry.is_object()
+    {
+        return Ok(entry);
+    }
+
+    const LIVE_STREAM: &str = "{\"liveStream\"";
+    const GAME_INFO: &str = ",\"gameInfo\"";
+    if let Some(start) = state.find(LIVE_STREAM)
+        && let Some(end) = state[start..].find(GAME_INFO)
+        && let Ok(entry) =
+            serde_json::from_str::<Value>(&format!("{}}}", &state[start..start + end]))
+    {
+        return Ok(entry);
+    }
+
+    Err(PlatformError::Parse(format!(
+        "快手页面数据无法解析: {whole_error}"
+    )))
+}
+
 /// Parse a room page (`live.kuaishou.com/u/{id}`).
 pub fn parse_room_page(html: &str, principal_id: &str) -> Result<RoomSnapshot, PlatformError> {
     let state = html
@@ -391,11 +437,8 @@ pub fn parse_room_page(html: &str, principal_id: &str) -> Result<RoomSnapshot, P
         .map(|start| &html[start + STATE_START.len()..])
         .and_then(|rest| rest.find(STATE_END).map(|end| &rest[..end]))
         .ok_or_else(|| classify_page_without_state(html))?;
-    let state: Value = serde_json::from_str(&undefined_to_null(state))
-        .map_err(|error| PlatformError::Parse(format!("快手页面数据无法解析: {error}")))?;
-    let entry = state
-        .pointer("/liveroom/playList/0")
-        .ok_or_else(|| PlatformError::Parse("快手页面数据缺少 playList".to_string()))?;
+    let entry = play_list_entry(&undefined_to_null(state))?;
+    let entry = &entry;
 
     if let Some(error) = entry.get("errorType").filter(|error| error.is_object()) {
         return Err(classify_error_type(error));
@@ -1048,6 +1091,82 @@ mod tests {
         assert_eq!(
             undefined_to_null(r#"{"undefinedKey":1}"#),
             r#"{"undefinedKey":1}"#
+        );
+    }
+
+    #[test]
+    fn non_ascii_outside_strings_does_not_panic() {
+        assert_eq!(
+            undefined_to_null("{\"a\":'主播',b:undefined} // 注释 undefined"),
+            "{\"a\":'主播',b:null} // 注释 null"
+        );
+        // Only ASCII identifier bytes join a token; this must not panic.
+        assert_eq!(undefined_to_null("主undefined"), "主null");
+        assert_eq!(undefined_to_null("：undefined"), "：null");
+        // A page whose state has a single-quoted string and a comment outside
+        // the room entry still parses, without panicking.
+        let html = ROOM_LIVE.replacen(
+            "{\"user\":",
+            "{\"misc\":{\"tip\":'快手主播'/* 注释 */},\"user\":",
+            1,
+        );
+        let snapshot = parse_room_page(&html, "test_anchor").unwrap();
+        assert!(snapshot.is_live);
+        assert_eq!(snapshot.anchor_name, "测试主播");
+    }
+
+    #[test]
+    fn non_json_values_in_other_modules_fall_back_to_the_room_entry() {
+        let html = ROOM_LIVE.replacen(
+            "{\"user\":",
+            "{\"misc\":{\"n\":NaN,\"i\":Infinity,\"d\":new Date(1),\"r\":/a+b/g},\"user\":",
+            1,
+        );
+        let snapshot = parse_room_page(&html, "test_anchor").unwrap();
+        assert!(snapshot.is_live);
+        assert_eq!(snapshot.variants.len(), 4);
+        assert_eq!(snapshot.anchor_id.as_deref(), Some("100000001"));
+
+        // Offline page and error page through the same fallback.
+        let offline = ROOM_OFFLINE.replacen("{\"user\":", "{\"misc\":NaN,\"user\":", 1);
+        assert!(!parse_room_page(&offline, "test_anchor").unwrap().is_live);
+        let error = ROOM_ERROR_22.replacen("{\"user\":", "{\"misc\":NaN,\"user\":", 1);
+        assert_eq!(
+            parse_room_page(&error, "a").unwrap_err().kind(),
+            "rate_limited"
+        );
+
+        // Bad values inside the entry after `gameInfo`: StreamGet's slice.
+        let entry = r#"{"liveStream":{"playUrls":{"h264":{"adaptationSet":{"representation":[
+            {"bitrate":2000,"qualityType":"HIGH","url":"https://cdn.example/hd.flv"}]}}}},
+            "author":{"id":"a","name":"主播"},"gameInfo":{},"config":{"t":NaN}}"#;
+        let snapshot = parse_room_page(&page_with_entry(entry), "a").unwrap();
+        assert!(snapshot.is_live);
+        assert_eq!(names(&snapshot), ["HIGH"]);
+    }
+
+    #[test]
+    fn representations_without_url_are_skipped() {
+        let entry = r#"{"liveStream":{"playUrls":{"h264":{"adaptationSet":{"representation":[
+            {"bitrate":8000,"qualityType":"BLUE_RAY","url":""},
+            {"bitrate":4000,"qualityType":"SUPER"},
+            {"bitrate":2000,"qualityType":"HIGH","url":"https://cdn.example/hd.flv"},
+            {"bitrate":1000,"qualityType":"STANDARD","url":"https://cdn.example/sd.flv"}]}}}},
+            "author":{"id":"a","name":"主播"}}"#;
+        let snapshot = parse_room_page(&page_with_entry(entry), "a").unwrap();
+        assert_eq!(names(&snapshot), ["HIGH", "STANDARD"]);
+        let od = build_live_info(snapshot, Quality::Od, true)
+            .selected
+            .unwrap();
+        assert_eq!(od.variant.name, "HIGH");
+
+        let none = r#"{"liveStream":{"playUrls":{"h264":{"adaptationSet":{"representation":[
+            {"bitrate":2000,"qualityType":"HIGH"}]}}}},"author":{"id":"a","name":"主播"}}"#;
+        assert_eq!(
+            parse_room_page(&page_with_entry(none), "a")
+                .unwrap_err()
+                .kind(),
+            "parse"
         );
     }
 
