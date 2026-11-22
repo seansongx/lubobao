@@ -14,21 +14,25 @@
 
 ## Project Structure
 
-LuBoBao (录播宝) is a Tauri 2 desktop app for live-stream recording. The current scaffold demonstrates the TypeScript-to-Rust connection with a greeting form. Stream monitoring and recording are planned features.
+LuBoBao (录播宝) is a Tauri 2 desktop app for live-stream recording. The frontend is currently an app shell: sidebar navigation (直播间、录像库、动态、设置), placeholder pages with empty states, and a status bar with placeholder values. Stream monitoring, recording, and native commands are planned features.
 
-- Edit the form markup in `index.html`, DOM event handlers in `src/main.ts`, and styles in `src/styles.css`. Frontend images live in `src/assets/`.
+- `index.html` only mounts `#root`. `src/main.tsx` renders `src/App.tsx`, which holds the current page in React local state; there is no router.
+- `src/components/` holds app components such as `app-sidebar.tsx` and `status-bar.tsx`. shadcn/ui components live in `src/components/ui/`; add them with `npx shadcn@latest add <name>` as pages need them (`components.json` uses the Nova style). Shared helpers such as `cn` live in `src/lib/`.
+- `src/pages/pages.ts` lists the navigation pages; page components live in `src/pages/`.
+- `src/tokens.css` defines the theme variables. `src/index.css` imports Tailwind CSS v4 and maps those variables into the Tailwind theme with `@theme inline`; light and dark follow `prefers-color-scheme`. Import with the `@/` alias, which points to `src/`.
 - Keep the public homepage and its assets in `website/`. This directory is the Nginx document root and can be deployed directly.
 - Implement native commands in `src-tauri/src/lib.rs` and register them with `tauri::generate_handler!`. The desktop entry point is `src-tauri/src/main.rs`.
-- Configure the window and installer in `src-tauri/tauri.conf.json`. Application icons live in `src-tauri/icons/`.
+- Configure the window and installer in `src-tauri/tauri.conf.json`. The window defaults to 1280×800 with a 1024×680 minimum. Application icons live in `src-tauri/icons/`.
 
 ## Development and Build Commands
 
 Run commands from the repository root. Install Node.js, npm, and stable Rust. On Windows, install WebView2 Runtime and Microsoft C++ Build Tools with the desktop C++ workload and Windows SDK.
 
 - `npm ci` installs the dependencies pinned in `package-lock.json`.
-- `npm run dev` starts Vite for browser-based layout work.
+- `npm run dev` starts Vite at `http://localhost:1420` for browser-based layout work.
 - `npm run tauri dev` starts Vite and opens the desktop app with native commands available.
-- `npm run build` checks TypeScript and builds the frontend into `dist/`.
+- `npm run build` type-checks with `tsc -b` and builds the frontend into `dist/`.
+- `cargo check --manifest-path src-tauri/Cargo.toml` checks the Rust side without building the app.
 - `npm run tauri build` builds the desktop app and writes installers to `src-tauri/target/release/bundle/`.
 
 ## Coding Style
@@ -39,7 +43,9 @@ Use two spaces in TypeScript, HTML, and CSS. Follow the existing camelCase TypeS
 
 ## Testing
 
-The project has no automated test cases, frontend test runner, or coverage threshold yet. Place new Rust unit tests beside the implementation in a `#[cfg(test)]` module, name each test after the behavior it checks, and run `cargo test --manifest-path src-tauri/Cargo.toml`. To check the desktop connection manually, launch the app, enter a name, click **Greet**, and verify the response includes that name.
+The project has no automated test cases, frontend test runner, or coverage threshold yet. Before committing, run `npm run build` and `cargo check --manifest-path src-tauri/Cargo.toml`. Place new Rust unit tests beside the implementation in a `#[cfg(test)]` module, name each test after the behavior it checks, and run `cargo test --manifest-path src-tauri/Cargo.toml`.
+
+To check the shell manually, run `npm run dev` and open `http://localhost:1420`. Switch between the four pages, check the sidebar, content area, and status bar in both light and dark system themes, and confirm that a 1024px-wide window has no horizontal scrollbar.
 
 ## Commits and Pull Requests
 
