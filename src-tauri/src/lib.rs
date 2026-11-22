@@ -1,5 +1,6 @@
 pub mod ffmpeg;
 pub mod platforms;
+pub mod recorder;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
