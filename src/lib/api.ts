@@ -5,9 +5,8 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { join, videoDir } from "@tauri-apps/api/path";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { openPath as openerOpenPath, openUrl as openerOpenUrl } from "@tauri-apps/plugin-opener";
+import { openUrl as openerOpenUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 
 import { createMockBackend } from "@/lib/mock-api";
 
@@ -250,42 +249,6 @@ export interface Settings {
   platform_cookies: Partial<Record<Platform, string>>;
 }
 
-/**
- * 后端默认值（settings.rs 的 defaults），用于“恢复默认值”。保存目录依赖系统，
- * 由 Backend.defaultSaveDir 提供。
- */
-export const settingDefaults: Omit<Settings, "live_save_path"> = {
-  loop_time_seconds: 180,
-  platform_max_concurrent_requests: 3,
-  video_format: "TS",
-  record_quality: "OD",
-  segmented_recording_enabled: true,
-  video_segment_time: 1800,
-  recording_space_threshold: 2.0,
-  default_live_source: "FLV",
-  force_https_recording: true,
-  flv_use_direct_download: false,
-  convert_to_mp4: true,
-  delete_original: false,
-  generate_time_subtitle_file: false,
-  only_notify_no_record: false,
-  filename_includes_title: false,
-  remove_emojis: false,
-  folder_name_platform: true,
-  folder_name_author: true,
-  folder_name_time: false,
-  folder_name_title: false,
-  enable_proxy: true,
-  proxy_address: "",
-  execute_custom_script: false,
-  custom_script_command: "",
-  system_notification_enabled: true,
-  stream_start_notification_enabled: false,
-  stream_end_notification_enabled: false,
-  default_platform_with_proxy:
-    "tiktok, sooplive, pandalive, winktv, flextv, popkontv, twitch, liveme, showroom, chzzk, shopee, shp, youtu, youtube, lang",
-  platform_cookies: {},
-};
 
 // ---- 后端接口 ----
 
@@ -304,18 +267,21 @@ export interface Backend {
   /** 录制引擎接入前返回 not_implemented。 */
   stopRecording(ids: TaskId[]): Promise<TaskSnapshot[]>;
   getSettings(): Promise<Settings>;
+  /** 后端的默认值（settings.rs），“恢复默认值”用。保存目录是本机的默认目录。 */
+  getSettingDefaults(): Promise<Settings>;
   /** 部分更新，返回完整设置。任一项无效时整批不保存。 */
   updateSettings(values: Partial<Settings>): Promise<Settings>;
   listActivity(query?: ActivityQuery): Promise<ActivityPage>;
 
-  /** 默认保存目录：系统「视频」目录下的「录播宝」，与 tasks/mod.rs 的 default_save_dir 一致。 */
-  defaultSaveDir(): Promise<string>;
   /** 应用版本号（tauri.conf.json 的 version）。 */
   getAppVersion(): Promise<string>;
   /** 弹出系统目录选择框，取消时返回 null。 */
   pickDirectory(options?: { title?: string; defaultPath?: string }): Promise<string | null>;
-  /** 用系统默认程序打开文件或目录。 */
-  openPath(path: string): Promise<void>;
+  /**
+   * 在系统文件管理器中显示文件或目录（打开所在文件夹并选中它）。只用 opener:default 自带的权限，
+   * 不开放 open-path：后者会让 webview 能用系统默认程序打开任意文件。
+   */
+  revealPath(path: string): Promise<void>;
   /** 用系统浏览器打开链接。 */
   openUrl(url: string): Promise<void>;
 
@@ -340,16 +306,16 @@ const tauriBackend: Backend = {
   setMonitoring: (ids, enabled) => invoke("set_monitoring", { ids, enabled }),
   stopRecording: (ids) => invoke("stop_recording", { ids }),
   getSettings: () => invoke("get_settings"),
+  getSettingDefaults: () => invoke("get_setting_defaults"),
   updateSettings: (values) => invoke("update_settings", { values }),
   listActivity: (query) => invoke("list_activity", { query: query ?? null }),
 
-  defaultSaveDir: async () => join(await videoDir(), "录播宝"),
   getAppVersion: () => getVersion(),
   async pickDirectory(options) {
     const picked = await openDialog({ directory: true, multiple: false, ...options });
     return typeof picked === "string" ? picked : null;
   },
-  openPath: (path) => openerOpenPath(path),
+  revealPath: (path) => revealItemInDir(path),
   openUrl: (url) => openerOpenUrl(url),
 
   onFfmpegStatus: (handler) => on("ffmpeg-status", handler),

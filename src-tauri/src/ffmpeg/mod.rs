@@ -177,12 +177,15 @@ impl FfmpegManager {
         };
         if force {
             self.set(FfmpegStatus::Verifying);
-            self.forget_verified(&component).await;
         } else {
             self.set_progress(FfmpegStatus::Checking);
         }
-        if self.check_current(&component).await {
-            return self.ready_current(&component);
+        match self.check_current(&component, force).await {
+            Ok(true) => return self.ready_current(&component),
+            // 强制校验时读不出文件（被占用、权限等）不能说明文件坏了，保留当前版本可用，
+            // 不因此掉到旧版本或重新下载。普通检查沿用原来的处理：当作不可用。
+            Err(_) if force => return self.ready_current(&component),
+            Ok(false) | Err(_) => {}
         }
 
         // 当前版本不可用：没有旧版本时如实显示未安装；有旧版本时先切到旧版本，下载期间也能用。
@@ -202,7 +205,7 @@ impl FfmpegManager {
         let result = match self.lock_install_dir().await {
             Ok(_lock) => {
                 // 等锁期间另一个进程可能已经装好了。
-                if self.check_current(&component).await {
+                if self.check_current(&component, false).await == Ok(true) {
                     return self.ready_current(&component);
                 }
                 self.install(&component).await
@@ -242,13 +245,8 @@ impl FfmpegManager {
         }
     }
 
-    /// 删除当前版本的校验记录，下次检查时重新计算哈希。
-    async fn forget_verified(&self, component: &Component) {
-        let record = self.install_dir(component).join(VERIFIED_RECORD);
-        let _ = tokio::fs::remove_file(record).await;
-    }
-
-    async fn check_current(&self, component: &Component) -> bool {
+    /// 校验当前版本。`force` 时忽略校验记录重新计算哈希；文件读不出来时返回 `Err`。
+    async fn check_current(&self, component: &Component, force: bool) -> Result<bool, String> {
         let binary = self.binary_path(component);
         let record = self.install_dir(component).join(VERIFIED_RECORD);
         let component = component.clone();
@@ -261,10 +259,11 @@ impl FfmpegManager {
                     ffmpeg: &component.ffmpeg_version,
                     package: &component.package_version,
                 },
+                force,
             )
         })
         .await
-        .unwrap_or(false)
+        .unwrap_or(Ok(false))
     }
 
     async fn find_fallback(&self, component: &Component) -> Option<InstalledVersion> {

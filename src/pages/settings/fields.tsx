@@ -207,7 +207,11 @@ function useDraft({ value, validate, onCommit, onError }: DraftInputOptions) {
     const message = validate?.(draft) ?? null;
     onError(message);
     if (message !== null) return;
-    if (draft !== committed.current) onCommit(draft);
+    if (draft === committed.current) return;
+    // 记下已提交的值：Enter 之后紧接着失焦不会把同一个值再保存一次。保存成功时外部值随之更新；
+    // 保存失败时字段下有错误，再次修改输入后会重新提交。
+    committed.current = draft;
+    onCommit(draft);
   };
 
   return {

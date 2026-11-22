@@ -1,4 +1,5 @@
 // 浏览器假数据（npm run dev，不在 Tauri 里时使用），方便调界面。
+// 地址参数 ?saveDelay=1500 放慢设置保存（毫秒），用来复现连续修改的先后顺序。
 // 任务覆盖七种显示状态；FFmpeg 状态可用地址参数切换：
 //   ?ffmpeg=checking | notInstalled | waiting | downloading | verifying | ready | updating | outdated | failed | fatal
 // 缺省时模拟一次下载：下载中 → 校验 → 可用。控制台可调用 window.__lubobaoMock.setFfmpeg("failed")。
@@ -23,7 +24,6 @@ import type {
   TaskMutation,
   TaskSnapshot,
 } from "@/lib/api";
-import { settingDefaults } from "@/lib/api";
 
 const TOTAL_BYTES = 39_636_992;
 
@@ -247,9 +247,41 @@ function seedTasks(now: number): TaskSnapshot[] {
 
 const defaultSaveDir = "C:\\Users\\me\\Videos\\录播宝";
 
-// api.ts 与本文件互相导入，settingDefaults 只能在调用时读取，不能在模块顶层展开。
+/** 与 src-tauri/src/tasks/settings.rs 的 defaults 一致，只用于假数据。 */
 function defaultSettings(): Settings {
-  return { live_save_path: defaultSaveDir, ...settingDefaults };
+  return {
+    live_save_path: defaultSaveDir,
+    loop_time_seconds: 180,
+    platform_max_concurrent_requests: 3,
+    video_format: "TS",
+    record_quality: "OD",
+    segmented_recording_enabled: true,
+    video_segment_time: 1800,
+    recording_space_threshold: 2.0,
+    default_live_source: "FLV",
+    force_https_recording: true,
+    flv_use_direct_download: false,
+    convert_to_mp4: true,
+    delete_original: false,
+    generate_time_subtitle_file: false,
+    only_notify_no_record: false,
+    filename_includes_title: false,
+    remove_emojis: false,
+    folder_name_platform: true,
+    folder_name_author: true,
+    folder_name_time: false,
+    folder_name_title: false,
+    enable_proxy: true,
+    proxy_address: "",
+    execute_custom_script: false,
+    custom_script_command: "",
+    system_notification_enabled: true,
+    stream_start_notification_enabled: false,
+    stream_end_notification_enabled: false,
+    default_platform_with_proxy:
+      "tiktok, sooplive, pandalive, winktv, flextv, popkontv, twitch, liveme, showroom, chzzk, shopee, shp, youtu, youtube, lang",
+    platform_cookies: {},
+  };
 }
 
 /** 与 src-tauri/src/tasks/settings.rs 的 ENUM_SETTINGS 一致。 */
@@ -279,6 +311,10 @@ function validateSetting(key: string, value: unknown): string | null {
       !Array.isArray(value) &&
       Object.values(value).every((item) => typeof item === "string");
     if (!valid) return `设置项 ${key} 的值无效：${shown}`;
+    // Cookie 里除 tab 以外的控制字符都拒绝，与后端一致。
+    if (Object.values(value).some((item) => /[\u0000-\u0008\u000A-\u001F\u007F]/.test(item as string))) {
+      return `设置项 ${key} 包含控制字符`;
+    }
   } else if (typeof value !== typeof fallback) {
     return `设置项 ${key} 的值无效：${shown}`;
   }
@@ -316,6 +352,7 @@ function delay(ms: number) {
 }
 
 export function createMockBackend(): Backend {
+  const saveDelay = Number(new URLSearchParams(window.location.search).get("saveDelay") ?? 150) || 150;
   const now = Date.now();
   let tasks = seedTasks(now);
   let nextId = tasks.length + 1;
@@ -508,8 +545,10 @@ export function createMockBackend(): Backend {
     stopRecording: () => reject("not_implemented", "录制功能尚未接入"),
 
     getSettings: () => Promise.resolve(settings),
+    getSettingDefaults: () => Promise.resolve(defaultSettings()),
     async updateSettings(values) {
-      await delay(150);
+      // ?saveDelay=毫秒 可以放慢保存，用来复现连续修改时的先后顺序问题。
+      await delay(saveDelay);
       for (const [key, value] of Object.entries(values)) {
         const message = validateSetting(key, value);
         if (message) return reject("invalid_input", message);
@@ -533,15 +572,14 @@ export function createMockBackend(): Backend {
       };
     },
 
-    defaultSaveDir: () => Promise.resolve(defaultSaveDir),
     getAppVersion: () => Promise.resolve("0.1.0"),
     pickDirectory: async (options) => {
       // 浏览器里没有系统目录选择框，用输入框代替。
       const picked = window.prompt(options?.title ?? "选择文件夹", options?.defaultPath ?? "");
       return picked && picked.trim() ? picked.trim() : null;
     },
-    openPath: async (path) => {
-      console.info("[mock] openPath", path);
+    revealPath: async (path) => {
+      console.info("[mock] revealPath", path);
     },
     openUrl: async (url) => {
       window.open(url, "_blank", "noopener");

@@ -751,15 +751,19 @@ async fn verified_record_is_invalidated_when_file_changes() {
     let component = component_for(&tgz, vec![server.url("/pkg.tgz")]);
     let binary = harness.installed();
     let record = harness.root.join("9.0.2-9.0.1").join("verified.json");
-    assert!(!install::check_installed(
-        &binary,
-        &record,
-        &component.package,
-        install::Versions {
-            ffmpeg: "9.0.2",
-            package: "9.0.1",
-        },
-    ));
+    assert_eq!(
+        install::check_installed(
+            &binary,
+            &record,
+            &component.package,
+            install::Versions {
+                ffmpeg: "9.0.2",
+                package: "9.0.1",
+            },
+            false,
+        ),
+        Ok(false)
+    );
 
     // 再次检查会重新下载并替换被改动的文件。
     let status = manager.ensure().await;
@@ -1148,6 +1152,29 @@ fn tamper_keeping_metadata(path: &Path) {
     file.set_modified(modified).unwrap();
 }
 
+/// 当前版本的校验记录。
+fn record_path(harness: &Harness) -> PathBuf {
+    harness.root.join("9.0.2-9.0.1").join("verified.json")
+}
+
+/// 去掉校验记录里的版本号。大小、修改时间和哈希不变，普通检查仍然命中缓存；
+/// 只有重新计算哈希后才会把整条记录（连同版本号）重新写回。
+fn strip_record_versions(harness: &Harness) {
+    let path = record_path(harness);
+    let mut record: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let object = record.as_object_mut().unwrap();
+    assert!(object.remove("ffmpegVersion").is_some());
+    object.remove("packageVersion");
+    std::fs::write(&path, record.to_string()).unwrap();
+}
+
+fn record_has_versions(harness: &Harness) -> bool {
+    let record: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(record_path(harness)).unwrap()).unwrap();
+    record.get("ffmpegVersion").is_some()
+}
+
 #[tokio::test]
 async fn reverify_shows_verifying_then_ready_without_network() {
     let tgz = sample_tgz();
@@ -1156,11 +1183,18 @@ async fn reverify_shows_verifying_then_ready_without_network() {
     let manager = harness.manager(component_for(&tgz, vec![server.url("/pkg.tgz")]));
     assert!(manager.ensure().await.is_ready());
     let requests_after_install = server.requests().len();
+    strip_record_versions(&harness);
+
+    // 对照：普通检查信任缓存，不重新计算哈希，记录保持原样。
+    assert!(manager.ensure().await.is_ready());
+    assert!(!record_has_versions(&harness));
     harness.events.lock().unwrap().clear();
 
     let status = manager.reverify().await;
 
     assert!(status.is_ready(), "{status:?}");
+    // 记录被重新写入，说明这次没有走缓存，而是重新计算了哈希。
+    assert!(record_has_versions(&harness));
     let events = harness.events.lock().unwrap().clone();
     assert!(
         matches!(
@@ -1177,13 +1211,88 @@ async fn reverify_shows_verifying_then_ready_without_network() {
     );
     assert_eq!(server.requests().len(), requests_after_install);
     assert_eq!(manager.ffmpeg_path(), Some(harness.installed()));
-    assert!(
-        harness
-            .root
-            .join("9.0.2-9.0.1")
-            .join("verified.json")
-            .exists()
+}
+
+/// 以独占方式打开文件（Windows）或去掉读权限（Unix），让哈希计算读不出来。
+/// 返回值在作用域内保持占用；以 root 运行等读权限无效的环境返回 `None`。
+fn make_unreadable(path: &Path) -> Option<Box<dyn std::any::Any>> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(path)
+            .unwrap();
+        Some(Box::new(file))
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o000)).unwrap();
+        if std::fs::File::open(path).is_ok() {
+            return None;
+        }
+        Some(Box::new(()))
+    }
+}
+
+#[tokio::test]
+async fn reverify_keeps_current_version_when_file_cannot_be_read() {
+    let tgz = sample_tgz();
+    let server = TestServer::start(vec![("/pkg.tgz", Route::File(tgz.clone()))]).await;
+    let harness = Harness::new();
+    // 旧版本也在：读不出当前版本时不应该退回它。
+    let old = with_versions(
+        component_for(&tgz, vec![server.url("/pkg.tgz")]),
+        "9.0.1",
+        "9.0.0",
     );
+    assert!(harness.manager(old).ensure().await.is_ready());
+    let manager = harness.manager(component_for(&tgz, vec![server.url("/pkg.tgz")]));
+    assert!(manager.ensure().await.is_ready());
+    let requests_before = server.requests().len();
+    let Some(guard) = make_unreadable(&harness.installed()) else {
+        return;
+    };
+    assert!(std::fs::read(harness.installed()).is_err());
+    harness.events.lock().unwrap().clear();
+
+    let status = manager.reverify().await;
+    drop(guard);
+
+    // 一直停在当前版本：没有切到旧版本，也没有“未安装”或下载。
+    let events = harness.events.lock().unwrap().clone();
+    assert!(
+        matches!(
+            events.as_slice(),
+            [
+                FfmpegStatus::Verifying,
+                FfmpegStatus::Ready {
+                    outdated: false,
+                    ..
+                }
+            ]
+        ),
+        "{events:?}"
+    );
+
+    match &status {
+        FfmpegStatus::Ready {
+            path,
+            outdated,
+            install_error,
+            ..
+        } => {
+            assert_eq!(path, &harness.installed());
+            assert!(!*outdated);
+            assert_eq!(install_error, &None);
+        }
+        other => panic!("unexpected {other:?}"),
+    }
+    assert_eq!(manager.ffmpeg_path(), Some(harness.installed()));
+    assert_eq!(server.requests().len(), requests_before);
+    assert!(record_path(&harness).exists());
 }
 
 #[tokio::test]
@@ -1274,4 +1383,17 @@ async fn reverify_while_install_runs_returns_current_status() {
     assert!(installed.is_ready(), "{installed:?}");
     assert_eq!(reverified, FfmpegStatus::Checking);
     assert_eq!(harness.probe.calls(), 1);
+    // 只下载、只校验了一次：安装途中出现一次“校验中”，之后重新校验没有再跑一轮
+    // （再跑会在“可用”之后再出现一次“校验中”）。
+    assert_eq!(server.requests().len(), 1);
+    let events = harness.events.lock().unwrap().clone();
+    let verifying = events
+        .iter()
+        .filter(|status| **status == FfmpegStatus::Verifying)
+        .count();
+    assert_eq!(verifying, 1, "{events:?}");
+    assert!(
+        events.last().is_some_and(FfmpegStatus::is_ready),
+        "{events:?}"
+    );
 }

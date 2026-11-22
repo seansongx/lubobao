@@ -1,6 +1,6 @@
 // 设置页：左侧分组导航，右侧显示当前分组。修改后自动保存。
 
-import { useState } from "react";
+import { Component, useState, type ErrorInfo, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -27,6 +27,37 @@ const groups: { id: GroupId; label: string }[] = [
   { id: "about", label: "关于" },
 ];
 
+interface BoundaryProps {
+  children: ReactNode;
+  onRetry: () => void;
+}
+
+/** 分组渲染出错时只影响设置页的内容区，不让整个应用白屏。 */
+class SettingsErrorBoundary extends Component<BoundaryProps, { error: Error | null }> {
+  state: { error: Error | null } = { error: null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error("设置页渲染失败", error, info.componentStack);
+  }
+
+  render() {
+    if (!this.state.error) return this.props.children;
+    return (
+      <div role="alert" className="flex max-w-[760px] items-center gap-3 rounded-lg border bg-card px-4 py-3">
+        <span className="flex-1 text-destructive">这一组设置显示失败：{this.state.error.message}</span>
+        {/* 重新读取成功后父组件换 key，错误边界随之重置。 */}
+        <Button type="button" variant="outline" onClick={this.props.onRetry}>
+          重新读取
+        </Button>
+      </div>
+    );
+  }
+}
+
 type SettingsGroupId = Exclude<GroupId, "components" | "about">;
 
 function SettingsGroup({ group, ctx }: { group: SettingsGroupId; ctx: SettingsController }) {
@@ -46,7 +77,7 @@ function SettingsGroup({ group, ctx }: { group: SettingsGroupId; ctx: SettingsCo
 
 export function SettingsPage() {
   const [group, setGroup] = useState<GroupId>("record");
-  const { controller, loadError, reload } = useSettings();
+  const { controller, loadError, reload, loadId } = useSettings();
 
   let body;
   if (group === "components") {
@@ -91,7 +122,12 @@ export function SettingsPage() {
             </button>
           ))}
         </nav>
-        <div className="min-w-0 flex-1 overflow-y-auto py-3.5 pr-5 pl-2.5">{body}</div>
+        <div className="min-w-0 flex-1 overflow-y-auto py-3.5 pr-5 pl-2.5">
+          {/* 切换分组或重新读取设置后重置错误状态。 */}
+          <SettingsErrorBoundary key={`${group}:${loadId}`} onRetry={reload}>
+            {body}
+          </SettingsErrorBoundary>
+        </div>
       </div>
     </section>
   );

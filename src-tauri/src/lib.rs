@@ -35,6 +35,7 @@ pub fn run() {
             tasks::commands::set_monitoring,
             tasks::commands::stop_recording,
             tasks::commands::get_settings,
+            tasks::commands::get_setting_defaults,
             tasks::commands::update_settings,
             tasks::commands::list_activity
         ])

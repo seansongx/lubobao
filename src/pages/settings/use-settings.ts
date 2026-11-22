@@ -1,22 +1,37 @@
 // 设置页的数据：读取一次快照，修改后立即保存（自动保存），后端拒绝时把原因挂到对应字段。
+//
+// 保存按顺序排队执行。要保存的值可以是一个更新函数，轮到它执行时才用“最新已保存的设置”
+// 计算，这样连续的修改（例如先改平台列表再点切换、两个平台的 Cookie 先后提交）不会用渲染
+// 当时的旧快照互相覆盖。
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
-import { api, isCommandError, settingDefaults, type Settings } from "@/lib/api";
+import { api, isCommandError, type Settings } from "@/lib/api";
 
 export type SettingKey = keyof Settings;
 export type FieldErrors = Partial<Record<SettingKey, string>>;
 
+/** 要保存的部分设置，或根据最新设置计算它的函数。返回 null 表示不用保存。 */
+export type SettingsUpdate = Partial<Settings> | ((latest: Settings) => Partial<Settings> | null);
+
+export interface SaveOptions {
+  /** 成功后的提示，默认“已保存”。 */
+  notice?: string;
+  /** 为 false 时校验错误不挂到字段上，只通过返回值交给调用方（例如按平台显示的 Cookie）。 */
+  attachErrors?: boolean;
+}
+
+export type SaveResult = { ok: true } | { ok: false; message: string };
+
 export interface SettingsController {
   settings: Settings;
   errors: FieldErrors;
-  /** 保存若干项。成功时返回 true 并给出轻量提示；失败时把原因挂到字段上。 */
-  save(values: Partial<Settings>, notice?: string): Promise<boolean>;
+  save(update: SettingsUpdate, options?: SaveOptions): Promise<SaveResult>;
   /** 前端校验的错误，传 null 清除。 */
   setError(key: SettingKey, message: string | null): void;
   /** 把若干项恢复为后端默认值。 */
-  reset(keys: readonly SettingKey[]): Promise<boolean>;
+  reset(keys: readonly SettingKey[]): Promise<SaveResult>;
   /** 每次恢复默认值后加一，用作分组的 key，丢弃输入框里未保存的草稿。 */
   revision: number;
 }
@@ -53,20 +68,53 @@ function fieldOf(message: string, keys: SettingKey[]): SettingKey | null {
   return keys.find((key) => new RegExp(`(^|[^a-z_])${key}([^a-z_]|$)`).test(message)) ?? null;
 }
 
+function errorMessage(error: unknown) {
+  return isCommandError(error) ? error.message : String(error);
+}
+
+/**
+ * 后端少了某个键（例如旧版本数据、或后端还没加上的新键）时用默认值补上，
+ * 页面读取任何键都不会拿到 undefined。
+ */
+function withDefaults(loaded: Settings, defaults: Settings | null): Settings {
+  return defaults ? { ...defaults, ...loaded } : loaded;
+}
+
 export function useSettings() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [errors, setErrors] = useState<FieldErrors>({});
   const [revision, setRevision] = useState(0);
-  // 保存按顺序进行，后发的保存不会被先发的结果覆盖。
+  // 每次从后端重新读取成功后加一。设置页的错误边界以它为 key，重新读取后才重置。
+  const [loadId, setLoadId] = useState(0);
+  // 排队中的保存读取这里的最新值，而不是渲染时的快照。
+  const latest = useRef<Settings | null>(null);
+  const defaults = useRef<Settings | null>(null);
   const queue = useRef<Promise<unknown>>(Promise.resolve());
+
+  const apply = useCallback((next: Settings) => {
+    const merged = withDefaults(next, defaults.current);
+    latest.current = merged;
+    setSettings(merged);
+  }, []);
 
   const load = useCallback(() => {
     setLoadError(null);
-    api.getSettings().then(setSettings, (error: unknown) => {
-      setLoadError(isCommandError(error) ? error.message : String(error));
-    });
-  }, []);
+    // 默认值读不到不影响显示，只是“恢复默认值”时再试一次。
+    const defaultsLoaded = api.getSettingDefaults().then(
+      (value) => {
+        defaults.current = value;
+      },
+      () => undefined,
+    );
+    Promise.all([api.getSettings(), defaultsLoaded]).then(
+      ([loaded]) => {
+        apply(loaded);
+        setLoadId((current) => current + 1);
+      },
+      (error: unknown) => setLoadError(errorMessage(error)),
+    );
+  }, [apply]);
 
   useEffect(load, [load]);
 
@@ -80,54 +128,70 @@ export function useSettings() {
     });
   }, []);
 
-  const save = useCallback((values: Partial<Settings>, notice = "已保存") => {
-    const keys = Object.keys(values) as SettingKey[];
-    const run = async () => {
-      try {
-        const next = await api.updateSettings(values);
-        setSettings(next);
-        setErrors((current) => {
-          const rest = { ...current };
-          for (const key of keys) delete rest[key];
-          return rest;
-        });
-        toast.success(notice, { id: SAVED_TOAST, duration: 1600 });
-        return true;
-      } catch (error) {
-        const message = isCommandError(error) ? error.message : String(error);
-        const validation = isCommandError(error) && (error.kind === "config" || error.kind === "invalid_input");
-        const key = validation ? (fieldOf(message, keys) ?? keys[0]) : null;
-        if (key) {
-          const label = fieldLabels[key];
-          const shown = label ? message.replace(key, `「${label}」`) : message;
-          setErrors((current) => ({ ...current, [key]: shown }));
-        } else {
-          toast.error(`保存失败：${message}`, { id: SAVED_TOAST });
+  const save = useCallback(
+    (update: SettingsUpdate, options: SaveOptions = {}): Promise<SaveResult> => {
+      const { notice = "已保存", attachErrors = true } = options;
+      const run = async (): Promise<SaveResult> => {
+        const base = latest.current;
+        if (!base) return { ok: false, message: "设置尚未读取" };
+        const values = typeof update === "function" ? update(base) : update;
+        if (!values || Object.keys(values).length === 0) return { ok: true };
+        const keys = Object.keys(values) as SettingKey[];
+        try {
+          apply(await api.updateSettings(values));
+          if (attachErrors) {
+            setErrors((current) => {
+              const rest = { ...current };
+              for (const key of keys) delete rest[key];
+              return rest;
+            });
+          }
+          toast.success(notice, { id: SAVED_TOAST, duration: 1600 });
+          return { ok: true };
+        } catch (error) {
+          const message = errorMessage(error);
+          const validation = isCommandError(error) && (error.kind === "config" || error.kind === "invalid_input");
+          const key = validation ? (fieldOf(message, keys) ?? keys[0]) : null;
+          const label = key ? fieldLabels[key] : undefined;
+          const shown = key && label ? message.replace(key, `「${label}」`) : message;
+          if (key && attachErrors) {
+            setErrors((current) => ({ ...current, [key]: shown }));
+          } else if (!key) {
+            toast.error(`保存失败：${message}`, { id: SAVED_TOAST });
+          }
+          return { ok: false, message: shown };
         }
-        return false;
-      }
-    };
-    const result = queue.current.then(run, run);
-    queue.current = result;
-    return result;
-  }, []);
+      };
+      const result = queue.current.then(run, run);
+      queue.current = result;
+      return result;
+    },
+    [apply],
+  );
 
   const reset = useCallback(
-    async (keys: readonly SettingKey[]) => {
-      const values: Partial<Settings> = {};
-      for (const key of keys) {
-        if (key === "live_save_path") values.live_save_path = await api.defaultSaveDir();
-        else Object.assign(values, { [key]: settingDefaults[key] });
+    async (keys: readonly SettingKey[]): Promise<SaveResult> => {
+      if (!defaults.current) {
+        try {
+          defaults.current = await api.getSettingDefaults();
+        } catch (error) {
+          const message = `读取默认值失败：${errorMessage(error)}`;
+          toast.error(message, { id: SAVED_TOAST });
+          return { ok: false, message };
+        }
       }
+      const source = defaults.current;
+      const values: Partial<Settings> = {};
+      for (const key of keys) Object.assign(values, { [key]: source[key] });
       // 恢复的键先清掉前端校验错误，成功后重新挂载分组，输入框回到保存的值。
       for (const key of keys) setError(key, null);
-      const saved = await save(values, "已恢复默认值");
-      if (saved) setRevision((current) => current + 1);
-      return saved;
+      const result = await save(values, { notice: "已恢复默认值" });
+      if (result.ok) setRevision((current) => current + 1);
+      return result;
     },
     [save, setError],
   );
 
   const controller: SettingsController | null = settings ? { settings, errors, save, setError, reset, revision } : null;
-  return { controller, loadError, reload: load };
+  return { controller, loadError, reload: load, loadId };
 }

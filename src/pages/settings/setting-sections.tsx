@@ -1,6 +1,6 @@
 // 有设置项的分组：录制、检测、网络、平台账号、通知。键名与默认值见 src-tauri/src/tasks/settings.rs。
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Eye, EyeOff, FolderOpen, FolderSearch } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -88,12 +88,12 @@ export function RecordSection({ ctx }: SectionProps) {
       setPickError(`无法打开目录选择框：${String(error)}`);
     }
   };
-  const open = async () => {
+  const reveal = async () => {
     setPickError(null);
     try {
-      await api.openPath(settings.live_save_path);
+      await api.revealPath(settings.live_save_path);
     } catch (error) {
-      setPickError(`无法打开目录，可能还没有创建：${String(error)}`);
+      setPickError(`无法显示目录，可能还没有创建：${String(error)}`);
     }
   };
 
@@ -114,9 +114,9 @@ export function RecordSection({ ctx }: SectionProps) {
           <FolderSearch aria-hidden />
           选择文件夹
         </Button>
-        <Button type="button" variant="outline" onClick={() => void open()}>
+        <Button type="button" variant="outline" onClick={() => void reveal()}>
           <FolderOpen aria-hidden />
-          打开
+          在文件夹中显示
         </Button>
       </FieldRow>
       <SelectField
@@ -244,17 +244,26 @@ export function CheckSection({ ctx }: SectionProps) {
   );
 }
 
-const PROXY_PATTERN = /^((https?|socks5h?|socks4a?):\/\/)?[^\s/:@]+(:[^\s/@]*@[^\s/:@]+)?(:\d{1,5})?\/?$/i;
+const PROXY_SCHEMES = new Set(["http:", "https:", "socks5:", "socks5h:", "socks4:", "socks4a:"]);
 
+/** 用 URL 解析校验代理地址，没写协议时按 http:// 处理。允许账号密码和 IPv6。 */
 function validateProxy(value: string) {
   if (value === "") return null;
   if (/\s/.test(value)) return "代理地址不能包含空格";
-  if (!PROXY_PATTERN.test(value)) return "格式应为 http://127.0.0.1:7890 或 socks5://127.0.0.1:1080";
+  const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(value) ? value : `http://${value}`;
+  let url: URL;
+  try {
+    url = new URL(withScheme);
+  } catch {
+    return "格式应为 http://127.0.0.1:7890 或 socks5://127.0.0.1:1080";
+  }
+  if (!PROXY_SCHEMES.has(url.protocol)) return "只支持 http、https、socks4、socks5 代理";
+  if (!url.hostname) return "缺少主机名";
   return null;
 }
 
-function splitPlatforms(value: string) {
-  return value
+function splitPlatforms(value: string | undefined) {
+  return (value ?? "")
     .split(/[,，]/)
     .map((item) => item.trim())
     .filter(Boolean);
@@ -274,11 +283,16 @@ export function NetworkSection({ ctx }: SectionProps) {
   const { settings } = ctx;
   const address = bind(ctx, "proxy_address");
   const platforms = bind(ctx, "default_platform_with_proxy");
-  const listed = splitPlatforms(settings.default_platform_with_proxy);
+  const platformList = settings.default_platform_with_proxy ?? "";
+  const listed = splitPlatforms(platformList);
 
+  // 用排队执行时的最新列表计算，前面还没保存完的修改（例如文本框失焦）不会被覆盖。
   const toggle = (key: Platform) => {
-    const next = listed.includes(key) ? listed.filter((item) => item !== key) : [...listed, key];
-    platforms.save(next.join(", "));
+    void ctx.save((latest) => {
+      const current = splitPlatforms(latest.default_platform_with_proxy);
+      const next = current.includes(key) ? current.filter((item) => item !== key) : [...current, key];
+      return { default_platform_with_proxy: next.join(", ") };
+    });
   };
 
   return (
@@ -297,12 +311,12 @@ export function NetworkSection({ ctx }: SectionProps) {
       <TextField
         label="代理地址"
         description={
-          /^socks/i.test(settings.proxy_address)
+          /^socks/i.test(settings.proxy_address ?? "")
             ? "当前是 SOCKS 代理：只用于检测开播，录制时不走代理"
             : "例如 http://127.0.0.1:7890"
         }
         placeholder="http://127.0.0.1:7890"
-        value={settings.proxy_address}
+        value={settings.proxy_address ?? ""}
         disabled={!settings.enable_proxy}
         error={address.error}
         validate={validateProxy}
@@ -312,7 +326,7 @@ export function NetworkSection({ ctx }: SectionProps) {
       <TextField
         label="走代理的平台"
         description="用逗号分隔的平台标识。抖音、快手是国内平台，通常不需要代理。"
-        value={settings.default_platform_with_proxy}
+        value={platformList}
         disabled={!settings.enable_proxy}
         error={platforms.error}
         stacked
@@ -356,19 +370,30 @@ function CookieField({
   platform: { key: Platform; name: string };
   value: string;
   error?: string;
-  onCommit: (value: string) => void;
+  /** 值有变化时传新值；没变化时传 null，用于清除之前的错误。 */
+  onCommit: (value: string | null) => void;
 }) {
   const [visible, setVisible] = useState(false);
   const [draft, setDraft] = useState(value);
   const [synced, setSynced] = useState(value);
+  // 最近一次提交的值，避免 Enter 后紧接着失焦把同一个值再提交一次。
+  const submitted = useRef(value);
   if (value !== synced) {
     setSynced(value);
     setDraft(value);
   }
+  useEffect(() => {
+    submitted.current = value;
+  }, [value]);
   const id = `cookie-${platform.key}`;
   const commit = () => {
     const next = draft.trim();
-    if (next !== value) onCommit(next);
+    if (next === submitted.current) {
+      if (next === value) onCommit(null);
+      return;
+    }
+    submitted.current = next;
+    onCommit(next);
   };
   return (
     <FieldRow
@@ -397,6 +422,8 @@ function CookieField({
             commit();
           } else if (event.key === "Escape") {
             setDraft(value);
+            submitted.current = value;
+            onCommit(null);
           }
         }}
       />
@@ -414,27 +441,59 @@ function CookieField({
   );
 }
 
+/** 与后端一致：除 tab 以外的控制字符（含换行）都不允许出现在 Cookie 里。 */
+const COOKIE_CONTROL_CHARS = /[\u0000-\u0008\u000A-\u001F\u007F]/;
+
 export function AccountsSection({ ctx }: SectionProps) {
   const cookies = ctx.settings.platform_cookies ?? {};
-  const save = (key: Platform, value: string) => {
-    const next = { ...cookies };
-    if (value) next[key] = value;
-    else delete next[key];
-    void ctx.save({ platform_cookies: next });
+  // 错误按平台分别记录，一个平台出错不会显示到另一个平台下面。
+  const [errors, setErrors] = useState<Partial<Record<Platform, string>>>({});
+  const setError = (key: Platform, message: string | null) =>
+    setErrors((current) => {
+      const next = { ...current };
+      if (message) next[key] = message;
+      else delete next[key];
+      return next;
+    });
+
+  const save = async (key: Platform, value: string) => {
+    if (COOKIE_CONTROL_CHARS.test(value)) {
+      setError(key, "Cookie 不能包含换行或其他控制字符");
+      return;
+    }
+    setError(key, null);
+    // 用排队执行时的最新 Cookie 合并，另一个平台还在保存中的修改不会丢。
+    const result = await ctx.save(
+      (latest) => {
+        const next = { ...(latest.platform_cookies ?? {}) };
+        if (value) next[key] = value;
+        else delete next[key];
+        return { platform_cookies: next };
+      },
+      { attachErrors: false },
+    );
+    if (!result.ok) setError(key, result.message);
   };
+
   return (
     <SettingsCard
       title="平台账号"
       description="Cookie 只保存在本机，只发送给对应平台的接口。"
-      onReset={() => void ctx.reset(groupKeys.accounts)}
+      onReset={() => {
+        setErrors({});
+        void ctx.reset(groupKeys.accounts);
+      }}
     >
       {supportedPlatforms.map((platform) => (
         <CookieField
           key={platform.key}
           platform={platform}
           value={cookies[platform.key] ?? ""}
-          error={ctx.errors.platform_cookies}
-          onCommit={(value) => save(platform.key, value)}
+          error={errors[platform.key]}
+          onCommit={(value) => {
+            if (value === null) setError(platform.key, null);
+            else void save(platform.key, value);
+          }}
         />
       ))}
     </SettingsCard>
