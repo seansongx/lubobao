@@ -294,6 +294,7 @@ impl Db<'_> {
                 monitoring: Monitoring::parse(&monitoring),
                 live: LiveState::Unknown,
                 record,
+                held: false,
             });
         }
         Ok((tasks, skipped))
