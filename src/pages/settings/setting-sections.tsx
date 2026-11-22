@@ -1,4 +1,4 @@
-// 有设置项的分组：录制、检测、网络、平台账号、通知。键名与默认值见 src-tauri/src/tasks/settings.rs。
+// 有设置项的分组：录制、检测、网络、平台账号、托盘与通知。键名与默认值见 src-tauri/src/tasks/settings.rs。
 
 import { useEffect, useRef, useState } from "react";
 import { Eye, EyeOff, FolderOpen, FolderSearch } from "lucide-react";
@@ -31,7 +31,12 @@ export const groupKeys = {
   check: ["loop_time_seconds", "platform_max_concurrent_requests", "default_live_source", "force_https_recording"],
   network: ["enable_proxy", "proxy_address", "default_platform_with_proxy"],
   accounts: ["platform_cookies"],
-  notify: ["system_notification_enabled", "stream_start_notification_enabled", "stream_end_notification_enabled"],
+  notify: [
+    "close_window_action",
+    "system_notification_enabled",
+    "stream_start_notification_enabled",
+    "stream_end_notification_enabled",
+  ],
 } as const satisfies Record<string, readonly SettingKey[]>;
 
 /** 常用的保存与校验接线。 */
@@ -502,15 +507,29 @@ export function AccountsSection({ ctx }: SectionProps) {
   );
 }
 
+const closeWindowOptions: SelectOption[] = [
+  { value: "ask", label: "每次询问" },
+  { value: "tray", label: "最小化到托盘" },
+  { value: "quit", label: "退出录播宝" },
+];
+
 export function NotifySection({ ctx }: SectionProps) {
   const { settings } = ctx;
   const off = !settings.system_notification_enabled;
   return (
     <SettingsCard
-      title="通知"
-      description="通知发送功能即将接入，目前只保存这些选项"
+      title="托盘与通知"
+      description="开播时如果窗口在后台就发系统通知；「仅通知」的直播间总是提醒；需要处理的问题也会提醒"
       onReset={() => void ctx.reset(groupKeys.notify)}
     >
+      <SelectField
+        label="关闭窗口时"
+        description="最小化到托盘后继续在后台检测和录制；托盘不可用时直接退出"
+        value={settings.close_window_action}
+        options={closeWindowOptions}
+        error={ctx.errors.close_window_action}
+        onChange={(value) => bind(ctx, "close_window_action").save(value as Settings["close_window_action"])}
+      />
       <SwitchField
         label="系统通知"
         description="关闭后不发送任何系统通知"
@@ -520,7 +539,7 @@ export function NotifySection({ ctx }: SectionProps) {
       />
       <SwitchField
         label="开播通知"
-        description="主播开播时通知"
+        description="窗口在后台时，主播开播发系统通知"
         checked={settings.stream_start_notification_enabled}
         disabled={off}
         error={ctx.errors.stream_start_notification_enabled}
@@ -528,7 +547,7 @@ export function NotifySection({ ctx }: SectionProps) {
       />
       <SwitchField
         label="下播通知"
-        description="主播下播时通知"
+        description="窗口在后台时，主播下播发系统通知"
         checked={settings.stream_end_notification_enabled}
         disabled={off}
         error={ctx.errors.stream_end_notification_enabled}

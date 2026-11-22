@@ -261,6 +261,8 @@ export interface Settings {
   system_notification_enabled: boolean;
   stream_start_notification_enabled: boolean;
   stream_end_notification_enabled: boolean;
+  /** 关闭主窗口时：ask 每次询问（默认），tray 隐藏到托盘，quit 退出。托盘不可用时一律退出。 */
+  close_window_action: CloseWindowAction;
 }
 
 // ---- 调度（src-tauri/src/scheduler/mod.rs） ----
@@ -271,6 +273,29 @@ export interface SchedulerStatus {
   nextCheckAt: number | null;
   /** 正在请求平台的任务数。 */
   checking: number;
+  /** 正在录制（含启动中、收尾中）的任务数。 */
+  recording: number;
+}
+
+// ---- 退出（src-tauri/src/desktop/quit.rs） ----
+
+/**
+ * idle：没有退出请求；confirming：有录制时从退出入口（托盘「退出」、macOS 菜单「退出录播宝」
+ * Cmd+Q、关窗时选择退出）发起，等用户确认；Dock「退出」、注销关机不经确认，后台限时收尾；
+ * finishing：已确认，正在停止录制、等文件收尾，随后应用退出。
+ */
+export type QuitPhase = "idle" | "confirming" | "finishing";
+
+export type CloseWindowAction = "ask" | "tray" | "quit";
+
+/** 有录制时点托盘「全部暂停监控」，pause-all-prompt 事件请前端确认。 */
+export interface PauseAllPrompt {
+  recording: number;
+}
+
+/** 退出状态，变化时通过 quit-state 事件推送。 */
+export interface QuitState {
+  phase: QuitPhase;
   /** 正在录制（含启动中、收尾中）的任务数。 */
   recording: number;
 }
@@ -372,6 +397,15 @@ export interface Backend {
   updateSettings(values: Partial<Settings>): Promise<Settings>;
   listActivity(query?: ActivityQuery): Promise<ActivityPage>;
   getSchedulerStatus(): Promise<SchedulerStatus>;
+  getQuitState(): Promise<QuitState>;
+  /** 确认退出：进入 finishing，停止全部录制、等文件收尾后退出。 */
+  confirmQuit(): Promise<void>;
+  /** 取消退出；已在收尾时不能取消，原样返回。 */
+  cancelQuit(): Promise<QuitState>;
+  /** 关窗三选一的结果（取消时不调用）。remember 时写入 close_window_action。 */
+  resolveClose(choice: "tray" | "quit", remember: boolean): Promise<void>;
+  /** 确认托盘「全部暂停监控」：暂停全部监控中的任务（同时停止录制）。 */
+  confirmPauseAll(): Promise<void>;
   /** 列出录像根目录下的子目录；path 缺省为根目录。 */
   listLibrary(path?: string): Promise<LibraryListing>;
   getDiskSpace(): Promise<DiskSpace>;
@@ -396,6 +430,10 @@ export interface Backend {
   onTaskRemoved(handler: (payload: { ids: TaskId[] }) => void): Promise<UnlistenFn>;
   onActivity(handler: (entry: ActivityEntry) => void): Promise<UnlistenFn>;
   onSchedulerStatus(handler: (status: SchedulerStatus) => void): Promise<UnlistenFn>;
+  onQuitState(handler: (state: QuitState) => void): Promise<UnlistenFn>;
+  /** close_window_action 为 ask 时关闭主窗口，请前端弹出三选一。 */
+  onClosePrompt(handler: () => void): Promise<UnlistenFn>;
+  onPauseAllPrompt(handler: (prompt: PauseAllPrompt) => void): Promise<UnlistenFn>;
 }
 
 function on<T>(event: string, handler: (payload: T) => void): Promise<UnlistenFn> {
@@ -417,6 +455,11 @@ const tauriBackend: Backend = {
   updateSettings: (values) => invoke("update_settings", { values }),
   listActivity: (query) => invoke("list_activity", { query: query ?? null }),
   getSchedulerStatus: () => invoke("get_scheduler_status"),
+  getQuitState: () => invoke("get_quit_state"),
+  confirmQuit: () => invoke("confirm_quit"),
+  cancelQuit: () => invoke("cancel_quit"),
+  resolveClose: (choice, remember) => invoke("resolve_close", { choice, remember }),
+  confirmPauseAll: () => invoke("confirm_pause_all"),
   listLibrary: (path) => invoke("list_library", { path: path ?? null }),
   getDiskSpace: () => invoke("get_disk_space"),
   getLibraryUsage: (refresh) => invoke("get_library_usage", { refresh: refresh ?? false }),
@@ -436,6 +479,9 @@ const tauriBackend: Backend = {
   onTaskRemoved: (handler) => on("task-removed", handler),
   onActivity: (handler) => on("activity", handler),
   onSchedulerStatus: (handler) => on("scheduler-status", handler),
+  onQuitState: (handler) => on("quit-state", handler),
+  onClosePrompt: (handler) => on("close-prompt", () => handler()),
+  onPauseAllPrompt: (handler) => on("pause-all-prompt", handler),
 };
 
 /** 是否运行在浏览器假数据模式。 */

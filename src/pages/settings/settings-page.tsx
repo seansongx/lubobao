@@ -22,7 +22,7 @@ const groups: { id: GroupId; label: string }[] = [
   { id: "check", label: "检测" },
   { id: "network", label: "网络" },
   { id: "accounts", label: "平台账号" },
-  { id: "notify", label: "通知" },
+  { id: "notify", label: "托盘与通知" },
   { id: "components", label: "组件" },
   { id: "about", label: "关于" },
 ];

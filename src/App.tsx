@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 
 import { AppSidebar } from "@/components/app-sidebar";
 import type { Navigate, TaskFocusRequest } from "@/components/navigation";
+import { DesktopDialogs } from "@/components/desktop-dialogs";
 import { StatusBar } from "@/components/status-bar";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -54,6 +55,7 @@ export default function App() {
         <main className="flex min-h-0 min-w-0">{content}</main>
         <StatusBar />
       </div>
+      <DesktopDialogs />
       {/* 顶部居中，避免遮住详情面板底部的操作按钮和批量操作条。 */}
       <Toaster position="top-center" />
     </TooltipProvider>

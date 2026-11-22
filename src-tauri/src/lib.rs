@@ -1,5 +1,4 @@
-use tauri::Manager;
-
+pub mod desktop;
 pub mod ffmpeg;
 pub mod library;
 pub mod platforms;
@@ -13,18 +12,18 @@ pub fn run() {
         // 只允许一个实例：第二次启动时把已有窗口显示到前台，新进程随即退出。
         // 必须最先注册。
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.unminimize();
-                let _ = window.show();
-                let _ = window.set_focus();
-            }
+            desktop::show_main_window(app);
         }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
+        // 关闭主窗口：按设置隐藏到托盘（录制继续）、退出或询问。
+        .on_window_event(desktop::on_window_event)
         .setup(|app| {
             ffmpeg::tauri_glue::init(app.handle())?;
             tasks::tauri_glue::init(app.handle())?;
             scheduler::tauri_glue::init(app.handle())?;
+            desktop::init(app.handle())?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -42,6 +41,12 @@ pub fn run() {
             tasks::commands::update_settings,
             tasks::commands::list_activity,
             scheduler::tauri_glue::get_scheduler_status,
+            desktop::quit::get_quit_state,
+            desktop::quit::confirm_quit,
+            desktop::quit::cancel_quit,
+            desktop::debug_desktop_action,
+            desktop::close::resolve_close,
+            desktop::tray::confirm_pause_all,
             library::commands::list_library,
             library::commands::get_disk_space,
             library::commands::get_library_usage,
@@ -51,10 +56,7 @@ pub fn run() {
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|app, event| {
-            // 退出前停止调度和所有录制，等文件收尾。
-            if let tauri::RunEvent::ExitRequested { code, api, .. } = &event {
-                scheduler::tauri_glue::on_exit_requested(app, *code, api);
-            }
-        });
+        // 退出前停止调度和所有录制，等文件收尾（确认在退出入口处理）；系统直接结束时同步兜底；
+        // macOS 点 Dock 图标时重新显示窗口。
+        .run(|app, event| desktop::on_run_event(app, &event));
 }

@@ -44,8 +44,9 @@ pub fn defaults(save_dir: &Path) -> Map<String, Value> {
         "custom_script_command": "",
         "platform_cookies": {},
         "system_notification_enabled": true,
-        "stream_start_notification_enabled": false,
+        "stream_start_notification_enabled": true,
         "stream_end_notification_enabled": false,
+        "close_window_action": "ask",
     });
     match value {
         Value::Object(map) => map,
@@ -64,6 +65,8 @@ pub const ENUM_SETTINGS: &[(&str, &[&str])] = &[
         ],
     ),
     ("default_live_source", &["FLV", "HLS"]),
+    // 关闭主窗口时：每次询问、隐藏到托盘、退出。
+    ("close_window_action", &["ask", "tray", "quit"]),
 ];
 
 /// 校验一项更新：键必须存在于默认值中，值的类型必须一致，数值项必须为正，
