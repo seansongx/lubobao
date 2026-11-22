@@ -1,0 +1,22 @@
+{
+  "data": {
+    "data": [
+      {
+        "id_str": "7000000000000000001",
+        "status": 4,
+        "title": "测试直播间（未开播）"
+      }
+    ],
+    "enter_room_id": "7000000000000000001",
+    "user": {
+      "id_str": "1000000001",
+      "sec_uid": "MS4wLjABAAAAtest_sec_uid",
+      "nickname": "离线主播"
+    },
+    "room_status": 2
+  },
+  "extra": {
+    "now": 1795364602491
+  },
+  "status_code": 0
+}
