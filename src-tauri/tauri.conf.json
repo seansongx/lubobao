@@ -26,13 +26,44 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": [
+      "nsis",
+      "app",
+      "dmg",
+      "appimage",
+      "deb"
+    ],
+    "publisher": "Song",
+    "copyright": "Copyright © 2026 Song. Released under the MIT License.",
+    "license": "MIT",
+    "category": "Video",
+    "shortDescription": "开播自动录，不用再蹲直播",
+    "longDescription": "录播宝是一个直播录制桌面应用：添加直播间后自动检测开播并调用 FFmpeg 录制。",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": [
+          "SimpChinese",
+          "English"
+        ],
+        "displayLanguageSelector": false
+      }
+    },
+    "macOS": {
+      "signingIdentity": "-",
+      "minimumSystemVersion": "10.15"
+    },
+    "linux": {
+      "deb": {
+        "section": "video"
+      }
+    }
   }
 }

@@ -1,0 +1,176 @@
+name: Release
+
+# 推送 v* 标签：三平台打包，并创建 GitHub Release 草稿（不会自动发布）。
+# 手动触发：只打包，安装包保存在本次运行的 Actions 产物里。
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: build (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-x64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            bundles: nsis
+          - name: macos-arm64
+            os: macos-latest
+            target: aarch64-apple-darwin
+            bundles: app,dmg
+          - name: macos-x64
+            os: macos-latest
+            target: x86_64-apple-darwin
+            bundles: app,dmg
+          # 22.04 的 glibc 较旧，AppImage 和 deb 能在更多发行版上运行。
+          - name: linux-amd64
+            os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            bundles: appimage,deb
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev patchelf libfuse2 file
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: ${{ matrix.target }}
+
+      - name: Check tag matches app version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          version="$(node -p "require('./src-tauri/tauri.conf.json').version")"
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::标签 $GITHUB_REF_NAME 与 tauri.conf.json 版本 $version 不一致"
+            exit 1
+          fi
+
+      - run: npm ci
+
+      - name: Build bundles
+        run: npx tauri build --ci --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+
+      # 打包文件名改成 ASCII，便于放到下载站和 CDN。
+      - name: Collect installers
+        run: |
+          version="$(node -p "require('./src-tauri/tauri.conf.json').version")"
+          bundle="src-tauri/target/${{ matrix.target }}/release/bundle"
+          out="$RUNNER_TEMP/installers"
+          mkdir -p "$out"
+          case "${{ matrix.name }}" in
+            windows-x64)
+              cp "$bundle"/nsis/*-setup.exe "$out/lubobao_${version}_windows_x64-setup.exe" ;;
+            macos-arm64)
+              cp "$bundle"/dmg/*.dmg "$out/lubobao_${version}_macos_arm64.dmg" ;;
+            macos-x64)
+              cp "$bundle"/dmg/*.dmg "$out/lubobao_${version}_macos_x64.dmg" ;;
+            linux-amd64)
+              cp "$bundle"/appimage/*.AppImage "$out/lubobao_${version}_linux_amd64.AppImage"
+              cp "$bundle"/deb/*.deb "$out/lubobao_${version}_linux_amd64.deb" ;;
+          esac
+          ls -l "$out"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer-${{ matrix.name }}
+          path: ${{ runner.temp }}/installers/*
+          if-no-files-found: error
+          compression-level: 0
+
+  publish:
+    name: summary and draft release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: installer-*
+          path: installers
+          merge-multiple: true
+
+      - name: Checksums and summary
+        working-directory: installers
+        run: |
+          sha256sum lubobao_* > SHA256SUMS.txt
+          {
+            echo "## 安装包"
+            echo
+            echo "| 文件 | 大小 | SHA-256 |"
+            echo "| --- | ---: | --- |"
+            for f in lubobao_*; do
+              size="$(stat -c %s "$f")"
+              mib="$(awk "BEGIN { printf \"%.1f MiB\", $size / 1048576 }")"
+              sum="$(sha256sum "$f" | cut -d ' ' -f 1)"
+              echo "| \`$f\` | $mib ($size B) | \`$sum\` |"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+          cat SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installers-all
+          path: installers/*
+          compression-level: 0
+
+      - name: Create draft release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > notes.md <<'EOF'
+          ## 下载
+
+          | 系统 | 文件 |
+          | --- | --- |
+          | Windows 10/11（x64） | `*_windows_x64-setup.exe` |
+          | macOS（Apple 芯片） | `*_macos_arm64.dmg` |
+          | macOS（Intel） | `*_macos_x64.dmg` |
+          | Linux（x64） | `*_linux_amd64.AppImage` 或 `*_linux_amd64.deb` |
+
+          首次启动时，录播宝会在后台下载 FFmpeg，安装包里不含 FFmpeg。校验值见 `SHA256SUMS.txt`。
+
+          ## 首次打开提示
+
+          安装包暂未做代码签名：
+
+          - **Windows**：SmartScreen 提示“已保护你的电脑”时，点“更多信息”→“仍要运行”。
+          - **macOS**：把录播宝拖进“应用程序”后，在 Finder 里右键点应用 →“打开”→ 再点“打开”。macOS 15 及以上如果没有“打开”按钮，先双击一次，再到“系统设置 → 隐私与安全性”底部点“仍要打开”。也可以在终端执行 `xattr -dr com.apple.quarantine /Applications/录播宝.app`。
+          - **Linux**：AppImage 需要先 `chmod +x`；deb 用 `sudo apt install ./文件名.deb` 安装。
+          EOF
+          gh release create "$GITHUB_REF_NAME" installers/* \
+            --draft \
+            --title "录播宝 $GITHUB_REF_NAME" \
+            --notes-file notes.md
