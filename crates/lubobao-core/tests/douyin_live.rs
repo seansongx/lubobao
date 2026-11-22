@@ -1,10 +1,10 @@
 //! Live checks against real Douyin rooms. Run manually:
-//! `cargo test --manifest-path src-tauri/Cargo.toml --test douyin_live -- --ignored --nocapture`
+//! `cargo test -p lubobao-core --test douyin_live -- --ignored --nocapture`
 //! Set `DOUYIN_LIVE_URL` to a room that is currently live to also check stream selection.
 
 use std::time::Instant;
 
-use lubobao_lib::platforms::{
+use lubobao_core::platforms::{
     FetchOptions, LiveInfo, PlatformAdapter, Quality, douyin::DouyinAdapter,
 };
 

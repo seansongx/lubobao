@@ -1060,7 +1060,7 @@ fn default_space_probe_reads_real_disk() {
 
 /// 真机录制：用抖音适配器解析在播直播间，按默认选项录制后手动停止。
 ///
-/// 运行：`cargo test --manifest-path src-tauri/Cargo.toml live_douyin -- --ignored --nocapture`。
+/// 运行：`cargo test -p lubobao-core live_douyin -- --ignored --nocapture`。
 /// 需要 `LUBOBAO_TEST_FFMPEG`；可用 `LUBOBAO_LIVE_URL`（默认 `https://live.douyin.com/78092960160`）、
 /// `LUBOBAO_LIVE_SECS`（默认 60）和 `LUBOBAO_LIVE_OUT`（保留录像的目录，默认临时目录）调整。
 #[tokio::test]

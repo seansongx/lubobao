@@ -1,5 +1,5 @@
 //! Live checks against real Kuaishou rooms. Run manually:
-//! `cargo test --manifest-path src-tauri/Cargo.toml --test kuaishou_live -- --ignored --nocapture --test-threads=1`
+//! `cargo test -p lubobao-core --test kuaishou_live -- --ignored --nocapture --test-threads=1`
 //!
 //! Set `KUAISHOU_LIVE_URL` to a room that is currently live to also check
 //! stream selection and record about 30 seconds with FFmpeg. The recording
@@ -11,10 +11,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use lubobao_lib::platforms::{
+use lubobao_core::platforms::{
     FetchOptions, LiveInfo, PlatformAdapter, Quality, kuaishou::KuaishouAdapter,
 };
-use lubobao_lib::recorder::{self, RecordOptions, RecordingRequest};
+use lubobao_core::recorder::{self, RecordOptions, RecordingRequest};
 
 /// StreamCap README example and the ids it must resolve to.
 const README_LINK: &str = "https://live.kuaishou.com/u/yall1102";

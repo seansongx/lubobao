@@ -4,14 +4,13 @@
 //! 下载和解压的临时文件放在同一目录下的 `.tmp/`，保证最后一步改名在同一块磁盘上。
 //! 安装期间持有 `.tmp/lock` 的系统文件锁，同时打开多个录播宝时只有一个进程在下载和写入。
 //!
-//! 本模块不依赖 Tauri，命令行程序直接使用 [`FfmpegManager`]；Tauri 的初始化和命令见 [`tauri_glue`]。
+//! 本模块不依赖 Tauri，命令行程序直接使用 [`FfmpegManager`]；Tauri 的初始化和命令见 `src-tauri/src/ffmpeg/tauri_glue.rs`。
 
 pub mod download;
 mod error;
 mod install;
 pub mod manifest;
 mod status;
-pub mod tauri_glue;
 #[cfg(test)]
 mod tests;
 

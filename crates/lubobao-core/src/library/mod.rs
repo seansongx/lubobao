@@ -14,9 +14,8 @@
 //!
 //! 分层约定：本文件只依赖标准库、serde 和 fs4，不出现 `tauri::`，以便以后不依赖 Tauri 的
 //! 命令行程序直接复用（根目录由调用方传入）。Tauri 命令包装、读取设置，以及用系统程序打开、
-//! 在文件夹中显示这类桌面功能，都放在胶水层 [`commands`]。
+//! 在文件夹中显示这类桌面功能，都放在桌面端的胶水层 `src-tauri/src/library/commands.rs`。
 
-pub mod commands;
 pub mod usage;
 
 #[cfg(test)]
@@ -66,7 +65,7 @@ pub struct LibraryError {
 }
 
 impl LibraryError {
-    fn new(kind: LibraryErrorKind, message: impl Into<String>, root: &Path) -> Self {
+    pub fn new(kind: LibraryErrorKind, message: impl Into<String>, root: &Path) -> Self {
         LibraryError {
             kind,
             message: message.into(),

@@ -1,6 +1,6 @@
 //! 任务核心：任务模型、SQLite 持久化、动态记录、设置，以及给前端的命令和事件。
 //!
-//! [`TaskManager`] 持有全部任务状态。前端通过 [`commands`] 中的 Tauri 命令读取快照和
+//! [`TaskManager`] 持有全部任务状态。前端通过桌面端 `src-tauri/src/tasks/commands.rs` 中的 Tauri 命令读取快照和
 //! 提交操作，通过 `task-updated`、`task-removed`、`activity` 事件接收变化。后续的轮询
 //! 调度和录制引擎通过 `set_live_state`、`set_record_state`、`update_record_progress`
 //! 回写状态，由这里负责持久化、写动态和推送事件。
@@ -15,12 +15,10 @@ use serde_json::{Map, Value, json};
 use crate::platforms::{LiveInfo, Platform, PlatformError, Quality, adapter_for};
 
 pub mod activity;
-pub mod commands;
 pub mod dedup;
 pub mod model;
 pub mod settings;
 pub mod store;
-pub mod tauri_glue;
 
 #[cfg(test)]
 mod tests;

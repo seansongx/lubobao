@@ -1,7 +1,7 @@
 //! 真机验证 FFmpeg 组件安装。
 //!
 //! ```text
-//! cargo run --manifest-path src-tauri/Cargo.toml --example ffmpeg_install -- <本地数据目录> [--offline]
+//! cargo run -p lubobao-core --example ffmpeg_install -- <本地数据目录> [--offline]
 //! ```
 //!
 //! `--offline` 把下载地址换成无效地址，用于确认已安装的版本会被直接复用。
@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use lubobao_lib::ffmpeg::{FfmpegManager, FfmpegStatus, ManagerConfig, run_version};
+use lubobao_core::ffmpeg::{FfmpegManager, FfmpegStatus, ManagerConfig, run_version};
 
 #[tokio::main]
 async fn main() {

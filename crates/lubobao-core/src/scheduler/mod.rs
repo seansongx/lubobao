@@ -14,7 +14,7 @@
 //!
 //! 平台请求和录制引擎都通过 [`LiveSource`]、[`RecordEngine`] 接入，测试中替换为假实现。
 //!
-//! 除 [`tauri_glue`] 外，本模块不依赖 Tauri，只用 Tokio，桌面应用和命令行程序共用：
+//! 本模块不依赖 Tauri（Tauri 胶水在 `src-tauri/src/scheduler/tauri_glue.rs`），只用 Tokio，桌面应用和命令行程序共用：
 //!
 //! ```ignore
 //! let tasks = Arc::new(tasks::open_in(&data_dir, &save_dir, Box::new(|_event| {}))?);
@@ -49,7 +49,6 @@ use crate::tasks::{
 
 mod engine;
 pub mod policy;
-pub mod tauri_glue;
 
 #[cfg(test)]
 mod tests;
