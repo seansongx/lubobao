@@ -239,10 +239,20 @@ export interface Settings {
   folder_name_title: boolean;
   enable_proxy: boolean;
   proxy_address: string;
-  /** 录制和检测使用代理的平台键，逗号分隔（StreamCap 默认只有海外平台）。 */
+  /**
+   * 检测和录制走代理的平台键，逗号分隔（中文逗号也可以，空格忽略，区分大小写），
+   * 例如 "tiktok, twitch"。默认与 StreamCap 相同，只有海外平台；不在列表里的平台直连。
+   * 代理只在 enable_proxy 为 true 且 proxy_address 非空时生效。
+   */
   default_platform_with_proxy: string;
   execute_custom_script: boolean;
   custom_script_command: string;
+  /**
+   * 平台 Cookie：键为平台键（"douyin"、"kuaishou"……），值为 Cookie 字符串，空字符串表示不用。
+   * 对应 StreamCap cookies.json。更新时整个对象替换。值含换行等无法放进请求头的字符时，
+   * updateSettings 以 kind "config" 拒绝。
+   */
+  platform_cookies: Record<string, string>;
   system_notification_enabled: boolean;
   stream_start_notification_enabled: boolean;
   stream_end_notification_enabled: boolean;

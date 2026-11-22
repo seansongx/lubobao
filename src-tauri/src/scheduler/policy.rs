@@ -59,27 +59,9 @@ pub fn max_concurrent(settings: &Map<String, Value>) -> usize {
         .unwrap_or(DEFAULT_MAX_CONCURRENT)
 }
 
-/// 设置 `default_platform_with_proxy` 中列出的平台键。与 StreamCap `is_use_proxy` 一样，
-/// 中英文逗号都可分隔，空格忽略。
-pub fn proxy_platforms(settings: &Map<String, Value>) -> Vec<String> {
-    text(settings, "default_platform_with_proxy")
-        .replace('，', ",")
-        .split(',')
-        .map(|key| key.trim().to_ascii_lowercase())
-        .filter(|key| !key.is_empty())
-        .collect()
-}
-
-/// 这个平台要用的代理地址：启用代理、填了地址，且平台在 `default_platform_with_proxy`
-/// 中（StreamCap `is_use_proxy`）。检测和录制都按这个规则。
+/// 这个平台要用的代理地址，规则见 [`crate::tasks::settings::proxy_for`]。
 pub fn proxy(settings: &Map<String, Value>, platform: Platform) -> Option<String> {
-    let address = text(settings, "proxy_address").trim();
-    (flag(settings, "enable_proxy", true)
-        && !address.is_empty()
-        && proxy_platforms(settings)
-            .iter()
-            .any(|key| key == platform.key()))
-    .then(|| address.to_string())
+    crate::tasks::settings::proxy_for(settings, platform.key())
 }
 
 /// 录制用的代理，以及不能用时给用户的提示。FFmpeg 只支持 HTTP 代理；SOCKS、HTTPS 等
@@ -134,13 +116,9 @@ pub fn recheck_delay(short_runs: u32, interval: Duration) -> Duration {
     }
 }
 
-/// 检测请求的选项：任务的画质，加上设置中的代理。
+/// 检测请求的选项：任务的画质，加上这个平台的代理和 Cookie。
 pub fn fetch_options(task: &TaskSnapshot, settings: &Map<String, Value>) -> FetchOptions {
-    FetchOptions {
-        cookies: None,
-        proxy: proxy(settings, task.config.platform),
-        quality: task.config.quality,
-    }
+    crate::tasks::settings::fetch_options(settings, task.config.platform, task.config.quality)
 }
 
 /// StreamCap `is_flv_preferred_platform`：这些平台默认录 FLV。

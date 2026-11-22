@@ -36,6 +36,8 @@ enum Reply {
 struct FakeSource {
     replies: Mutex<HashMap<String, Reply>>,
     calls: Mutex<Vec<(String, Instant)>>,
+    /// 每次请求收到的选项。
+    options: Mutex<Vec<FetchOptions>>,
     /// 设置后每次请求先取一个许可，用来让请求停在半路。
     gate: Mutex<Option<Arc<Semaphore>>>,
     current: AtomicUsize,
@@ -123,10 +125,11 @@ impl LiveSource for Arc<FakeSource> {
     fn fetch(
         &self,
         url: String,
-        _options: FetchOptions,
+        options: FetchOptions,
     ) -> BoxFuture<'static, Result<LiveInfo, PlatformError>> {
         let source = Arc::clone(self);
         Box::pin(async move {
+            source.options.lock().unwrap().push(options);
             source
                 .calls
                 .lock()
@@ -1176,4 +1179,46 @@ async fn a_socks_proxy_is_used_for_checks_but_recording_goes_direct() {
         warnings.items[0].message,
         "录制不支持 SOCKS5 代理，已直连录制（检测仍使用代理）"
     );
+}
+
+#[tokio::test(start_paused = true)]
+async fn checks_send_the_platform_cookie_and_only_listed_platforms_use_the_proxy() {
+    let h = harness();
+    h.update_settings(json!({
+        "proxy_address": "127.0.0.1:7890",
+        "platform_cookies": { "douyin": " ttwid=abc ", "kuaishou": "did=1" },
+    }));
+    let (_, url) = h.add("1031", Reply::Offline, false);
+    h.start();
+    until(SHORT, "首次检测", || h.source.calls(&url).len() == 1).await;
+    let first = h.source.options.lock().unwrap()[0].clone();
+    assert_eq!(first.cookies.as_deref(), Some("ttwid=abc"));
+    // 默认列表只有海外平台：抖音直连。
+    assert_eq!(first.proxy, None);
+
+    h.update_settings(json!({
+        "default_platform_with_proxy": "tiktok, douyin",
+        "platform_cookies": {},
+    }));
+    until(INTERVAL + SHORT, "第二次检测", || {
+        h.source.calls(&url).len() == 2
+    })
+    .await;
+    let second = h.source.options.lock().unwrap()[1].clone();
+    assert_eq!(second.proxy.as_deref(), Some("127.0.0.1:7890"));
+    assert_eq!(second.cookies, None);
+}
+
+#[test]
+fn rejects_cookies_that_cannot_be_sent_as_a_header() {
+    let h = harness();
+    let mut map = Map::new();
+    map.insert(
+        "platform_cookies".into(),
+        json!({ "douyin": "a=1
+b=2" }),
+    );
+    let error = h.tasks.update_settings(map).unwrap_err();
+    assert_eq!(error.kind, crate::tasks::ErrorKind::Config);
+    assert_eq!(h.tasks.settings()["platform_cookies"], json!({}));
 }

@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock, Weak};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
-use crate::platforms::{FetchOptions, LiveInfo, Platform, PlatformError, Quality, adapter_for};
+use crate::platforms::{LiveInfo, Platform, PlatformError, Quality, adapter_for};
 
 pub mod activity;
 pub mod commands;
@@ -343,8 +343,12 @@ impl TaskManager {
 
     // ---- 添加与编辑 ----
 
-    /// 识别平台并实际请求一次直播间。
-    pub async fn resolve(url: &str, quality: Quality) -> CommandResult<LiveInfo> {
+    /// 识别平台并实际请求一次直播间，按设置使用这个平台的代理和 Cookie。
+    pub async fn resolve(
+        url: &str,
+        quality: Quality,
+        settings: &Map<String, Value>,
+    ) -> CommandResult<LiveInfo> {
         let url = url.trim();
         if url.is_empty() {
             return Err(CommandError::new(
@@ -358,10 +362,7 @@ impl TaskManager {
                 format!("暂不支持这个链接的平台：{url}"),
             )
         })?;
-        let options = FetchOptions {
-            quality,
-            ..FetchOptions::default()
-        };
+        let options = settings::fetch_options(settings, adapter.platform(), quality);
         Ok(adapter.fetch(url, &options).await?)
     }
 
@@ -375,7 +376,7 @@ impl TaskManager {
 
     pub async fn add_task(&self, input: AddTaskInput) -> CommandResult<TaskMutation> {
         let quality = input.quality.unwrap_or_else(|| self.default_quality());
-        let info = Self::resolve(&input.url, quality).await?;
+        let info = Self::resolve(&input.url, quality, &self.settings()).await?;
         self.add_resolved(input, &info)
     }
 
@@ -473,7 +474,7 @@ impl TaskManager {
         let info = match new_url {
             Some(url) => {
                 let quality = input.quality.unwrap_or(current.config.quality);
-                Some(Self::resolve(url, quality).await?)
+                Some(Self::resolve(url, quality, &self.settings()).await?)
             }
             None => None,
         };
@@ -885,8 +886,7 @@ impl TaskManager {
     /// 校验并保存部分设置，返回完整设置。任一项无效时整批不保存。
     pub fn update_settings(&self, values: Map<String, Value>) -> CommandResult<Map<String, Value>> {
         for (key, value) in &values {
-            settings::validate(&self.defaults, key, value)
-                .map_err(|message| CommandError::new(ErrorKind::InvalidInput, message))?;
+            settings::validate(&self.defaults, key, value)?;
         }
         self.lock()
             .store

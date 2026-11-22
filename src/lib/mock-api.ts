@@ -243,6 +243,7 @@ const defaultSettings: Settings = {
     "tiktok, sooplive, pandalive, winktv, flextv, popkontv, twitch, liveme, showroom, chzzk, shopee, shp, youtu, youtube, lang",
   execute_custom_script: false,
   custom_script_command: "",
+  platform_cookies: {},
   system_notification_enabled: true,
   stream_start_notification_enabled: false,
   stream_end_notification_enabled: false,
@@ -516,6 +517,13 @@ export function createMockBackend(): Backend {
 
     getSettings: () => Promise.resolve(settings),
     async updateSettings(values) {
+      // 与 Rust 一致：Cookie 不能含换行等控制字符（制表符除外）。
+      for (const [platform, cookie] of Object.entries(values.platform_cookies ?? {})) {
+        // eslint-disable-next-line no-control-regex
+        if (typeof cookie !== "string" || /[\x00-\x08\x0a-\x1f\x7f]/.test(cookie)) {
+          return reject("config", `${platform} 的 Cookie 含有换行等无法放进请求头的字符`);
+        }
+      }
       settings = { ...settings, ...values };
       return settings;
     },
