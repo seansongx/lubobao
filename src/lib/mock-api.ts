@@ -12,6 +12,7 @@
 //   路径含 login / timeout / busy / parse  分别返回 auth_required / network / rate_limited / parse
 //   其他域名                          unsupported_platform；无法解析的文本为 invalid_url
 // 事件推送：录制中的任务每秒增长大小；等待开播的任务每隔一段时间模拟一次检测；重试中的任务按 nextRetryAt 重试。
+// 任务列表：?tasks=slow 延迟 1.5 秒返回；?tasks=fail 第一次读取失败。
 // 控制台：window.__lubobaoMock.goLive(id) / endLive(id) / setStopSupported(true) / setEvents(false)。
 
 import type { UnlistenFn } from "@tauri-apps/api/event";
@@ -386,6 +387,9 @@ export function createMockBackend(): Backend {
   const activity: ActivityEntry[] = [];
   let nextActivityId = 1;
   let stopSupported = false;
+  const tasksMode = new URLSearchParams(window.location.search).get("tasks");
+  // 状态栏和页面各订阅一次，两次都失败才能稳定演示。
+  let failuresLeft = tasksMode === "fail" ? 2 : 0;
   let eventsEnabled = true;
 
   const ffmpegChannel = new Channel<FfmpegStatus>();
@@ -572,7 +576,16 @@ export function createMockBackend(): Backend {
       simulateDownload();
       return Promise.resolve(ffmpeg);
     },
-    listTasks: () => Promise.resolve(tasks),
+    async listTasks() {
+      // ?tasks=slow 模拟加载耗时；?tasks=fail 让第一次读取失败，用来演示重试。
+      if (tasksMode === "slow") await delay(1500);
+      if (failuresLeft > 0) {
+        failuresLeft -= 1;
+        await delay(600);
+        return reject("storage", "无法打开本地数据库（演示）");
+      }
+      return tasks;
+    },
 
     async addTask(input: AddTaskInput): Promise<TaskMutation> {
       await delay(700);

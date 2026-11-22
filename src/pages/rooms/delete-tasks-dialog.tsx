@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Loader2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -17,25 +17,17 @@ import { describeError, type ErrorView } from "@/pages/rooms/format";
 import { Notice } from "@/pages/rooms/notice";
 
 interface DeleteTasksDialogProps {
-  /** 待删除的任务；null 表示关闭。 */
-  tasks: TaskSnapshot[] | null;
+  /** 待删除的任务。关闭后父组件保留上一份列表，关闭动画期间标题不变。 */
+  tasks: TaskSnapshot[];
+  open: boolean;
   onOpenChange: (open: boolean) => void;
   onDeleted: (ids: TaskId[]) => void;
 }
 
-export function DeleteTasksDialog({ tasks, onOpenChange, onDeleted }: DeleteTasksDialogProps) {
+export function DeleteTasksDialog({ tasks, open, onOpenChange, onDeleted }: DeleteTasksDialogProps) {
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<ErrorView | null>(null);
-  const open = tasks !== null && tasks.length > 0;
-
-  useEffect(() => {
-    if (open) {
-      setError(null);
-      setDeleting(false);
-    }
-  }, [open]);
-
-  const list = tasks ?? [];
+  const list = tasks;
   const names = list.slice(0, 5).map((task) => task.anchorName).join("、");
   const more = list.length > 5 ? ` 等 ${list.length} 个任务` : "";
 
@@ -56,7 +48,7 @@ export function DeleteTasksDialog({ tasks, onOpenChange, onDeleted }: DeleteTask
   }
 
   return (
-    <AlertDialog open={open} onOpenChange={(next) => !deleting && onOpenChange(next)}>
+    <AlertDialog open={open && list.length > 0} onOpenChange={(next) => !deleting && onOpenChange(next)}>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>删除 {list.length === 1 ? list[0].anchorName : `${list.length} 个任务`}？</AlertDialogTitle>

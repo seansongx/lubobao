@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
+import { useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import type { RowSelectionState, SortingState, Updater } from "@tanstack/react-table";
 import {
+  AlertTriangle,
   ArrowDownWideNarrow,
+  Loader2,
   ArrowUpNarrowWide,
   Pause,
   Play,
@@ -16,7 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { TaskId, TaskSnapshot } from "@/lib/api";
-import { useTasks } from "@/lib/use-backend";
+import type { TaskList } from "@/lib/use-backend";
 import { cn } from "@/lib/utils";
 import { AddTaskDialog } from "@/pages/rooms/add-task-dialog";
 import { DeleteTasksDialog } from "@/pages/rooms/delete-tasks-dialog";
@@ -32,7 +34,7 @@ import { setMonitoring } from "@/pages/rooms/task-actions";
 import { TaskInspector } from "@/pages/rooms/task-inspector";
 import { StatusMark } from "@/pages/rooms/task-status";
 import { TaskTable } from "@/pages/rooms/task-table";
-import { useNow } from "@/pages/rooms/use-now";
+import { describeError } from "@/pages/rooms/format";
 
 function resolve<T>(updater: Updater<T>, current: T): T {
   return typeof updater === "function" ? (updater as (old: T) => T)(current) : updater;
@@ -60,20 +62,42 @@ export interface TaskFocusRequest {
 }
 
 interface RoomsPageProps {
+  /** 由 App 持有的任务订阅，切换页面不重新加载。 */
+  taskList: TaskList;
   view: RoomsView;
   onViewChange: Dispatch<SetStateAction<RoomsView>>;
   focusTask?: TaskFocusRequest | null;
 }
 
-export function RoomsPage({ view, onViewChange, focusTask }: RoomsPageProps) {
-  const tasks = useTasks();
-  const now = useNow();
-  const [adding, setAdding] = useState(false);
-  const [editingId, setEditingId] = useState<TaskId | null>(null);
-  const [deleting, setDeleting] = useState<TaskSnapshot[] | null>(null);
+const NO_TASKS: TaskSnapshot[] = [];
+
+/** 对话框状态：关闭时保留内容直到动画结束；key 每次打开递增，让表单重新挂载并取得新的初始值。 */
+interface DialogState<T> {
+  open: boolean;
+  key: number;
+  value: T;
+}
+
+export function RoomsPage({ taskList, view, onViewChange, focusTask }: RoomsPageProps) {
+  const tasks = taskList.tasks ?? NO_TASKS;
+  const [adding, setAdding] = useState<DialogState<null>>({ open: false, key: 0, value: null });
+  const [editing, setEditing] = useState<DialogState<TaskId | null>>({ open: false, key: 0, value: null });
+  const [deleting, setDeleting] = useState<DialogState<TaskSnapshot[]>>({ open: false, key: 0, value: [] });
   const [batchBusy, setBatchBusy] = useState(false);
 
-  const patch = (values: Partial<RoomsView>) => onViewChange((current) => ({ ...current, ...values }));
+  const patch = useCallback(
+    (values: Partial<RoomsView>) => onViewChange((current) => ({ ...current, ...values })),
+    [onViewChange],
+  );
+  const openAdd = () => setAdding((current) => ({ open: true, key: current.key + 1, value: null }));
+  const openEdit = useCallback(
+    (id: TaskId) => setEditing((current) => ({ open: true, key: current.key + 1, value: id })),
+    [],
+  );
+  const openDelete = useCallback(
+    (list: TaskSnapshot[]) => setDeleting((current) => ({ open: true, key: current.key + 1, value: list })),
+    [],
+  );
 
   const platforms = useMemo(() => {
     const map = new Map<string, string>();
@@ -92,41 +116,78 @@ export function RoomsPage({ view, onViewChange, focusTask }: RoomsPageProps) {
     [tasks, view.group, view.platform, view.query],
   );
 
-  // 批量操作只作用于当前显示且被勾选的任务。
+  // 筛选或任务变化后剔除不可见的勾选，批量操作和表头状态都只针对可见行。
+  useEffect(() => {
+    if (taskList.tasks === null) return;
+    const visibleIds = new Set(visible.map((task) => String(task.id)));
+    onViewChange((current) => {
+      const stale = Object.keys(current.rowSelection).filter((id) => !visibleIds.has(id));
+      if (stale.length === 0) return current;
+      const rowSelection = { ...current.rowSelection };
+      for (const id of stale) delete rowSelection[id];
+      return { ...current, rowSelection };
+    });
+  }, [visible, taskList.tasks, onViewChange]);
+
+  // 统计卡片的数字一次遍历算完。
+  const counts = useMemo(() => {
+    const result: Record<StatusGroup, number> = { all: 0, recording: 0, monitoring: 0, attention: 0, paused: 0 };
+    for (const task of tasks) {
+      result.all += 1;
+      for (const group of statusGroups) if (group.id !== "all" && inGroup(task, group.id)) result[group.id] += 1;
+    }
+    return result;
+  }, [tasks]);
+
   const selected = visible.filter((task) => view.rowSelection[String(task.id)]);
   const activeTask = tasks.find((task) => task.id === view.activeId) ?? null;
-  const editingTask = tasks.find((task) => task.id === editingId) ?? null;
+  const editingTask = tasks.find((task) => task.id === editing.value) ?? null;
   const sort = view.sorting[0] ?? { id: "status", desc: false };
   const filtered = view.group !== "all" || view.platform !== "all" || view.query.trim() !== "";
 
-  const onSortingChange = (updater: Updater<SortingState>) =>
-    onViewChange((current) => ({ ...current, sorting: resolve(updater, current.sorting) }));
-  const onRowSelectionChange = (updater: Updater<RowSelectionState>) =>
-    onViewChange((current) => ({ ...current, rowSelection: resolve(updater, current.rowSelection) }));
+  const onSortingChange = useCallback(
+    (updater: Updater<SortingState>) =>
+      onViewChange((current) => ({ ...current, sorting: resolve(updater, current.sorting) })),
+    [onViewChange],
+  );
+  const onRowSelectionChange = useCallback(
+    (updater: Updater<RowSelectionState>) =>
+      onViewChange((current) => ({ ...current, rowSelection: resolve(updater, current.rowSelection) })),
+    [onViewChange],
+  );
+  const onActivate = useCallback((id: TaskId) => patch({ activeId: id }), [patch]);
+  const closeInspector = useCallback(() => patch({ activeId: null }), [patch]);
 
   const clearSelection = () => patch({ rowSelection: {} });
 
+  /** 批量操作成功后，启停和删除都只取消被处理的那些勾选。 */
+  const unselect = useCallback(
+    (ids: TaskId[]) =>
+      onViewChange((current) => {
+        const rowSelection = { ...current.rowSelection };
+        for (const id of ids) delete rowSelection[String(id)];
+        return { ...current, rowSelection };
+      }),
+    [onViewChange],
+  );
+
   async function batchMonitoring(enabled: boolean) {
+    const ids = selected.map((task) => task.id);
     setBatchBusy(true);
-    const ok = await setMonitoring(
-      selected.map((task) => task.id),
-      enabled,
-    );
+    const ok = await setMonitoring(ids, enabled);
     setBatchBusy(false);
-    if (ok) clearSelection();
+    if (ok) unselect(ids);
   }
 
-  function onDeleted(ids: TaskId[]) {
-    onViewChange((current) => {
-      const rowSelection = { ...current.rowSelection };
-      for (const id of ids) delete rowSelection[String(id)];
-      return {
-        ...current,
-        rowSelection,
-        activeId: current.activeId !== null && ids.includes(current.activeId) ? null : current.activeId,
-      };
-    });
-  }
+  const onDeleted = useCallback(
+    (ids: TaskId[]) => {
+      unselect(ids);
+      onViewChange((current) =>
+        current.activeId !== null && ids.includes(current.activeId) ? { ...current, activeId: null } : current,
+      );
+    },
+    [onViewChange, unselect],
+  );
 
   const showTask = (id: TaskId) => {
     // 定位到任务：清除会把它隐藏的筛选。
@@ -144,19 +205,28 @@ export function RoomsPage({ view, onViewChange, focusTask }: RoomsPageProps) {
         <header className="flex items-center gap-2.5 px-5 pt-3.5">
           <h1 className="m-0 text-[17px] font-semibold">直播间</h1>
           <span className="flex-1" />
-          <Button onClick={() => setAdding(true)}>
+          <Button onClick={openAdd}>
             <Plus aria-hidden />
             添加直播间
           </Button>
         </header>
 
-        {tasks.length === 0 ? (
-          <EmptyState onAdd={() => setAdding(true)} />
+        {taskList.tasks === null ? (
+          taskList.error ? (
+            <LoadError error={taskList.error} onRetry={taskList.reload} />
+          ) : (
+            <div className="flex flex-1 items-center justify-center gap-2 text-muted-foreground" role="status">
+              <Loader2 className="size-4 animate-spin" aria-hidden />
+              正在读取直播间…
+            </div>
+          )
+        ) : tasks.length === 0 ? (
+          <EmptyState onAdd={openAdd} />
         ) : (
           <>
             <div className="grid grid-cols-5 gap-2 px-5 pt-3.5 xl:gap-2.5" role="group" aria-label="按状态筛选">
               {statusGroups.map((group) => {
-                const count = tasks.filter((task) => inGroup(task, group.id)).length;
+                const count = counts[group.id];
                 const on = view.group === group.id;
                 const mark = groupMark[group.id];
                 return (
@@ -258,13 +328,12 @@ export function RoomsPage({ view, onViewChange, focusTask }: RoomsPageProps) {
               {visible.length > 0 ? (
                 <TaskTable
                   tasks={visible}
-                  now={now}
                   sorting={view.sorting}
                   onSortingChange={onSortingChange}
                   rowSelection={view.rowSelection}
                   onRowSelectionChange={onRowSelectionChange}
                   activeId={view.activeId}
-                  onActivate={(id) => patch({ activeId: id })}
+                  onActivate={onActivate}
                 />
               ) : (
                 <div className="flex flex-col items-center gap-3 px-5 py-14 text-center text-muted-foreground">
@@ -294,7 +363,7 @@ export function RoomsPage({ view, onViewChange, focusTask }: RoomsPageProps) {
                     <Pause aria-hidden />
                     暂停
                   </BatchButton>
-                  <BatchButton onClick={() => setDeleting(selected)} disabled={batchBusy}>
+                  <BatchButton onClick={() => openDelete(selected)} disabled={batchBusy}>
                     <Trash2 aria-hidden />
                     删除
                   </BatchButton>
@@ -320,16 +389,33 @@ export function RoomsPage({ view, onViewChange, focusTask }: RoomsPageProps) {
         <TaskInspector
           key={activeTask.id}
           task={activeTask}
-          now={now}
-          onClose={() => patch({ activeId: null })}
-          onEdit={() => setEditingId(activeTask.id)}
-          onDelete={() => setDeleting([activeTask])}
+          onClose={closeInspector}
+          onEdit={openEdit}
+          onDelete={openDelete}
         />
       )}
 
-      <AddTaskDialog open={adding} onOpenChange={setAdding} onShowTask={showTask} />
-      <EditTaskDialog task={editingTask} onOpenChange={(open) => !open && setEditingId(null)} />
-      <DeleteTasksDialog tasks={deleting} onOpenChange={(open) => !open && setDeleting(null)} onDeleted={onDeleted} />
+      <AddTaskDialog
+        key={"add-" + adding.key}
+        open={adding.open}
+        onOpenChange={(open) => setAdding((current) => ({ ...current, open }))}
+        onShowTask={showTask}
+      />
+      {editingTask && (
+        <EditTaskDialog
+          key={"edit-" + editing.key}
+          task={editingTask}
+          open={editing.open}
+          onOpenChange={(open) => setEditing((current) => ({ ...current, open }))}
+        />
+      )}
+      <DeleteTasksDialog
+        key={"delete-" + deleting.key}
+        tasks={deleting.value}
+        open={deleting.open}
+        onOpenChange={(open) => setDeleting((current) => ({ ...current, open }))}
+        onDeleted={onDeleted}
+      />
     </div>
   );
 }
@@ -345,6 +431,24 @@ function BatchButton({ className, ...props }: React.ComponentProps<typeof Button
       )}
       {...props}
     />
+  );
+}
+
+function LoadError({ error, onRetry }: { error: unknown; onRetry: () => void }) {
+  const view = describeError(error);
+  return (
+    <div className="mx-5 mt-3.5 mb-4 flex flex-1 items-center justify-center rounded-xl border bg-card">
+      <div className="flex max-w-sm flex-col items-center gap-2 px-6 py-14 text-center" role="alert">
+        <span className="mb-1 grid size-10 place-items-center rounded-full bg-status-recording-soft text-status-recording">
+          <AlertTriangle className="size-5" aria-hidden />
+        </span>
+        <p className="m-0 text-sm font-medium">无法读取直播间列表</p>
+        <p className="m-0 break-words text-muted-foreground">{view.message || view.title}</p>
+        <Button className="mt-2" onClick={onRetry}>
+          重试
+        </Button>
+      </div>
+    </div>
   );
 }
 

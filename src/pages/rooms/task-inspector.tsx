@@ -1,8 +1,8 @@
-import { useEffect, useState, type ReactNode } from "react";
-import { ExternalLink, FolderOpen, Pause, Pencil, Play, Square, Trash2, X } from "lucide-react";
+import { memo, useEffect, useState, type ReactNode } from "react";
+import { ExternalLink, FolderOpen, Loader2, Pause, Pencil, Play, Square, Trash2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { api, type ActivityEntry, type ActivityKind, type TaskSnapshot } from "@/lib/api";
+import { api, type ActivityEntry, type ActivityKind, type TaskId, type TaskSnapshot } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { AnchorAvatar, PlatformTag } from "@/pages/rooms/anchor";
 import {
@@ -19,16 +19,26 @@ import {
 import { Notice } from "@/pages/rooms/notice";
 import { openFolder, openInBrowser, setMonitoring, stopRecording } from "@/pages/rooms/task-actions";
 import { TaskStatus } from "@/pages/rooms/task-status";
+import { useNow } from "@/pages/rooms/use-now";
 
 const ACTIVITY_LIMIT = 20;
 
-/** 订阅某个任务的最近动态：先取一页，再把推送的新动态叠加到前面。 */
-function useTaskActivity(taskId: number): ActivityEntry[] | null {
+type ActivityState = { entries: ActivityEntry[] | null; failed: boolean };
+
+/** 订阅某个任务的最近动态：先取一页，再把推送的新动态叠加到前面。订阅或读取失败时标记 failed。 */
+function useTaskActivity(taskId: number): ActivityState {
   const [entries, setEntries] = useState<ActivityEntry[] | null>(null);
+  const [failed, setFailed] = useState(false);
   useEffect(() => {
     let active = true;
     let pending: ActivityEntry[] | null = [];
     setEntries(null);
+    setFailed(false);
+    const fail = () => {
+      if (!active) return;
+      setFailed(true);
+      setEntries((current) => current ?? []);
+    };
     const merge = (incoming: ActivityEntry[], base: ActivityEntry[]) => {
       const seen = new Set(base.map((entry) => entry.id));
       return [...incoming.filter((entry) => !seen.has(entry.id)).reverse(), ...base].slice(0, ACTIVITY_LIMIT);
@@ -38,25 +48,33 @@ function useTaskActivity(taskId: number): ActivityEntry[] | null {
       if (pending) pending.push(entry);
       else setEntries((current) => merge([entry], current ?? []));
     });
-    void unlistenPromise.then(() =>
-      api.listActivity({ taskId, limit: ACTIVITY_LIMIT }).then(
-        (page) => {
+    // 监听注册失败也继续读取一页，只是不再有实时更新。
+    void unlistenPromise
+      .catch(() => undefined)
+      .then(() =>
+        api.listActivity({ taskId, limit: ACTIVITY_LIMIT }).then((page) => {
           if (!active) return;
           const buffered = pending ?? [];
           pending = null;
           setEntries(merge(buffered, page.items));
-        },
-        () => {
-          if (active) setEntries([]);
-        },
-      ),
-    );
+        }, fail),
+      );
+    void unlistenPromise.catch(fail);
     return () => {
       active = false;
-      void unlistenPromise.then((unlisten) => unlisten());
+      void unlistenPromise.then(
+        (unlisten) => unlisten(),
+        () => undefined,
+      );
     };
   }, [taskId]);
-  return entries;
+  return { entries, failed };
+}
+
+/** 已录时长：只有这一处随时钟刷新。 */
+function Elapsed({ since }: { since: number }) {
+  const now = useNow();
+  return <>{formatDuration(now - since)}</>;
 }
 
 const activityDot: Record<ActivityKind, string> = {
@@ -104,14 +122,14 @@ function KeyValues({ rows }: { rows: [string, ReactNode, string?][] }) {
 
 interface TaskInspectorProps {
   task: TaskSnapshot;
-  now: number;
   onClose: () => void;
-  onEdit: () => void;
-  onDelete: () => void;
+  onEdit: (id: TaskId) => void;
+  onDelete: (tasks: TaskSnapshot[]) => void;
 }
 
-export function TaskInspector({ task, now, onClose, onEdit, onDelete }: TaskInspectorProps) {
-  const activity = useTaskActivity(task.id);
+/** 回调由页面用 useCallback 固定，只有当前任务的快照变化时才重渲染。 */
+export const TaskInspector = memo(function TaskInspector({ task, onClose, onEdit, onDelete }: TaskInspectorProps) {
+  const { entries: activity, failed: activityFailed } = useTaskActivity(task.id);
   const [busy, setBusy] = useState<"stop" | "monitor" | null>(null);
   const recording = isRecordingActive(task.record);
   const paused = task.monitoring === "paused";
@@ -180,7 +198,7 @@ export function TaskInspector({ task, now, onClose, onEdit, onDelete }: TaskInsp
               rows={[
                 ["文件", task.record.filePath.split(/[\\/]/).pop() ?? task.record.filePath, task.record.filePath],
                 ["位置", task.record.filePath, task.record.filePath],
-                ["已录", formatDuration(now - task.record.startedAt), `开始于 ${formatDateTime(task.record.startedAt)}`],
+                ["已录", <Elapsed since={task.record.startedAt} />, `开始于 ${formatDateTime(task.record.startedAt)}`],
                 ...(task.record.state === "recording"
                   ? ([
                       ["大小", formatBytes(task.record.bytesWritten)],
@@ -208,7 +226,7 @@ export function TaskInspector({ task, now, onClose, onEdit, onDelete }: TaskInsp
           {activity === null ? (
             <p className="m-0 text-xs text-muted-foreground">正在读取…</p>
           ) : activity.length === 0 ? (
-            <p className="m-0 text-xs text-muted-foreground">暂无动态</p>
+            <p className="m-0 text-xs text-muted-foreground">{activityFailed ? "动态读取失败" : "暂无动态"}</p>
           ) : (
             <ul className="m-0 flex list-none flex-col gap-2.5 p-0">
               {activity.map((entry) => (
@@ -230,11 +248,11 @@ export function TaskInspector({ task, now, onClose, onEdit, onDelete }: TaskInsp
           <Button
             variant="destructive"
             className="col-span-2"
-            disabled={busy !== null}
+            disabled={busy !== null || task.record.state === "finishing"}
             onClick={() => void run("stop", () => stopRecording(task))}
           >
-            <Square aria-hidden />
-            停止录制
+            {task.record.state === "finishing" ? <Loader2 className="animate-spin" aria-hidden /> : <Square aria-hidden />}
+            {task.record.state === "finishing" ? "正在收尾…" : "停止录制"}
           </Button>
         )}
         <Button
@@ -245,7 +263,7 @@ export function TaskInspector({ task, now, onClose, onEdit, onDelete }: TaskInsp
           {paused ? <Play aria-hidden /> : <Pause aria-hidden />}
           {paused ? "恢复监控" : "暂停监控"}
         </Button>
-        <Button variant="outline" onClick={onEdit}>
+        <Button variant="outline" onClick={() => onEdit(task.id)}>
           <Pencil aria-hidden />
           编辑
         </Button>
@@ -253,11 +271,11 @@ export function TaskInspector({ task, now, onClose, onEdit, onDelete }: TaskInsp
           <FolderOpen aria-hidden />
           打开文件夹
         </Button>
-        <Button variant="outline" className="text-destructive hover:text-destructive" onClick={onDelete}>
+        <Button variant="outline" className="text-destructive hover:text-destructive" onClick={() => onDelete([task])}>
           <Trash2 aria-hidden />
           删除
         </Button>
       </footer>
     </aside>
   );
-}
+});

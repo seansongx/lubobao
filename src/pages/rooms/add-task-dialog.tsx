@@ -31,7 +31,7 @@ type Phase =
   | { step: "resolving"; force: boolean }
   | { step: "added"; task: TaskSnapshot }
   | { step: "duplicate"; existing: TaskSnapshot[]; candidate: ResolvedRoom }
-  | { step: "error"; error: ErrorView };
+  | { step: "error"; error: ErrorView; force: boolean };
 
 /** 浏览器假数据下的示例链接，便于演示各种结果。 */
 const mockExamples: { label: string; url: string }[] = [
@@ -52,24 +52,24 @@ interface AddTaskDialogProps {
 export function AddTaskDialog({ open, onOpenChange, onShowTask }: AddTaskDialogProps) {
   const id = useId();
   const inputRef = useRef<HTMLInputElement>(null);
+  // 父组件每次打开都换 key 重新挂载，草稿从空白开始，不会闪出上一次的内容。
   const [url, setUrl] = useState("");
   const [quality, setQuality] = useState<Quality>("OD");
   const [notifyOnly, setNotifyOnly] = useState(false);
   const [defaultQuality, setDefaultQuality] = useState<Quality | undefined>();
   const [phase, setPhase] = useState<Phase>({ step: "input" });
+  const touched = useRef({ quality: false, notifyOnly: false });
 
-  // 每次打开都重置草稿，默认值取自设置。
+  // 默认值取自设置；设置晚到时，不覆盖用户已经改过的字段。
   useEffect(() => {
     if (!open) return;
     let active = true;
-    setUrl("");
-    setPhase({ step: "input" });
     void api.getSettings().then(
       (settings) => {
         if (!active) return;
-        setQuality(settings.record_quality);
         setDefaultQuality(settings.record_quality);
-        setNotifyOnly(settings.only_notify_no_record);
+        if (!touched.current.quality) setQuality(settings.record_quality);
+        if (!touched.current.notifyOnly) setNotifyOnly(settings.only_notify_no_record);
       },
       () => undefined,
     );
@@ -92,7 +92,7 @@ export function AddTaskDialog({ open, onOpenChange, onShowTask }: AddTaskDialogP
         setPhase({ step: "added", task: result.task });
       }
     } catch (error) {
-      setPhase({ step: "error", error: describeError(error) });
+      setPhase({ step: "error", error: describeError(error), force });
     }
   }
 
@@ -105,7 +105,8 @@ export function AddTaskDialog({ open, onOpenChange, onShowTask }: AddTaskDialogP
       inputRef.current?.focus();
       return;
     }
-    void submit(false);
+    // 强制添加失败后点“重试”，仍按强制添加提交。
+    void submit(phase.step === "error" && phase.force);
   }
 
   function editUrl(next: string) {
@@ -161,9 +162,15 @@ export function AddTaskDialog({ open, onOpenChange, onShowTask }: AddTaskDialogP
 
           <RecordOptions
             quality={quality}
-            onQualityChange={setQuality}
+            onQualityChange={(value) => {
+              touched.current.quality = true;
+              setQuality(value);
+            }}
             notifyOnly={notifyOnly}
-            onNotifyOnlyChange={setNotifyOnly}
+            onNotifyOnlyChange={(value) => {
+              touched.current.notifyOnly = true;
+              setNotifyOnly(value);
+            }}
             defaultQuality={defaultQuality}
             disabled={busy || phase.step === "duplicate"}
           />

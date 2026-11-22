@@ -1,4 +1,4 @@
-import { useEffect, useId, useState, type FormEvent } from "react";
+import { useId, useState, type FormEvent } from "react";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -20,34 +20,23 @@ import { Notice } from "@/pages/rooms/notice";
 import { RecordOptions } from "@/pages/rooms/task-form-fields";
 
 interface EditTaskDialogProps {
-  task: TaskSnapshot | null;
+  /** 最新的任务快照。父组件每次打开时换 key，草稿按打开时的快照初始化。 */
+  task: TaskSnapshot;
+  open: boolean;
   onOpenChange: (open: boolean) => void;
 }
 
 type Problem = { kind: "error"; error: ErrorView } | { kind: "duplicate"; existing: TaskSnapshot[] };
 
-export function EditTaskDialog({ task, onOpenChange }: EditTaskDialogProps) {
+export function EditTaskDialog({ task, open, onOpenChange }: EditTaskDialogProps) {
   const id = useId();
-  const [url, setUrl] = useState("");
-  const [quality, setQuality] = useState<Quality>("OD");
-  const [notifyOnly, setNotifyOnly] = useState(false);
-  const [note, setNote] = useState("");
+  const [url, setUrl] = useState(() => task.url);
+  const [quality, setQuality] = useState<Quality>(() => task.quality);
+  const [notifyOnly, setNotifyOnly] = useState(() => task.notifyOnly);
+  const [note, setNote] = useState(() => task.note);
   const [saving, setSaving] = useState(false);
   const [problem, setProblem] = useState<Problem | null>(null);
 
-  // 只在打开新任务时载入草稿，后端事件刷新快照不覆盖正在编辑的内容。
-  const taskId = task?.id;
-  useEffect(() => {
-    if (!task) return;
-    setUrl(task.url);
-    setQuality(task.quality);
-    setNotifyOnly(task.notifyOnly);
-    setNote(task.note);
-    setProblem(null);
-    setSaving(false);
-  }, [taskId]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  if (!task) return <Dialog open={false} />;
   const current = task;
 
   const changes: UpdateTaskInput = { id: current.id };
@@ -87,7 +76,7 @@ export function EditTaskDialog({ task, onOpenChange }: EditTaskDialogProps) {
   }
 
   return (
-    <Dialog open onOpenChange={(next) => !saving && onOpenChange(next)}>
+    <Dialog open={open} onOpenChange={(next) => !saving && onOpenChange(next)}>
       <DialogContent className="sm:max-w-[520px]">
         <form onSubmit={onSubmit} className="flex flex-col gap-4">
           <DialogHeader>

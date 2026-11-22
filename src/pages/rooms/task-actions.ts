@@ -62,7 +62,9 @@ export async function openFolder(task: TaskSnapshot): Promise<void> {
 }
 
 export async function openInBrowser(task: TaskSnapshot): Promise<void> {
-  const url = task.liveUrl ?? task.url;
+  const raw = (task.liveUrl ?? task.url).trim();
+  // 后端接受不带协议的输入（如 v.douyin.com/xxx），opener 只允许 http/https。
+  const url = raw.includes("://") ? raw : `https://${raw}`;
   if (isMockBackend) {
     window.open(url, "_blank", "noopener");
     return;
