@@ -1,34 +1,62 @@
 // 浏览器假数据（npm run dev，不在 Tauri 里时使用），方便调界面。
-// 任务覆盖七种显示状态；FFmpeg 状态可用地址参数切换：
-//   ?ffmpeg=checking | notInstalled | waiting | downloading | verifying | ready | updating | outdated | failed | fatal
-// 缺省时模拟一次下载：下载中 → 校验 → 可用。控制台可调用 window.__lubobaoMock.setFfmpeg("failed")。
 // 显示状态的推导复刻 src-tauri/src/tasks/model.rs 的 derive_display，只用于假数据。
 //
-// 添加任务的演示链接（见 resolveMock）：
-//   live.douyin.com/{数字或抖音号}    识别成功；同一房间号或同一主播判为重复
-//   v.douyin.com/CeiU5cbX            主页短链，与 live.douyin.com/745964462470 是同一主播
-//   v.douyin.com/{其他}               识别为列表中第一个主播（演示重复）
-//   www.douyin.com/user/{sec_uid}    主页链接
+// 数据
+//   任务：抖音和快手，覆盖七种显示状态（含两个录制中、一个仅通知）。
+//   动态：三天的历史记录，覆盖全部类型（含 warning），id 按时间递增，与 before 分页一致。
+//   录像库：按平台 / 主播分目录的录像树，含分段、空目录和 800 个分段的大目录。
+//
+// 地址参数
+//   ?ffmpeg=checking | notInstalled | waiting | downloading | verifying | ready | updating | outdated | failed | fatal
+//       缺省时模拟一次下载：下载中 → 校验 → 可用。
+//   ?library=missing   录像根目录不存在；把设置 live_save_path 改成其他路径也视为不存在。
+//   ?tasks=slow        任务列表延迟 1.5 秒返回（演示加载中）。
+//   ?tasks=fail        前两次读取任务列表失败（状态栏和直播间各一次，演示失败和重试）。
+//
+// 添加任务的演示链接（见 resolveMock）
+//   live.douyin.com/{数字或抖音号}      识别成功；同一主播或同一链接判为重复
+//   v.douyin.com/CeiU5cbX              主页短链，与 live.douyin.com/745964462470 是同一主播
+//   v.douyin.com/{其他}                识别为列表中第一个主播（演示重复）
+//   www.douyin.com/user/{sec_uid}      主页链接
+//   live.kuaishou.com/u/{id}           快手直播间
 //   路径含 login / timeout / busy / parse  分别返回 auth_required / network / rate_limited / parse
-//   其他域名                          unsupported_platform；无法解析的文本为 invalid_url
-// 事件推送：录制中的任务每秒增长大小；等待开播的任务每隔一段时间模拟一次检测；重试中的任务按 nextRetryAt 重试。
-// 任务列表：?tasks=slow 延迟 1.5 秒返回；?tasks=fail 第一次读取失败。
-// 控制台：window.__lubobaoMock.goLive(id) / endLive(id) / setStopSupported(true) / setEvents(false)。
+//   其他域名                            unsupported_platform；无法解析的文本为 invalid_url
+//
+// 事件推送
+//   录制中的任务每秒增长大小；等待开播的任务每隔一段时间模拟一次检测；重试中的任务按 nextRetryAt 重试；
+//   调度每 180 秒一轮，推送 scheduler-status。手动停止录制后 recordHeld 为 true，下播或重新启用监控后恢复。
+//
+// 控制台 window.__lubobaoMock
+//   setFfmpeg("failed")、simulateDownload()           FFmpeg 状态
+//   setLibraryMissing(true)                          录像根目录是否存在
+//   pushActivity("warning")                          推送一条新动态
+//   goLive(id)、endLive(id)                          模拟开播（自动录制）与下播
+//   setStopSupported(false)                          停止录制返回 not_implemented
+//   setEvents(false)                                 暂停进度和检测的模拟推送
+//   backend                                          假后端对象
 
 import type { UnlistenFn } from "@tauri-apps/api/event";
 
 import type {
   ActivityEntry,
+  ActivityKind,
   ActivityPage,
   AddTaskInput,
   Backend,
   CommandError,
   DisplayStatus,
   FfmpegStatus,
+  LibraryEntry,
+  LibraryError,
+  LibraryListing,
+  DiskSpace,
+  UsageSnapshot,
   LiveState,
   Monitoring,
+  Platform,
   RecordState,
   ResolvedRoom,
+  SchedulerStatus,
   Settings,
   TaskId,
   TaskMutation,
@@ -107,20 +135,27 @@ function displayReason(status: DisplayStatus, live: LiveState, record: RecordSta
 }
 
 type MockSeed = Pick<TaskSnapshot, "anchorName" | "roomId" | "monitoring" | "live" | "record"> &
-  Partial<Pick<TaskSnapshot, "notifyOnly" | "quality" | "note" | "anchorId" | "url">>;
+  Partial<Pick<TaskSnapshot, "notifyOnly" | "quality" | "note" | "platform" | "anchorId" | "url" | "liveUrl">>;
+
+const mockPlatforms: Record<Platform, { name: string; roomUrl: (roomId: string) => string }> = {
+  douyin: { name: "抖音", roomUrl: (roomId) => `https://live.douyin.com/${roomId}` },
+  kuaishou: { name: "快手直播", roomUrl: (roomId) => `https://live.kuaishou.com/u/${roomId}` },
+};
 
 function snapshot(id: TaskId, seed: MockSeed, createdAt: number): TaskSnapshot {
   const notifyOnly = seed.notifyOnly ?? false;
   const display = deriveDisplay(seed.monitoring, seed.live, seed.record, notifyOnly);
+  const platform = seed.platform ?? "douyin";
+  const roomUrl = mockPlatforms[platform].roomUrl(seed.roomId);
   return {
     id,
-    url: seed.url ?? `https://live.douyin.com/${seed.roomId}`,
-    platform: "douyin",
-    platformName: "抖音",
+    url: seed.url ?? roomUrl,
+    platform,
+    platformName: mockPlatforms[platform].name,
     roomId: seed.roomId,
-    anchorId: seed.anchorId ?? `MS4wLjABAAAA-mock-${id}`,
+    anchorId: seed.anchorId ?? (platform === "kuaishou" ? String(100_000_000 + id) : `MS4wLjABAAAA-mock-${id}`),
     anchorName: seed.anchorName,
-    liveUrl: `https://live.douyin.com/${seed.roomId}`,
+    liveUrl: seed.liveUrl === undefined ? roomUrl : seed.liveUrl,
     quality: seed.quality ?? "OD",
     notifyOnly,
     note: seed.note ?? "",
@@ -128,6 +163,7 @@ function snapshot(id: TaskId, seed: MockSeed, createdAt: number): TaskSnapshot {
     monitoring: seed.monitoring,
     live: seed.live,
     record: seed.record,
+    recordHeld: false,
     display,
     displayReason: displayReason(display, seed.live, seed.record),
   };
@@ -155,6 +191,29 @@ function seedTasks(now: number): TaskSnapshot[] {
       monitoring: "enabled",
       quality: "HD",
       live: { state: "checking", since: now - 1_000 },
+      record: { state: "idle" },
+    },
+    {
+      anchorName: "峡谷练习生",
+      roomId: "canyon_trainee",
+      platform: "kuaishou",
+      monitoring: "enabled",
+      live: { state: "live", checkedAt: now - 40_000, title: null },
+      record: {
+        state: "recording",
+        filePath: "D:\\Records\\快手直播\\峡谷练习生\\峡谷练习生_2026-11-22_21-02-10.ts",
+        startedAt: now - 26 * minute,
+        bytesWritten: 1_634_000_000,
+        bitrateKbps: 8400,
+      },
+    },
+    {
+      anchorName: "乡村厨房",
+      roomId: "3xcountrykitchen",
+      platform: "kuaishou",
+      monitoring: "enabled",
+      quality: "HD",
+      live: { state: "offline", checkedAt: now - 3 * minute },
       record: { state: "idle" },
     },
     {
@@ -249,12 +308,213 @@ const defaultSettings: Settings = {
   folder_name_title: false,
   enable_proxy: true,
   proxy_address: "",
+  default_platform_with_proxy:
+    "tiktok, sooplive, pandalive, winktv, flextv, popkontv, twitch, liveme, showroom, chzzk, shopee, shp, youtu, youtube, lang",
   execute_custom_script: false,
   custom_script_command: "",
+  platform_cookies: {},
   system_notification_enabled: true,
   stream_start_notification_enabled: false,
   stream_end_notification_enabled: false,
 };
+
+// ---- 录像库 ----
+
+/** 目录：子项名称 → 子目录或文件。文件为 [字节数, 距今分钟数]。 */
+interface MockDir {
+  [name: string]: MockDir | MockFile;
+}
+type MockFile = [number, number];
+
+const GB = 1024 ** 3;
+const MB = 1024 ** 2;
+
+function segments(prefix: string, count: number, ageMinutes: number, bytes: number): MockDir {
+  const dir: MockDir = {};
+  for (let i = 0; i < count; i++) {
+    dir[`${prefix}_${String(i).padStart(3, "0")}.ts`] = [bytes, ageMinutes - i * 30];
+  }
+  return dir;
+}
+
+function mockLibraryTree(): MockDir {
+  return {
+    抖音: {
+      一只小羊驼: {
+        // 正在录制的一次，最后一段仍在写入。
+        ...segments("一只小羊驼_2026-11-22_20-14-03", 3, 83, 1.3 * GB),
+        ...segments("一只小羊驼_2026-11-21_20-01-47", 5, 1_500, 1.4 * GB),
+        "一只小羊驼_2026-11-20_19-58-12.mp4": [5.62 * GB, 2_900],
+      },
+      甜品研究所: {
+        "甜品研究所_2026-11-19_14-00-05_000.ts": [820 * MB, 4_600],
+        "甜品研究所_2026-11-18_14-02-44_000.ts": [1.1 * GB, 6_100],
+      },
+      晚八点读书会: {},
+      // 大目录：800 个分段，用来检查虚拟滚动。
+      长时间主播: {
+        ...segments("长时间主播_2026-11-10_08-00-00", 500, 20_000, 1.2 * GB),
+        ...segments("长时间主播_2026-11-01_08-00-00", 300, 40_000, 1.2 * GB),
+      },
+      阿星游戏: {
+        "阿星游戏_2026-11-22_21-01-30_000.ts": [312 * MB, 22],
+      },
+    },
+    快手: {
+      夜听电台: {
+        "夜听电台 第 12 期_2026-11-21_23-40-00_000.ts": [2.2 * GB, 1_300],
+        "夜听电台 第 12 期_2026-11-21_23-40-00_001.ts": [640 * MB, 1_270],
+      },
+    },
+    空目录: {},
+    "手动转存 (旧).mp4": [3.4 * GB, 20_000],
+  };
+}
+
+function isMockDir(node: MockDir | MockFile): node is MockDir {
+  return !Array.isArray(node);
+}
+
+function splitSegment(name: string): [string, number | null] {
+  const match = /^(.+)_(\d{3,})(\.[^.]+)$/.exec(name);
+  return match ? [match[1] + match[3], Number(match[2])] : [name, null];
+}
+
+/** 与 src-tauri/src/library 的排序一致：目录按名称；文件按同次录制分组，组按最新时间倒序，组内按序号。 */
+function sortEntries(entries: LibraryEntry[]): LibraryEntry[] {
+  const dirs = entries
+    .filter((entry) => entry.kind === "dir")
+    .sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
+  const files = entries.filter((entry) => entry.kind === "file");
+  const latest = new Map<string, number>();
+  for (const file of files) {
+    const key = file.group ?? file.name;
+    latest.set(key, Math.max(latest.get(key) ?? -Infinity, file.modifiedAt ?? -Infinity));
+  }
+  const groupOf = (entry: LibraryEntry) => entry.group ?? entry.name;
+  files.sort(
+    (a, b) =>
+      (latest.get(groupOf(b)) ?? 0) - (latest.get(groupOf(a)) ?? 0) ||
+      groupOf(b).localeCompare(groupOf(a)) ||
+      (a.segment ?? 0) - (b.segment ?? 0) ||
+      a.name.localeCompare(b.name),
+  );
+  return [...dirs, ...files];
+}
+
+function walkMock(dir: MockDir): { bytes: number; files: number } {
+  let bytes = 0;
+  let files = 0;
+  for (const node of Object.values(dir)) {
+    if (isMockDir(node)) {
+      const child = walkMock(node);
+      bytes += child.bytes;
+      files += child.files;
+    } else {
+      bytes += node[0];
+      files += 1;
+    }
+  }
+  return { bytes, files };
+}
+
+// ---- 动态历史 ----
+
+interface ActivitySeed {
+  task: TaskSnapshot | null;
+  kind: ActivityKind;
+  message: string;
+  detail?: Record<string, unknown>;
+}
+
+/** 三天的历史动态，按时间从旧到新返回。条数超过一页（50），方便检查分页。 */
+function seedActivity(tasks: TaskSnapshot[], now: number): { at: number; seed: ActivitySeed }[] {
+  const byName = (name: string) => tasks.find((task) => task.anchorName === name) ?? null;
+  const minute = 60_000;
+  const result: { at: number; seed: ActivitySeed }[] = [];
+  const push = (minutesAgo: number, seed: ActivitySeed) =>
+    result.push({ at: now - minutesAgo * minute, seed });
+
+  for (const task of tasks) push(4_400 - task.id * 3, { task, kind: "user_action", message: "添加任务" });
+  // 已删除的任务：动态保留，taskId 为空。
+  push(4_300, { task: null, kind: "user_action", message: "删除任务" });
+
+  // 前两天：每个录制任务每天开播、录制、重试、下播各一轮。
+  for (const day of [2, 1]) {
+    const base = day * 1_440;
+    for (const [offset, name] of [
+      [120, "一只小羊驼"],
+      [260, "甜品研究所"],
+      [300, "阿星游戏"],
+      [330, "山野徒步"],
+    ] as const) {
+      const task = byName(name);
+      const start = base + offset;
+      const filePath = `C:\\Users\\me\\Videos\\录播宝\\抖音\\${name}\\${name}_000.ts`;
+      push(start, { task, kind: "live_start", message: "检测到开播", detail: { title: "今晚见" } });
+      push(start - 1, { task, kind: "record_start", message: "开始录制", detail: { filePath, quality: "OD" } });
+      for (const retry of [0, 1]) {
+        push(start - 20 - retry * 15, {
+          task,
+          kind: "failure",
+          message: "检测失败：连接超时",
+          detail: { kind: "network" },
+        });
+      }
+      push(start - 110, { task, kind: "live_end", message: "已下播" });
+      push(start - 111, {
+        task,
+        kind: "record_end",
+        message: "录制结束",
+        detail: { filePath, durationMs: 110 * minute },
+      });
+    }
+    push(base + 30, { task: byName("街头篮球"), kind: "user_action", message: "暂停监控" });
+    push(base + 5, { task: byName("晚八点读书会"), kind: "live_start", message: "检测到开播" });
+  }
+
+  // 今天。
+  push(200, {
+    task: byName("晚八点读书会"),
+    kind: "live_start",
+    message: "检测到开播",
+    detail: { title: "共读《活着》" },
+  });
+  push(84, { task: byName("一只小羊驼"), kind: "live_start", message: "检测到开播", detail: { title: "晚间闲聊" } });
+  push(83, {
+    task: byName("一只小羊驼"),
+    kind: "record_start",
+    message: "开始录制",
+    detail: { filePath: "C:\\Users\\me\\Videos\\录播宝\\抖音\\一只小羊驼\\一只小羊驼_2026-11-22_20-14-03_000.ts", quality: "OD" },
+  });
+  push(40, {
+    task: byName("私密直播间"),
+    kind: "failure",
+    message: "检测失败：该直播间需要登录后观看，请在设置中填写 Cookie",
+    detail: { kind: "auth_required" },
+  });
+  push(22, { task: byName("阿星游戏"), kind: "record_start", message: "开始录制", detail: { quality: "OD" } });
+  push(1, {
+    task: byName("阿星游戏"),
+    kind: "failure",
+    message: "录制失败：磁盘空间不足：D:\\Records 剩余 1.2 GB，低于阈值 2 GB",
+    detail: { filePath: null },
+  });
+  push(15, {
+    task: byName("峡谷练习生"),
+    kind: "warning",
+    message: "代理是 SOCKS，录制不支持，本次直连录制",
+    detail: { proxy: "socks5://127.0.0.1:1080" },
+  });
+  push(0.2, {
+    task: byName("老王说车"),
+    kind: "failure",
+    message: "检测失败：连接超时，30 秒后重试",
+    detail: { kind: "network" },
+  });
+
+  return result.sort((a, b) => a.at - b.at);
+}
 
 type Handler<T> = (payload: T) => void;
 
@@ -295,7 +555,7 @@ function normalizeUrl(url: string): string {
 const DEMO_ROOM = "745964462470";
 const DEMO_ANCHOR = `MS4wLjABAAAA-mock-anchor-${DEMO_ROOM}`;
 
-/** 模拟 platforms::resolve：只认抖音，按链接内容返回各类错误。 */
+/** 模拟 platforms::resolve：认抖音和快手，按链接内容返回各类错误。 */
 function resolveMock(input: string, tasks: TaskSnapshot[]): ResolvedRoom | CommandError {
   const url = input.trim();
   if (!url) return { kind: "invalid_input", message: "请输入直播间链接" };
@@ -308,13 +568,33 @@ function resolveMock(input: string, tasks: TaskSnapshot[]): ResolvedRoom | Comma
   const host = parsed.hostname.toLowerCase();
   const path = parsed.pathname;
   if (!host.includes(".")) return { kind: "invalid_url", message: `无法识别的链接：${url}` };
-  if (!host.endsWith("douyin.com")) return { kind: "unsupported_platform", message: `暂不支持 ${host} 的直播间` };
+  const platform: Platform | null = host.endsWith("douyin.com")
+    ? "douyin"
+    : host.endsWith("kuaishou.com")
+      ? "kuaishou"
+      : null;
+  if (!platform) return { kind: "unsupported_platform", message: `暂不支持 ${host} 的直播间` };
   if (/login/i.test(path)) return { kind: "auth_required", message: "该直播间需要登录后观看，请填写 Cookie" };
-  if (/timeout|network/i.test(path)) return { kind: "network", message: "连接 live.douyin.com 超时" };
+  if (/timeout|network/i.test(path)) return { kind: "network", message: `连接 ${host} 超时` };
   if (/busy/i.test(path)) return { kind: "rate_limited", message: "当前服务繁忙（10011），请稍后再试" };
   if (/parse/i.test(path)) return { kind: "parse", message: "直播间页面缺少 roomStore 数据" };
 
-  const base = { url, platform: "douyin" as const, platformName: "抖音", isLive: false, title: null };
+  const base = { url, platform, platformName: mockPlatforms[platform].name, isLive: false, title: null };
+  const known = (roomId: string) => tasks.find((task) => task.platform === platform && task.roomId === roomId);
+
+  if (platform === "kuaishou") {
+    const match = /^\/u\/([\w.-]+)\/?$/.exec(path);
+    if (!match) return { kind: "invalid_url", message: `无法从链接中找到快手直播间：${url}` };
+    const roomId = match[1];
+    const task = known(roomId);
+    return {
+      ...base,
+      roomId,
+      anchorId: task?.anchorId ?? `ks-${roomId}`,
+      anchorName: task?.anchorName ?? `快手主播 ${roomId}`,
+      liveUrl: mockPlatforms.kuaishou.roomUrl(roomId),
+    };
+  }
   if (host === "v.douyin.com") {
     const code = path.split("/").filter(Boolean)[0];
     if (!code) return { kind: "invalid_url", message: "短链缺少短码" };
@@ -324,39 +604,27 @@ function resolveMock(input: string, tasks: TaskSnapshot[]): ResolvedRoom | Comma
         roomId: DEMO_ROOM,
         anchorId: DEMO_ANCHOR,
         anchorName: `主播 ${DEMO_ROOM}`,
-        liveUrl: `https://live.douyin.com/${DEMO_ROOM}`,
+        liveUrl: mockPlatforms.douyin.roomUrl(DEMO_ROOM),
       };
     }
-    const first = tasks[0];
+    const first = tasks.find((task) => task.platform === "douyin");
     if (!first) return { kind: "invalid_url", message: "短链已失效" };
-    return {
-      ...base,
-      roomId: first.roomId,
-      anchorId: first.anchorId,
-      anchorName: first.anchorName,
-      liveUrl: first.liveUrl,
-    };
+    return { ...base, roomId: first.roomId, anchorId: first.anchorId, anchorName: first.anchorName, liveUrl: first.liveUrl };
   }
   const user = /^\/user\/([\w-]+)/.exec(path);
   if (user) {
-    return {
-      ...base,
-      roomId: user[1].slice(0, 12),
-      anchorId: user[1],
-      anchorName: `主播 ${user[1].slice(0, 6)}`,
-      liveUrl: null,
-    };
+    return { ...base, roomId: user[1].slice(0, 12), anchorId: user[1], anchorName: `主播 ${user[1].slice(0, 6)}`, liveUrl: null };
   }
   const room = /^\/([\w.-]+)\/?$/.exec(path);
   if (host === "live.douyin.com" && room) {
     const roomId = room[1];
-    const known = tasks.find((task) => task.roomId === roomId);
+    const task = known(roomId);
     return {
       ...base,
       roomId,
-      anchorId: known?.anchorId ?? (roomId === DEMO_ROOM ? DEMO_ANCHOR : `MS4wLjABAAAA-mock-anchor-${roomId}`),
-      anchorName: known?.anchorName ?? `主播 ${roomId}`,
-      liveUrl: `https://live.douyin.com/${roomId}`,
+      anchorId: task?.anchorId ?? (roomId === DEMO_ROOM ? DEMO_ANCHOR : `MS4wLjABAAAA-mock-anchor-${roomId}`),
+      anchorName: task?.anchorName ?? `主播 ${roomId}`,
+      liveUrl: mockPlatforms.douyin.roomUrl(roomId),
     };
   }
   return { kind: "invalid_url", message: `无法从链接中找到直播间：${url}` };
@@ -386,16 +654,34 @@ export function createMockBackend(): Backend {
   let settings = { ...defaultSettings };
   const activity: ActivityEntry[] = [];
   let nextActivityId = 1;
-  let stopSupported = false;
-  const tasksMode = new URLSearchParams(window.location.search).get("tasks");
-  // 状态栏和页面各订阅一次，两次都失败才能稳定演示。
-  let failuresLeft = tasksMode === "fail" ? 2 : 0;
+  // 与 Rust 一致，停止录制默认可用；setStopSupported(false) 演示 not_implemented。
+  let stopSupported = true;
   let eventsEnabled = true;
+  const tasksMode = new URLSearchParams(window.location.search).get("tasks");
+  // 状态栏和直播间各订阅一次，两次都失败才能稳定演示。
+  let failuresLeft = tasksMode === "fail" ? 2 : 0;
 
   const ffmpegChannel = new Channel<FfmpegStatus>();
   const updatedChannel = new Channel<TaskSnapshot>();
   const removedChannel = new Channel<{ ids: TaskId[] }>();
   const activityChannel = new Channel<ActivityEntry>();
+  const schedulerChannel = new Channel<SchedulerStatus>();
+
+  // 假调度：每 180 秒一轮检测。
+  const MOCK_INTERVAL_MS = 180_000;
+  let nextCheckAt = now + 42_000;
+  function schedulerStatus(): SchedulerStatus {
+    return {
+      nextCheckAt: tasks.some((task) => task.monitoring === "enabled") ? nextCheckAt : null,
+      checking: 0,
+      recording: tasks.filter((task) => task.display === "recording").length,
+    };
+  }
+  setInterval(() => {
+    if (Date.now() < nextCheckAt) return;
+    nextCheckAt += MOCK_INTERVAL_MS;
+    schedulerChannel.emit(schedulerStatus());
+  }, 1000);
 
   let ffmpeg: FfmpegStatus = { state: "checking" };
   let simulation: ReturnType<typeof setInterval> | undefined;
@@ -433,10 +719,10 @@ export function createMockBackend(): Backend {
     setTimeout(simulateDownload, 800);
   }
 
-  function log(task: TaskSnapshot | null, kind: ActivityEntry["kind"], message: string, at = Date.now()) {
+  function log(task: TaskSnapshot | null, kind: ActivityEntry["kind"], message: string) {
     const entry: ActivityEntry = {
       id: nextActivityId++,
-      at,
+      at: Date.now(),
       taskId: task?.id ?? null,
       anchorName: task?.anchorName ?? "",
       kind,
@@ -454,9 +740,30 @@ export function createMockBackend(): Backend {
 
   function rederive(task: TaskSnapshot, patch: Partial<TaskSnapshot>): TaskSnapshot {
     const next = { ...task, ...patch };
-    next.display = deriveDisplay(next.monitoring, next.live, next.record, next.notifyOnly);
-    next.displayReason = displayReason(next.display, next.live, next.record);
+    // 与 Rust 一致：手动停止后仍在直播时按仅通知显示。
+    next.display = deriveDisplay(
+      next.monitoring,
+      next.live,
+      next.record,
+      next.notifyOnly || next.recordHeld,
+    );
+    next.displayReason =
+      next.display === "notify" && next.recordHeld && !next.notifyOnly
+        ? "已手动停止录制，下次开播时自动录制"
+        : displayReason(next.display, next.live, next.record);
     return next;
+  }
+
+  for (const { at, seed } of seedActivity(tasks, now)) {
+    activity.unshift({
+      id: nextActivityId++,
+      at,
+      taskId: seed.task?.id ?? null,
+      anchorName: seed.task?.anchorName ?? "旧任务",
+      kind: seed.kind,
+      message: seed.message,
+      detail: seed.detail ?? null,
+    });
   }
 
   function patchTask(id: TaskId, patch: Partial<TaskSnapshot>): TaskSnapshot | null {
@@ -467,38 +774,13 @@ export function createMockBackend(): Backend {
     return next;
   }
 
-  // 种子动态：按时间排序，最新的在最前，id 也按时间递增（与 before 分页一致）。
-  const seedEntries: Omit<ActivityEntry, "id">[] = [];
-  const seed = (task: TaskSnapshot, kind: ActivityEntry["kind"], message: string, at: number) =>
-    seedEntries.push({ at, taskId: task.id, anchorName: task.anchorName, kind, message, detail: null });
-  for (const task of tasks) {
-    const { live, record } = task;
-    seed(task, "user_action", "添加任务", task.createdAt);
-    if (record.state === "recording") {
-      seed(task, "live_start", live.state === "live" && live.title ? `开播：${live.title}` : "开播", record.startedAt - 4_000);
-      seed(task, "record_start", `开始录制 · ${qualityNames[task.quality]}`, record.startedAt);
-    } else if (record.state === "failed") {
-      seed(task, "live_start", "开播", record.failedAt - 20 * 60_000);
-      seed(task, "record_start", "开始录制", record.failedAt - 20 * 60_000 + 3_000);
-      seed(task, "failure", `录制中断：${record.reason}`, record.failedAt);
-    } else if (live.state === "checkFailed") {
-      seed(task, "failure", `检测失败：${live.message}`, live.failedAt);
-    } else if (live.state === "live") {
-      seed(task, "live_start", live.title ? `开播：${live.title}` : "开播", live.checkedAt);
-    } else if (task.monitoring === "paused") {
-      seed(task, "user_action", "暂停监控", task.createdAt + 3_600_000);
-    }
-  }
-  seedEntries.sort((a, b) => a.at - b.at);
-  for (const entry of seedEntries) activity.unshift({ ...entry, id: nextActivityId++ });
-
   function startRecording(task: TaskSnapshot) {
     const started = Date.now();
     const stamp = new Date(started).toISOString().slice(0, 19).replace("T", "_").replace(/:/g, "-");
     return patchTask(task.id, {
       record: {
         state: "recording",
-        filePath: `${settings.live_save_path}\\抖音\\${task.anchorName}\\${task.anchorName}_${stamp}.ts`,
+        filePath: `${settings.live_save_path}\\${task.platformName}\\${task.anchorName}\\${task.anchorName}_${stamp}.ts`,
         startedAt: started,
         bytesWritten: 0,
         bitrateKbps: 4000 + Math.round(Math.random() * 3000),
@@ -506,38 +788,43 @@ export function createMockBackend(): Backend {
     });
   }
 
+  /** 收尾 1.5 秒后回到空闲，写一条 record_end。 */
+  function finishRecording(id: TaskId, message: string, patch: Partial<TaskSnapshot> = {}) {
+    const task = tasks.find((item) => item.id === id);
+    if (!task || task.record.state !== "recording") return task ?? null;
+    const { filePath, startedAt } = task.record;
+    const finishing = patchTask(id, { ...patch, record: { state: "finishing", filePath, startedAt } });
+    setTimeout(() => {
+      const current = tasks.find((item) => item.id === id);
+      if (current?.record.state !== "finishing") return;
+      const idle = patchTask(id, { record: { state: "idle" } });
+      if (idle) log(idle, "record_end", message);
+      schedulerChannel.emit(schedulerStatus());
+    }, 1500);
+    schedulerChannel.emit(schedulerStatus());
+    return finishing;
+  }
+
   function goLive(id: TaskId) {
     const task = tasks.find((item) => item.id === id);
     if (!task || task.monitoring === "paused") return;
     const next = patchTask(id, { live: { state: "live", checkedAt: Date.now(), title: "演示直播" } });
     if (!next) return;
-    log(next, "live_start", "开播：演示直播");
-    if (!next.notifyOnly && !isActive(next.record)) {
+    log(next, "live_start", "检测到开播：演示直播");
+    if (!next.notifyOnly && !next.recordHeld && !isActive(next.record)) {
       const recording = startRecording(next);
       if (recording) log(recording, "record_start", `开始录制 · ${qualityNames[recording.quality]}`);
+      schedulerChannel.emit(schedulerStatus());
     }
-  }
-
-  function finishRecording(id: TaskId, reason: string) {
-    const task = tasks.find((item) => item.id === id);
-    if (!task || !isActive(task.record)) return;
-    patchTask(id, {
-      record: { state: "finishing", filePath: task.record.filePath, startedAt: task.record.startedAt },
-    });
-    setTimeout(() => {
-      const current = tasks.find((item) => item.id === id);
-      if (!current || current.record.state !== "finishing") return;
-      const done = patchTask(id, { record: { state: "idle" } });
-      if (done) log(done, "record_end", reason);
-    }, 1200);
   }
 
   function endLive(id: TaskId) {
     const task = tasks.find((item) => item.id === id);
     if (!task) return;
     finishRecording(id, "下播，录制结束");
-    const next = patchTask(id, { live: { state: "offline", checkedAt: Date.now() } });
-    if (next && task.live.state === "live") log(next, "live_end", "下播");
+    // 与 Rust 一致：下播后清除手动停止。
+    const next = patchTask(id, { live: { state: "offline", checkedAt: Date.now() }, recordHeld: false });
+    if (next && task.live.state === "live") log(next, "live_end", "已下播");
   }
 
   // 事件推送：录制进度每秒更新；等待开播的任务定期检测；重试中的任务到点重试。
@@ -570,6 +857,36 @@ export function createMockBackend(): Backend {
     }
   }, 1000);
 
+  const libraryTree = mockLibraryTree();
+  let usageCache: { usage: { usedBytes: number; fileCount: number }; computedAt: number } | null = null;
+  let usageRunning = false;
+  let libraryForcedMissing = new URLSearchParams(window.location.search).get("library") === "missing";
+
+  const libraryExists = () =>
+    !libraryForcedMissing && settings.live_save_path === defaultSettings.live_save_path;
+
+  function libraryFailure(kind: LibraryError["kind"], message: string): LibraryError {
+    return { kind, message, root: settings.live_save_path };
+  }
+
+  /** 解析相对路径，规则与 Rust 一致：拒绝 ..、绝对路径和带 : 的片段。 */
+  function libraryLookup(path: string): { parts: string[]; node: MockDir | MockFile } {
+    const root = settings.live_save_path;
+    if (!libraryExists()) throw libraryFailure("root_missing", `录像目录不存在：${root}`);
+    if (/^[\\/]/.test(path)) throw libraryFailure("invalid_path", "路径必须相对于录像目录");
+    const parts = path.split(/[\\/]/).filter((part) => part !== "" && part !== ".");
+    let node: MockDir | MockFile = libraryTree;
+    for (const part of parts) {
+      if (part === ".." || part.includes(":")) throw libraryFailure("invalid_path", `路径片段无效：${part}`);
+      const next: MockDir | MockFile | undefined = isMockDir(node) ? node[part] : undefined;
+      if (!next) {
+        throw libraryFailure("not_found", `找不到 ${root}\\${parts.join("\\")}，可能已被移动或删除`);
+      }
+      node = next;
+    }
+    return { parts, node };
+  }
+
   const backend: Backend = {
     getFfmpegStatus: () => Promise.resolve(ffmpeg),
     retryFfmpegInstall: () => {
@@ -577,7 +894,6 @@ export function createMockBackend(): Backend {
       return Promise.resolve(ffmpeg);
     },
     async listTasks() {
-      // ?tasks=slow 模拟加载耗时；?tasks=fail 让第一次读取失败，用来演示重试。
       if (tasksMode === "slow") await delay(1500);
       if (failuresLeft > 0) {
         failuresLeft -= 1;
@@ -601,7 +917,9 @@ export function createMockBackend(): Backend {
           anchorName: candidate.anchorName,
           anchorId: candidate.anchorId ?? undefined,
           roomId: candidate.roomId,
+          platform: candidate.platform,
           url: candidate.url,
+          liveUrl: candidate.liveUrl,
           monitoring: "enabled",
           live: { state: "offline", checkedAt: Date.now() },
           record: { state: "idle" },
@@ -611,10 +929,10 @@ export function createMockBackend(): Backend {
         },
         Date.now(),
       );
-      task.liveUrl = candidate.liveUrl;
       tasks = [...tasks, task];
       updatedChannel.emit(task);
       log(task, "user_action", "添加任务");
+      schedulerChannel.emit(schedulerStatus());
       return { result: "added", task };
     },
 
@@ -623,6 +941,7 @@ export function createMockBackend(): Backend {
       if (!task) return reject("not_found", `任务 ${input.id} 不存在`);
       const patch: Partial<TaskSnapshot> = {};
       if (input.url !== undefined && input.url.trim() !== task.url) {
+        // 与 Rust 一致：正在录制时不能改链接。
         if (isActive(task.record)) {
           return reject("recording_active", `${task.anchorName} 正在录制，停止录制后才能修改链接`);
         }
@@ -633,6 +952,8 @@ export function createMockBackend(): Backend {
         if (existing.length > 0 && !input.force) return { result: "duplicate", existing, candidate };
         Object.assign(patch, {
           url: candidate.url,
+          platform: candidate.platform,
+          platformName: candidate.platformName,
           roomId: candidate.roomId,
           anchorId: candidate.anchorId,
           anchorName: candidate.anchorName,
@@ -650,7 +971,11 @@ export function createMockBackend(): Backend {
     },
 
     async deleteTasks(ids) {
-      const busy = tasks.find((task) => ids.includes(task.id) && isActive(task.record));
+      const busy = tasks.find(
+        (task) =>
+          ids.includes(task.id) &&
+          (task.record.state === "recording" || task.record.state === "finishing"),
+      );
       if (busy) return reject("recording_active", `${busy.anchorName} 正在录制，停止录制后才能删除`);
       const removed = tasks.filter((task) => ids.includes(task.id));
       tasks = tasks.filter((task) => !ids.includes(task.id));
@@ -667,40 +992,61 @@ export function createMockBackend(): Backend {
           result.push(task);
           continue;
         }
-        const recording = isActive(task.record);
+        // 与 Rust 一致：暂停监控时停止录制（假数据直接结束）；重新启用时清除录制失败和手动停止。
+        const recording = task.record.state === "recording" || task.record.state === "finishing";
+        const record: RecordState =
+          (!enabled && recording) || (enabled && task.record.state === "failed")
+            ? { state: "idle" }
+            : task.record;
         const next = rederive(task, {
           monitoring,
-          live: recording ? task.live : enabled ? { state: "checking", since: Date.now() } : { state: "unknown" },
-          // 与 Rust 一致：重新启用监控时清除录制失败。
-          record: enabled && task.record.state === "failed" ? { state: "idle" } : task.record,
+          live: enabled ? { state: "checking", since: Date.now() } : { state: "unknown" },
+          record,
+          recordHeld: enabled ? false : task.recordHeld,
         });
         replace(next);
         log(next, "user_action", enabled ? "开始监控" : "暂停监控");
+        if (!enabled && recording) log(next, "record_end", "录制结束");
         result.push(next);
-        if (enabled && !recording) {
+        if (enabled) {
+          // 模拟一次检测：1.5 秒后回到未开播。
           setTimeout(() => {
             const current = tasks.find((item) => item.id === task.id);
-            if (current?.live.state === "checking") {
-              patchTask(task.id, { live: { state: "offline", checkedAt: Date.now() } });
-            }
+            if (current?.live.state === "checking") patchTask(task.id, { live: { state: "offline", checkedAt: Date.now() } });
           }, 1500);
         }
       }
+      schedulerChannel.emit(schedulerStatus());
       return result;
     },
 
     async stopRecording(ids) {
       if (!stopSupported) return reject("not_implemented", "录制功能尚未接入");
+      const result: TaskSnapshot[] = [];
       for (const id of ids) {
         const task = tasks.find((item) => item.id === id);
-        if (task) log(task, "user_action", "手动停止录制");
-        finishRecording(id, "手动停止录制");
+        if (!task) continue;
+        if (task.record.state !== "recording") {
+          result.push(task);
+          continue;
+        }
+        // 与 Rust 一致：先进入收尾中，ffmpeg 写完文件尾后回到空闲；本场直播不再自动录制。
+        log(task, "user_action", "手动停止录制");
+        const finishing = finishRecording(id, "录制结束", { recordHeld: true });
+        if (finishing) result.push(finishing);
       }
-      return tasks.filter((task) => ids.includes(task.id));
+      return result;
     },
 
     getSettings: () => Promise.resolve(settings),
     async updateSettings(values) {
+      // 与 Rust 一致：Cookie 不能含换行等控制字符（制表符除外）。
+      for (const [platform, cookie] of Object.entries(values.platform_cookies ?? {})) {
+        // eslint-disable-next-line no-control-regex
+        if (typeof cookie !== "string" || /[\x00-\x08\x0a-\x1f\x7f]/.test(cookie)) {
+          return reject("config", `${platform} 的 Cookie 含有换行等无法放进请求头的字符`);
+        }
+      }
       settings = { ...settings, ...values };
       return settings;
     },
@@ -720,10 +1066,100 @@ export function createMockBackend(): Backend {
       };
     },
 
+    async listLibrary(path = ""): Promise<LibraryListing> {
+      await delay(150);
+      const found = libraryLookup(path);
+      if (!isMockDir(found.node)) throw libraryFailure("invalid_target", `${path} 不是文件夹`);
+      const prefix = found.parts.length ? `${found.parts.join("/")}/` : "";
+      const entries = Object.entries(found.node).map(([name, node]): LibraryEntry => {
+        if (isMockDir(node)) {
+          return {
+            name,
+            path: prefix + name,
+            kind: "dir",
+            size: null,
+            modifiedAt: now - 30 * 60_000,
+            childCount: Object.keys(node).length,
+            segment: null,
+            group: null,
+          };
+        }
+        const [group, segment] = splitSegment(name);
+        return {
+          name,
+          path: prefix + name,
+          kind: "file",
+          size: Math.round(node[0]),
+          modifiedAt: now - node[1] * 60_000,
+          childCount: null,
+          segment,
+          group,
+        };
+      });
+      return { root: settings.live_save_path, path: found.parts.join("/"), entries: sortEntries(entries) };
+    },
+
+    async getDiskSpace(): Promise<DiskSpace> {
+      await delay(80);
+      return {
+        root: settings.live_save_path,
+        rootExists: libraryExists(),
+        availableBytes: Math.round(186.4 * GB),
+        totalBytes: Math.round(931.5 * GB),
+      };
+    },
+
+    async getLibraryUsage(refresh = false): Promise<UsageSnapshot> {
+      await delay(80);
+      const exists = libraryExists();
+      if (!exists) {
+        return { root: settings.live_save_path, rootExists: false, usage: null, computedAt: null, computing: false };
+      }
+      // 模拟 Rust 的缓存：过期或刷新时启动一次 1.5 秒的「遍历」，期间返回上次结果并标明统计中。
+      const stale = !usageCache || Date.now() - usageCache.computedAt > 30_000;
+      if (!usageRunning && (refresh || stale)) {
+        usageRunning = true;
+        setTimeout(() => {
+          const walked = walkMock(libraryTree);
+          usageCache = {
+            usage: { usedBytes: Math.round(walked.bytes), fileCount: walked.files },
+            computedAt: Date.now(),
+          };
+          usageRunning = false;
+        }, 1500);
+      }
+      return {
+        root: settings.live_save_path,
+        rootExists: true,
+        usage: usageCache?.usage ?? null,
+        computedAt: usageCache?.computedAt ?? null,
+        computing: usageRunning,
+      };
+    },
+
+    async openLibraryFile(path) {
+      const found = libraryLookup(path);
+      if (isMockDir(found.node)) throw libraryFailure("invalid_target", `${path} 不是录像文件`);
+      console.info("[mock] 用系统播放器打开", path);
+    },
+
+    async openLibraryFolder(path) {
+      const found = libraryLookup(path);
+      if (!isMockDir(found.node)) throw libraryFailure("invalid_target", `${path} 不是文件夹`);
+      console.info("[mock] 打开文件夹", path || "（根目录）");
+    },
+
+    async revealLibraryItem(path) {
+      libraryLookup(path);
+      console.info("[mock] 在文件夹中显示", path || "（根目录）");
+    },
+
     onFfmpegStatus: (handler) => ffmpegChannel.subscribe(handler),
     onTaskUpdated: (handler) => updatedChannel.subscribe(handler),
     onTaskRemoved: (handler) => removedChannel.subscribe(handler),
     onActivity: (handler) => activityChannel.subscribe(handler),
+    getSchedulerStatus: () => Promise.resolve(schedulerStatus()),
+    onSchedulerStatus: (handler) => schedulerChannel.subscribe(handler),
   };
 
   (window as unknown as { __lubobaoMock: unknown }).__lubobaoMock = {
@@ -740,6 +1176,24 @@ export function createMockBackend(): Backend {
     },
     setEvents: (value: boolean) => {
       eventsEnabled = value;
+    },
+    /** 切换录像根目录是否存在。 */
+    setLibraryMissing: (missing: boolean) => {
+      libraryForcedMissing = missing;
+    },
+    /** 模拟一条新动态，检查实时插入。 */
+    pushActivity: (kind: ActivityKind = "live_start") => {
+      const task = tasks[Math.floor(Math.random() * tasks.length)] ?? null;
+      const messages: Record<ActivityKind, string> = {
+        live_start: "检测到开播",
+        live_end: "已下播",
+        record_start: "开始录制",
+        record_end: "录制结束",
+        failure: "检测失败：连接超时",
+        warning: "代理是 SOCKS，录制不支持，本次直连录制",
+        user_action: "修改任务",
+      };
+      log(task, kind, messages[kind]);
     },
     backend,
   };

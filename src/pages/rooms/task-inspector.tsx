@@ -83,6 +83,7 @@ const activityDot: Record<ActivityKind, string> = {
   record_start: "bg-status-recording",
   record_end: "bg-status-waiting",
   failure: "bg-status-recording",
+  warning: "bg-status-retrying",
   user_action: "bg-muted-foreground/50",
 };
 

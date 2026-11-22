@@ -37,6 +37,7 @@ type Phase =
 const mockExamples: { label: string; url: string }[] = [
   { label: "新直播间", url: "https://live.douyin.com/745964462470" },
   { label: "重复（主页短链）", url: "https://v.douyin.com/CeiU5cbX" },
+  { label: "快手", url: "https://live.kuaishou.com/u/3xdemo" },
   { label: "需要登录", url: "https://live.douyin.com/login-required" },
   { label: "不支持的平台", url: "https://www.example.com/live/1" },
   { label: "网络错误", url: "https://live.douyin.com/network-timeout" },

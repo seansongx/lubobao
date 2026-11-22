@@ -4,7 +4,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-import { api, type FfmpegStatus, type TaskId, type TaskSnapshot } from "@/lib/api";
+import { api, type FfmpegStatus, type SchedulerStatus, type TaskId, type TaskSnapshot } from "@/lib/api";
 
 type Unlisten = () => void;
 
@@ -24,6 +24,36 @@ function subscribeAll(registrations: Promise<Unlisten>[], ready: () => void): Un
     disposed = true;
     unlisteners.forEach((fn) => fn());
   };
+}
+
+/** 调度概况：先注册 scheduler-status 监听再取快照，事件比快照新时不被覆盖。 */
+export function useSchedulerStatus(): SchedulerStatus | null {
+  const [status, setStatus] = useState<SchedulerStatus | null>(null);
+  useEffect(() => {
+    let active = true;
+    let sawEvent = false;
+    const stop = subscribeAll(
+      [
+        api.onSchedulerStatus((next) => {
+          sawEvent = true;
+          setStatus(next);
+        }),
+      ],
+      () => {
+        api.getSchedulerStatus().then(
+          (initial) => {
+            if (active && !sawEvent) setStatus(initial);
+          },
+          () => undefined,
+        );
+      },
+    );
+    return () => {
+      active = false;
+      stop();
+    };
+  }, []);
+  return status;
 }
 
 export function useFfmpegStatus(): FfmpegStatus | null {

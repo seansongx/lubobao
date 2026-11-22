@@ -12,7 +12,6 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
-use std::sync::Mutex;
 
 use reqwest::Url;
 use reqwest::header::{ACCEPT_LANGUAGE, COOKIE, HeaderMap, HeaderValue, REFERER, USER_AGENT};
@@ -22,8 +21,9 @@ use serde_json::Value;
 
 use super::sign::ab_sign;
 use super::{
-    BoxFuture, FetchOptions, LiveInfo, Platform, PlatformAdapter, PlatformError, Quality,
-    StreamVariant, build_client, fallback_variant_index, select_variant_index, selected_stream,
+    BoxFuture, ClientCache, FetchOptions, LiveInfo, Platform, PlatformAdapter, PlatformError,
+    Quality, StreamVariant, cookie_header, fallback_variant_index, select_variant_index,
+    selected_stream, user_cookie,
 };
 
 const ACCEPT_LANGUAGE_VALUE: &str = "zh-CN,zh;q=0.8,zh-TW;q=0.7,zh-HK;q=0.5,en-US;q=0.3,en;q=0.2";
@@ -586,12 +586,6 @@ pub fn stream_headers() -> BTreeMap<String, String> {
     ])
 }
 
-fn cookie_header(value: &str) -> Result<HeaderValue, PlatformError> {
-    HeaderValue::from_str(value).map_err(|_| {
-        PlatformError::Config("Cookie 含有换行等无法发送的字符，请检查平台 Cookie 设置".to_string())
-    })
-}
-
 /// Append the signature verbatim, as StreamGet does (`api += "&a_bogus=" + a_bogus`).
 fn append_signature(api: &Url, signature: &str) -> String {
     format!("{}&a_bogus={signature}", api.as_str())
@@ -611,43 +605,16 @@ fn probe_headers() -> HeaderMap {
     headers
 }
 
-fn user_cookie(options: &FetchOptions) -> Option<&str> {
-    options
-        .cookies
-        .as_deref()
-        .map(str::trim)
-        .filter(|cookie| !cookie.is_empty())
-}
-
 /// Douyin adapter. Holds one HTTP client per proxy setting so repeated polls
 /// reuse connections; the client is rebuilt when the proxy changes.
 #[derive(Debug, Default)]
 pub struct DouyinAdapter {
-    client: Mutex<Option<(Option<String>, reqwest::Client)>>,
+    clients: ClientCache,
 }
 
 impl DouyinAdapter {
     pub fn new() -> Self {
         DouyinAdapter::default()
-    }
-
-    fn client(&self, proxy: Option<&str>) -> Result<reqwest::Client, PlatformError> {
-        let key = proxy
-            .map(str::trim)
-            .filter(|proxy| !proxy.is_empty())
-            .map(str::to_string);
-        let mut cached = self
-            .client
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if let Some((cached_key, client)) = cached.as_ref()
-            && *cached_key == key
-        {
-            return Ok(client.clone());
-        }
-        let client = build_client(key.as_deref())?;
-        *cached = Some((key, client.clone()));
-        Ok(client)
     }
 
     /// Follow a share link and return where it lands. Like StreamGet, only the
@@ -803,7 +770,7 @@ impl DouyinAdapter {
         options: &FetchOptions,
     ) -> Result<LiveInfo, PlatformError> {
         let link = parse_link(url)?;
-        let client = self.client(options.proxy.as_deref())?;
+        let client = self.clients.get(options.proxy.as_deref())?;
         let snapshot = match &link {
             DouyinLink::WebRoom { web_rid } => self.fetch_web(&client, web_rid, options).await?,
             DouyinLink::DouyinId { id } => self.fetch_web(&client, id, options).await?,
@@ -1193,33 +1160,6 @@ mod tests {
         assert_eq!(
             append_signature(&api, "Ab/c-d=="),
             "https://live.douyin.com/webcast/room/web/enter/?aid=6383&a_bogus=Ab/c-d=="
-        );
-    }
-
-    #[test]
-    fn client_is_reused_until_the_proxy_changes() {
-        let adapter = DouyinAdapter::new();
-        adapter.client(None).unwrap();
-        adapter.client(Some("  ")).unwrap();
-        assert_eq!(adapter.client.lock().unwrap().as_ref().unwrap().0, None);
-        adapter.client(Some("127.0.0.1:7890")).unwrap();
-        assert_eq!(
-            adapter
-                .client
-                .lock()
-                .unwrap()
-                .as_ref()
-                .unwrap()
-                .0
-                .as_deref(),
-            Some("127.0.0.1:7890")
-        );
-        assert_eq!(
-            adapter
-                .client(Some("ftp://127.0.0.1:21"))
-                .unwrap_err()
-                .kind(),
-            "config"
         );
     }
 

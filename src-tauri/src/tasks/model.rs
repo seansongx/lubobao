@@ -250,6 +250,8 @@ pub struct TaskSnapshot {
     pub monitoring: Monitoring,
     pub live: LiveState,
     pub record: RecordState,
+    /// 用户手动停止了录制：本次直播不再自动录制，下播或重新启用监控后恢复。只在内存中。
+    pub record_held: bool,
     pub display: DisplayStatus,
     pub display_reason: Option<String>,
 }
@@ -262,20 +264,31 @@ pub struct Task {
     pub monitoring: Monitoring,
     pub live: LiveState,
     pub record: RecordState,
+    /// 见 [`TaskSnapshot::record_held`]。
+    pub held: bool,
 }
 
+/// 手动停止后仍在直播时给界面显示的原因。
+pub const HELD_REASON: &str = "已手动停止录制，下次开播时自动录制";
+
 impl Task {
+    /// 手动停止后仍在直播时与仅通知一样显示：已开播、没有写文件，属于正常结果。
     pub fn display(&self) -> DisplayStatus {
         derive_display(
             self.monitoring,
             &self.live,
             &self.record,
-            self.config.notify_only,
+            self.config.notify_only || self.held,
         )
     }
 
     pub fn snapshot(&self) -> TaskSnapshot {
         let display = self.display();
+        let reason = if display == DisplayStatus::Notify && self.held && !self.config.notify_only {
+            Some(HELD_REASON.to_string())
+        } else {
+            display_reason(display, &self.live, &self.record)
+        };
         TaskSnapshot {
             id: self.id,
             config: self.config.clone(),
@@ -283,8 +296,9 @@ impl Task {
             monitoring: self.monitoring,
             live: self.live.clone(),
             record: self.record.clone(),
+            record_held: self.held,
             display,
-            display_reason: display_reason(display, &self.live, &self.record),
+            display_reason: reason,
         }
     }
 }
@@ -482,6 +496,7 @@ mod tests {
             monitoring: On,
             live: failed_check(PlatformErrorKind::Network),
             record: RecordState::Idle,
+            held: false,
         };
         let value = serde_json::to_value(task.snapshot()).unwrap();
         assert_eq!(value["id"], 7);

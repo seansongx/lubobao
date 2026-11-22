@@ -15,6 +15,8 @@ export interface RoomsView {
   rowSelection: RowSelectionState;
   /** 右侧详情显示的任务。 */
   activeId: TaskId | null;
+  /** 已处理的跳转请求 seq。页面每次切回都会重新挂载，靠它避免重复应用旧的跳转。 */
+  handledFocusSeq: number;
 }
 
 export const initialRoomsView: RoomsView = {
@@ -24,6 +26,7 @@ export const initialRoomsView: RoomsView = {
   sorting: [{ id: "status", desc: false }],
   rowSelection: {},
   activeId: null,
+  handledFocusSeq: 0,
 };
 
 export const statusGroups: { id: StatusGroup; label: string; statuses: DisplayStatus[] | null }[] = [

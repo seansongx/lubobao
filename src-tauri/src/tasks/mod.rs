@@ -6,15 +6,13 @@
 //! 回写状态，由这里负责持久化、写动态和推送事件。
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::path::Path;
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, Weak};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
-use tauri::{Emitter, Manager};
-use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 
-use crate::platforms::{FetchOptions, LiveInfo, Platform, PlatformError, Quality, adapter_for};
+use crate::platforms::{LiveInfo, Platform, PlatformError, Quality, adapter_for};
 
 pub mod activity;
 pub mod commands;
@@ -22,6 +20,7 @@ pub mod dedup;
 pub mod model;
 pub mod settings;
 pub mod store;
+pub mod tauri_glue;
 
 #[cfg(test)]
 mod tests;
@@ -49,6 +48,17 @@ pub enum TaskEvent {
 }
 
 pub type Listener = Box<dyn Fn(TaskEvent) + Send + Sync>;
+
+/// 调度器提供给任务核心的回调。任务核心不持有调度器（用 `Weak` 避免循环引用），
+/// 调用时不持有任务锁。
+pub trait SchedulerHook: Send + Sync {
+    /// 任务集合或监控意图变了，请尽快重新排期（新任务、恢复监控立即检测）。
+    fn wake(&self);
+    /// 请求停止这个任务的录制（包括正在启动的录制）。有录制时返回 true。
+    fn stop_recording(&self, id: TaskId) -> bool;
+    /// 设置已保存，下一轮按新设置检测。
+    fn settings_changed(&self);
+}
 
 /// 命令失败时返回给前端的结构化错误：`{ kind, message }`。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -206,6 +216,7 @@ pub struct TaskManager {
     inner: Mutex<Inner>,
     defaults: Map<String, Value>,
     listener: Listener,
+    hook: OnceLock<Weak<dyn SchedulerHook>>,
 }
 
 fn user_action(task: &Task, message: &str, detail: Option<Value>) -> NewActivity {
@@ -234,6 +245,7 @@ impl TaskManager {
             }),
             defaults: settings::defaults(save_dir),
             listener,
+            hook: OnceLock::new(),
         };
         manager.recover_interrupted()?;
         Ok(manager)
@@ -243,6 +255,21 @@ impl TaskManager {
         self.inner
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// 登记调度器。只能登记一次，之后的调用被忽略。
+    pub fn set_scheduler_hook(&self, hook: Weak<dyn SchedulerHook>) {
+        let _ = self.hook.set(hook);
+    }
+
+    fn scheduler(&self) -> Option<Arc<dyn SchedulerHook>> {
+        self.hook.get().and_then(Weak::upgrade)
+    }
+
+    fn wake_scheduler(&self) {
+        if let Some(hook) = self.scheduler() {
+            hook.wake();
+        }
     }
 
     fn emit_all(&self, events: Vec<TaskEvent>) {
@@ -316,8 +343,12 @@ impl TaskManager {
 
     // ---- 添加与编辑 ----
 
-    /// 识别平台并实际请求一次直播间。
-    pub async fn resolve(url: &str, quality: Quality) -> CommandResult<LiveInfo> {
+    /// 识别平台并实际请求一次直播间，按设置使用这个平台的代理和 Cookie。
+    pub async fn resolve(
+        url: &str,
+        quality: Quality,
+        settings: &Map<String, Value>,
+    ) -> CommandResult<LiveInfo> {
         let url = url.trim();
         if url.is_empty() {
             return Err(CommandError::new(
@@ -331,10 +362,7 @@ impl TaskManager {
                 format!("暂不支持这个链接的平台：{url}"),
             )
         })?;
-        let options = FetchOptions {
-            quality,
-            ..FetchOptions::default()
-        };
+        let options = settings::fetch_options(settings, adapter.platform(), quality);
         Ok(adapter.fetch(url, &options).await?)
     }
 
@@ -348,7 +376,7 @@ impl TaskManager {
 
     pub async fn add_task(&self, input: AddTaskInput) -> CommandResult<TaskMutation> {
         let quality = input.quality.unwrap_or_else(|| self.default_quality());
-        let info = Self::resolve(&input.url, quality).await?;
+        let info = Self::resolve(&input.url, quality, &self.settings()).await?;
         self.add_resolved(input, &info)
     }
 
@@ -423,6 +451,7 @@ impl TaskManager {
             monitoring: Monitoring::Enabled,
             live,
             record: RecordState::Idle,
+            held: false,
         };
         let snapshot = task.snapshot();
         inner.tasks.insert(id, task);
@@ -432,6 +461,7 @@ impl TaskManager {
             TaskEvent::Updated(Box::new(snapshot.clone())),
             TaskEvent::Activity(entry),
         ]);
+        self.wake_scheduler();
         Ok(TaskMutation::Added { task: snapshot })
     }
 
@@ -444,7 +474,7 @@ impl TaskManager {
         let info = match new_url {
             Some(url) => {
                 let quality = input.quality.unwrap_or(current.config.quality);
-                Some(Self::resolve(url, quality).await?)
+                Some(Self::resolve(url, quality, &self.settings()).await?)
             }
             None => None,
         };
@@ -533,6 +563,7 @@ impl TaskManager {
         drop(guard);
         events.insert(0, TaskEvent::Updated(Box::new(snapshot.clone())));
         self.emit_all(events);
+        self.wake_scheduler();
         Ok(TaskMutation::Updated { task: snapshot })
     }
 
@@ -577,11 +608,19 @@ impl TaskManager {
         let mut events = vec![TaskEvent::Removed(removed.clone())];
         events.extend(entries.into_iter().map(TaskEvent::Activity));
         self.emit_all(events);
+        // 正在启动、还没写入录制状态的录制不会被上面的检查拦住，一并停止。
+        if let Some(hook) = self.scheduler() {
+            for id in &removed {
+                hook.stop_recording(*id);
+            }
+            hook.wake();
+        }
         Ok(removed)
     }
 
-    /// 批量启用或暂停监控。重新启用时一并清除录制失败（例如磁盘不足），给用户一个
-    /// 「处理完了，重新开始」的入口。返回这些任务的快照（含未变化的任务）。
+    /// 批量启用或暂停监控。重新启用时一并清除录制失败（例如磁盘不足）和手动停止的
+    /// 保持状态，给用户一个「处理完了，重新开始」的入口。暂停时与 StreamCap 一样
+    /// 停止正在进行的录制。返回这些任务的快照（含未变化的任务）。
     pub fn set_monitoring(
         &self,
         ids: &[TaskId],
@@ -625,8 +664,12 @@ impl TaskManager {
             if clears_failure(task) {
                 updated.record = RecordState::Idle;
             }
-            // 暂停后旧的检测结果不再有效，重新启用时从未知开始。
-            if !updated.record.is_active() {
+            if enabled {
+                updated.held = false;
+            }
+            // 暂停后旧的检测结果不再有效，从未知开始。重新启用时一律重置（包括暂停时停下、
+            // 还在收尾的录制），调度据此立即检测；暂停时正在写文件的保留直播状态。
+            if enabled || !updated.record.is_active() {
                 updated.live = LiveState::Unknown;
             }
             events.push(TaskEvent::Updated(Box::new(updated.snapshot())));
@@ -640,6 +683,14 @@ impl TaskManager {
             .collect();
         drop(guard);
         self.emit_all(events);
+        if let Some(hook) = self.scheduler() {
+            if !enabled {
+                for task in &changed {
+                    hook.stop_recording(task.id);
+                }
+            }
+            hook.wake();
+        }
         Ok(snapshots)
     }
 
@@ -694,6 +745,10 @@ impl TaskManager {
                 .ok()
         });
         let updated = inner.tasks.get_mut(&id).expect("task exists");
+        // 下播后手动停止的保持状态结束，下一次开播照常录制。
+        if matches!(live, LiveState::Offline { .. }) {
+            updated.held = false;
+        }
         updated.live = live;
         let snapshot = updated.snapshot();
         drop(guard);
@@ -831,20 +886,45 @@ impl TaskManager {
     /// 校验并保存部分设置，返回完整设置。任一项无效时整批不保存。
     pub fn update_settings(&self, values: Map<String, Value>) -> CommandResult<Map<String, Value>> {
         for (key, value) in &values {
-            settings::validate(&self.defaults, key, value)
-                .map_err(|message| CommandError::new(ErrorKind::InvalidInput, message))?;
+            settings::validate(&self.defaults, key, value)?;
         }
         self.lock()
             .store
             .transaction(|db| db.save_settings(&values))?;
+        if let Some(hook) = self.scheduler() {
+            hook.settings_changed();
+        }
         Ok(self.settings())
     }
 
-    pub fn stop_recording(&self, _ids: &[TaskId]) -> CommandResult<Vec<TaskSnapshot>> {
-        Err(CommandError::new(
-            ErrorKind::NotImplemented,
-            "录制功能尚未接入",
-        ))
+    /// 手动停止录制（含正在启动的录制）。停止请求立即返回；录制状态随后经由收尾中
+    /// 回到空闲，通过 `task-updated` 推送。被停止的任务在本次直播中不再自动录制，
+    /// 直到检测到下播或用户重新启用监控。没有录制的任务原样返回。
+    pub fn stop_recording(&self, ids: &[TaskId]) -> CommandResult<Vec<TaskSnapshot>> {
+        let hook = self
+            .scheduler()
+            .ok_or_else(|| CommandError::new(ErrorKind::NotImplemented, "录制调度尚未启动"))?;
+        let mut events = Vec::new();
+        for id in ids {
+            if !hook.stop_recording(*id) {
+                continue;
+            }
+            let mut inner = self.lock();
+            if let Some(task) = inner.tasks.get_mut(id)
+                && !task.held
+            {
+                task.held = true;
+                events.push(TaskEvent::Updated(Box::new(task.snapshot())));
+            }
+        }
+        let snapshots = {
+            let inner = self.lock();
+            ids.iter()
+                .filter_map(|id| inner.tasks.get(id).map(Task::snapshot))
+                .collect()
+        };
+        self.emit_all(events);
+        Ok(snapshots)
     }
 }
 
@@ -852,53 +932,20 @@ fn not_found(id: TaskId) -> CommandError {
     CommandError::new(ErrorKind::NotFound, format!("任务 {id} 不存在"))
 }
 
-/// 默认保存目录：系统「视频」目录下的 `录播宝`，取不到时用应用数据目录下的 `recordings`。
-fn default_save_dir(app: &tauri::AppHandle, data_dir: &Path) -> PathBuf {
-    app.path()
-        .video_dir()
-        .map(|dir| dir.join("录播宝"))
-        .unwrap_or_else(|_| data_dir.join("recordings"))
-}
+/// 数据库文件名，位于数据目录下。
+pub const DB_FILE: &str = "lubobao.db";
 
-fn open_manager(app: &tauri::AppHandle) -> Result<TaskManager, String> {
-    let data_dir = app
-        .path()
-        .app_local_data_dir()
-        .map_err(|error| format!("找不到应用数据目录：{error}"))?;
-    let db_path = data_dir.join("lubobao.db");
+/// 打开 `data_dir/lubobao.db`（不存在时创建）并恢复任务。`save_dir` 是默认录像保存目录
+/// （设置 `live_save_path` 的缺省值）。不依赖 Tauri，命令行程序也用它。失败时返回给用户
+/// 看的说明，含数据库路径。
+pub fn open_in(
+    data_dir: &Path,
+    save_dir: &Path,
+    listener: Listener,
+) -> Result<TaskManager, String> {
+    let db_path = data_dir.join(DB_FILE);
     let store =
         Store::open(&db_path).map_err(|error| format!("{error}\n数据库：{}", db_path.display()))?;
-    let handle = app.clone();
-    let listener: Listener = Box::new(move |event| {
-        let _ = match event {
-            TaskEvent::Updated(snapshot) => handle.emit(TASK_UPDATED_EVENT, *snapshot),
-            TaskEvent::Removed(ids) => handle.emit(TASK_REMOVED_EVENT, json!({ "ids": ids })),
-            TaskEvent::Activity(entry) => handle.emit(ACTIVITY_EVENT, entry),
-        };
-    });
-    TaskManager::open(store, &default_save_dir(app, &data_dir), listener)
+    TaskManager::open(store, save_dir, listener)
         .map_err(|error| format!("{}\n数据库：{}", error.message, db_path.display()))
-}
-
-/// 在 Tauri `setup` 中调用：打开数据库、恢复任务并登记 `Arc<TaskManager>`。
-///
-/// 打不开数据库（例如被更新版本的录播宝升级过）时不 panic：记日志，弹出错误对话框，
-/// 用户确认后退出。
-pub fn init(app: &tauri::AppHandle) -> tauri::Result<()> {
-    match open_manager(app) {
-        Ok(manager) => {
-            app.manage(Arc::new(manager));
-        }
-        Err(message) => {
-            eprintln!("录播宝无法打开任务数据：{message}");
-            let handle = app.clone();
-            app.dialog()
-                .message(format!("无法打开任务数据，录播宝将退出。\n\n{message}"))
-                .title("录播宝启动失败")
-                .kind(MessageDialogKind::Error)
-                .buttons(MessageDialogButtons::Ok)
-                .show(move |_| handle.exit(1));
-        }
-    }
-    Ok(())
 }

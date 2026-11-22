@@ -9,11 +9,13 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Mutex;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
 pub mod douyin;
+pub mod kuaishou;
 mod sign;
 
 /// Boxed future returned by adapter methods so adapters can be used as trait objects.
@@ -26,6 +28,7 @@ pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 #[serde(rename_all = "snake_case")]
 pub enum Platform {
     Douyin,
+    Kuaishou,
 }
 
 impl Platform {
@@ -33,6 +36,7 @@ impl Platform {
     pub fn key(self) -> &'static str {
         match self {
             Platform::Douyin => "douyin",
+            Platform::Kuaishou => "kuaishou",
         }
     }
 
@@ -40,6 +44,7 @@ impl Platform {
     pub fn display_name(self) -> &'static str {
         match self {
             Platform::Douyin => "抖音",
+            Platform::Kuaishou => "快手直播",
         }
     }
 }
@@ -328,7 +333,10 @@ pub trait PlatformAdapter: Send + Sync {
 
 /// All built-in adapters.
 pub fn adapters() -> Vec<Box<dyn PlatformAdapter>> {
-    vec![Box::new(douyin::DouyinAdapter::new())]
+    vec![
+        Box::new(douyin::DouyinAdapter::new()),
+        Box::new(kuaishou::KuaishouAdapter::new()),
+    ]
 }
 
 /// First adapter that accepts the link.
@@ -361,6 +369,22 @@ pub fn fallback_variant_index(variant_count: usize, quality: Quality) -> Option<
         padded_index - 1
     };
     Some(fallback.min(variant_count - 1))
+}
+
+/// Neighbour of an already chosen variant, for platforms that do not pick by
+/// padded position (Kuaishou picks by bitrate): the next lower variant, or
+/// the one above when the chosen variant is already the lowest. Mirrors
+/// `fallback_variant_index` on the real list.
+pub fn neighbour_variant_index(variant_count: usize, index: usize) -> Option<usize> {
+    if variant_count == 0 {
+        return None;
+    }
+    let index = index.min(variant_count - 1);
+    if index + 1 < variant_count {
+        Some(index + 1)
+    } else {
+        Some(index.saturating_sub(1))
+    }
 }
 
 /// Build a `SelectedStream` for a variant, using StreamGet's `record_url = m3u8 or flv`.
@@ -415,6 +439,48 @@ pub(crate) fn build_client(proxy: Option<&str>) -> Result<reqwest::Client, Platf
         .map_err(|error| PlatformError::Network(format!("failed to build HTTP client: {error}")))
 }
 
+/// One HTTP client per proxy setting, so repeated polls reuse connections.
+/// The client is rebuilt when the proxy changes.
+#[derive(Debug, Default)]
+pub(crate) struct ClientCache(Mutex<Option<(Option<String>, reqwest::Client)>>);
+
+impl ClientCache {
+    pub(crate) fn get(&self, proxy: Option<&str>) -> Result<reqwest::Client, PlatformError> {
+        let key = proxy
+            .map(str::trim)
+            .filter(|proxy| !proxy.is_empty())
+            .map(str::to_string);
+        let mut cached = self
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some((cached_key, client)) = cached.as_ref()
+            && *cached_key == key
+        {
+            return Ok(client.clone());
+        }
+        let client = build_client(key.as_deref())?;
+        *cached = Some((key, client.clone()));
+        Ok(client)
+    }
+}
+
+/// The user's cookie for this platform, when set.
+pub(crate) fn user_cookie(options: &FetchOptions) -> Option<&str> {
+    options
+        .cookies
+        .as_deref()
+        .map(str::trim)
+        .filter(|cookie| !cookie.is_empty())
+}
+
+/// A `Cookie` header value, rejecting values that cannot be sent.
+pub(crate) fn cookie_header(value: &str) -> Result<reqwest::header::HeaderValue, PlatformError> {
+    reqwest::header::HeaderValue::from_str(value).map_err(|_| {
+        PlatformError::Config("Cookie 含有换行等无法发送的字符，请检查平台 Cookie 设置".to_string())
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -454,6 +520,16 @@ mod tests {
         assert_eq!(fallback_variant_index(5, Quality::Sd), Some(4));
         assert_eq!(fallback_variant_index(5, Quality::Ld), Some(3));
         assert_eq!(fallback_variant_index(2, Quality::Uhd), Some(1));
+    }
+
+    #[test]
+    fn neighbour_moves_down_or_up_from_the_lowest_variant() {
+        assert_eq!(neighbour_variant_index(4, 0), Some(1));
+        assert_eq!(neighbour_variant_index(4, 2), Some(3));
+        assert_eq!(neighbour_variant_index(4, 3), Some(2));
+        assert_eq!(neighbour_variant_index(4, 9), Some(2));
+        assert_eq!(neighbour_variant_index(1, 0), Some(0));
+        assert_eq!(neighbour_variant_index(0, 0), None);
     }
 
     #[test]
@@ -547,6 +623,21 @@ mod tests {
                 "{proxy}"
             );
         }
+    }
+
+    #[test]
+    fn client_is_reused_until_the_proxy_changes() {
+        let cache = ClientCache::default();
+        let cached_key = || cache.0.lock().unwrap().as_ref().unwrap().0.clone();
+        cache.get(None).unwrap();
+        cache.get(Some("  ")).unwrap();
+        assert_eq!(cached_key(), None);
+        cache.get(Some("127.0.0.1:7890")).unwrap();
+        assert_eq!(cached_key().as_deref(), Some("127.0.0.1:7890"));
+        assert_eq!(
+            cache.get(Some("ftp://127.0.0.1:21")).unwrap_err().kind(),
+            "config"
+        );
     }
 
     #[test]

@@ -57,6 +57,8 @@ export function statusText(task: TaskSnapshot): string {
     return `重试中 · 第 ${task.live.attempt} 次`;
   }
   if (task.display === "recording" && task.record.state === "finishing") return "录制中 · 收尾";
+  // 手动停止后仍在直播：后端按仅通知显示，文字说明是用户停止的。
+  if (task.display === "notify" && task.recordHeld && !task.notifyOnly) return "已开播 · 已停止录制";
   return statusLabels[task.display];
 }
 

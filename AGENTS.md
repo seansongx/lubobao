@@ -14,7 +14,9 @@
 
 ## Project Structure
 
-LuBoBao (录播宝) is a Tauri 2 desktop app for live-stream recording. The frontend is currently an app shell: sidebar navigation (直播间、录像库、动态、设置), placeholder pages with empty states, and a status bar with placeholder values. Stream monitoring, recording, and native commands are planned features.
+LuBoBao (录播宝) is a Tauri 2 desktop app for live-stream recording, with a headless Linux CLI and Docker image planned for the same core. The 0.1.0 launch scope and acceptance status live in `docs/feature-map.md`.
+
+- Rust modules in `src-tauri/src/`: `platforms/` (adapters that resolve a room link into live status, qualities and stream URLs), `recorder/` (FFmpeg process lifecycle), `ffmpeg/` (download, verify and install FFmpeg from `@seankit/ffmpeg`), `tasks/` (task model, SQLite storage, activity, settings and Tauri commands). Keep these modules free of Tauri; put `tauri::` code, commands and event emission in thin glue files so the CLI can reuse the core.
 
 - `index.html` only mounts `#root`. `src/main.tsx` renders `src/App.tsx`, which holds the current page in React local state; there is no router.
 - `src/components/` holds app components such as `app-sidebar.tsx` and `status-bar.tsx`. shadcn/ui components live in `src/components/ui/`; add them with `npx shadcn@latest add <name>` as pages need them (`components.json` uses the Nova style). Shared helpers such as `cn` live in `src/lib/`.
@@ -43,9 +45,16 @@ Use two spaces in TypeScript, HTML, and CSS. Name React components in PascalCase
 
 ## Testing
 
-The project has no automated test cases, frontend test runner, or coverage threshold yet. Before committing, run `npm run build` and `cargo check --manifest-path src-tauri/Cargo.toml`. Place new Rust unit tests beside the implementation in a `#[cfg(test)]` module, name each test after the behavior it checks, and run `cargo test --manifest-path src-tauri/Cargo.toml`.
+Rust tests live beside the implementation in `#[cfg(test)]` modules, plus offline fixtures and `#[ignore]` live-network tests under `src-tauri/tests/`. Name each test after the behavior it checks. There is no frontend test runner yet. Before committing, run `npm run build`, then `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` in `src-tauri/`. Set `LUBOBAO_TEST_FFMPEG` to an ffmpeg binary to run the recorder tests; without it they are skipped. Run live tests with `cargo test -- --ignored --nocapture` when a change touches a platform adapter.
 
 To check the shell manually, run `npm run dev` and open `http://127.0.0.1:1420`. Switch between the four pages, check the sidebar, content area, and status bar in both light and dark system themes, and confirm that a 1024px-wide window has no horizontal scrollbar.
+
+## CI and Releases
+
+- `.github/workflows/test.yml` runs on every push and pull request on Windows, macOS (arm64), and Ubuntu: `npm run build`, `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `cargo test`. It installs FFmpeg from `@seankit/ffmpeg@9.0.1` and sets `LUBOBAO_TEST_FFMPEG`, so the recorder tests run too; `#[ignore]` network tests are skipped. Run the same three cargo commands locally before pushing.
+- `.github/workflows/release.yml` builds unsigned installers: Windows NSIS (x64), separate macOS dmg for arm64 and x64 (ad-hoc signed), and Linux AppImage and deb built on Ubuntu 22.04. Files are renamed to ASCII (`lubobao_<version>_<os>_<arch>…`), uploaded as Actions artifacts, and the run summary lists each file's size and SHA-256. Manual runs (`workflow_dispatch`) only build; a `v*` tag also creates a draft GitHub Release with `SHA256SUMS.txt` and first-launch notes.
+- Release steps: `node scripts/set-version.mjs <x.y.z>` (updates `package.json`, `package-lock.json`, `tauri.conf.json`, `Cargo.toml`, and `Cargo.lock`), commit, then `git tag v<x.y.z>` and push the tag. The workflow fails if the tag differs from the app version. Review and publish the draft release by hand.
+- The icon source is `docs/brand/app-icon.svg` (full-bleed, for Windows and Linux) and `docs/brand/app-icon-macos.svg` (on the macOS icon grid). Regenerate with `npx tauri icon docs/brand/app-icon.png`, then replace `src-tauri/icons/icon.icns` with the one generated from `app-icon-macos.png`, and delete the `android/` and `ios/` folders.
 
 ## Commits and Pull Requests
 

@@ -140,6 +140,7 @@ export function describeRecord(task: TaskSnapshot): { value: string; reason: str
   const { record } = task;
   switch (record.state) {
     case "idle":
+      if (task.recordHeld) return { value: "已停止", reason: "手动停止，本场直播不再录制" };
       return { value: task.notifyOnly ? "仅通知" : "未录制", reason: task.notifyOnly ? "开播时只通知，不写文件" : null };
     case "recording":
       return { value: "写入中", reason: null };
@@ -159,7 +160,7 @@ export interface ErrorView {
 const errorAdvice: Record<CommandErrorKind, { title: string; advice: string }> = {
   invalid_url: { title: "链接无效", advice: "检查链接是否完整，或在直播间页面重新复制分享链接。" },
   invalid_input: { title: "输入有误", advice: "检查填写的内容后重试。" },
-  unsupported_platform: { title: "暂不支持这个平台", advice: "目前支持抖音直播间、主页和分享短链，更多平台陆续加入。" },
+  unsupported_platform: { title: "暂不支持这个平台", advice: "目前支持抖音、快手的直播间、主页和分享短链，更多平台陆续加入。" },
   auth_required: { title: "需要登录", advice: "该直播间需要登录才能观看，在设置的平台账号中填写 Cookie 后重试。" },
   network: { title: "网络连接失败", advice: "检查网络或代理设置后重试。" },
   rate_limited: { title: "请求过于频繁", advice: "平台暂时限制了访问，过几分钟再试。" },

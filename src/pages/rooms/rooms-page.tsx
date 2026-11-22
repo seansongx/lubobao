@@ -14,6 +14,7 @@ import {
   X,
 } from "lucide-react";
 
+import type { TaskFocusRequest } from "@/components/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -54,12 +55,6 @@ const sortOptions = [
   { id: "timing", label: "按已录时长", desc: true },
   { id: "size", label: "按文件大小", desc: true },
 ];
-
-/** 其他页面请求定位到某个任务；seq 变化即重新定位。与 src/components/navigation.ts 的约定一致，合并时统一。 */
-export interface TaskFocusRequest {
-  taskId: TaskId;
-  seq: number;
-}
 
 interface RoomsPageProps {
   /** 由 App 持有的任务订阅，切换页面不重新加载。 */
@@ -194,10 +189,22 @@ export function RoomsPage({ taskList, view, onViewChange, focusTask }: RoomsPage
     onViewChange((current) => ({ ...current, activeId: id, group: "all", platform: "all", query: "" }));
   };
 
-  const focusSeq = focusTask?.seq;
+  // 其他页面请求定位任务：每个 seq 只处理一次，切回本页时不重复应用。
   useEffect(() => {
-    if (focusTask) showTask(focusTask.taskId);
-  }, [focusSeq]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!focusTask) return;
+    onViewChange((current) =>
+      focusTask.seq === current.handledFocusSeq
+        ? current
+        : {
+            ...current,
+            handledFocusSeq: focusTask.seq,
+            activeId: focusTask.taskId,
+            group: "all",
+            platform: "all",
+            query: "",
+          },
+    );
+  }, [focusTask, onViewChange]);
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1">
@@ -461,7 +468,7 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
         </span>
         <p className="m-0 text-sm font-medium">还没有直播间</p>
         <p className="m-0 text-muted-foreground">
-          粘贴抖音直播间链接、主播主页或分享短链。录播宝会按检测间隔查看是否开播，开播后自动录制。
+          粘贴抖音、快手的直播间链接、主播主页或分享短链。录播宝会按检测间隔查看是否开播，开播后自动录制。
         </p>
         <Button className="mt-2" onClick={onAdd}>
           <Plus aria-hidden />
