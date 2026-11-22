@@ -53,7 +53,8 @@ fn rc4_encrypt(plaintext: &[u8], key: &[u8]) -> Vec<u8> {
 /// SM3 hash (GB/T 32905-2016).
 pub(crate) fn sm3(data: &[u8]) -> [u8; 32] {
     let mut reg: [u32; 8] = [
-        0x7380166f, 0x4914b2b9, 0x172442d7, 0xda8a0600, 0xa96f30bc, 0x163138aa, 0xe38dee4d, 0xb0fb0e4e,
+        0x7380166f, 0x4914b2b9, 0x172442d7, 0xda8a0600, 0xa96f30bc, 0x163138aa, 0xe38dee4d,
+        0xb0fb0e4e,
     ];
     let bit_length = (data.len() as u64) * 8;
     let mut message = data.to_vec();
@@ -67,7 +68,12 @@ pub(crate) fn sm3(data: &[u8]) -> [u8; 32] {
         let mut w = [0u32; 68];
         let mut w1 = [0u32; 64];
         for t in 0..16 {
-            w[t] = u32::from_be_bytes([block[4 * t], block[4 * t + 1], block[4 * t + 2], block[4 * t + 3]]);
+            w[t] = u32::from_be_bytes([
+                block[4 * t],
+                block[4 * t + 1],
+                block[4 * t + 2],
+                block[4 * t + 3],
+            ]);
         }
         for j in 16..68 {
             let a = w[j - 16] ^ w[j - 9] ^ w[j - 3].rotate_left(15);
@@ -153,7 +159,12 @@ fn random_prefix() -> Vec<u8> {
 }
 
 fn split_to_bytes(num: u64) -> [u8; 4] {
-    [(num >> 24) as u8, (num >> 16) as u8, (num >> 8) as u8, num as u8]
+    [
+        (num >> 24) as u8,
+        (num >> 16) as u8,
+        (num >> 8) as u8,
+        num as u8,
+    ]
 }
 
 fn rc4_bb(query: &str, user_agent: &str, start_time: u64) -> Vec<u8> {
@@ -211,15 +222,15 @@ fn rc4_bb(query: &str, user_agent: &str, start_time: u64) -> Vec<u8> {
     b[71] = 0;
 
     b[72] = [
-        18, 20, 26, 30, 38, 40, 42, 21, 27, 31, 35, 39, 41, 43, 22, 28, 32, 36, 23, 29, 33, 37, 44, 45, 46, 47, 48,
-        49, 50, 24, 25, 52, 53, 54, 55, 57, 58, 59, 60, 65, 66, 70, 71,
+        18, 20, 26, 30, 38, 40, 42, 21, 27, 31, 35, 39, 41, 43, 22, 28, 32, 36, 23, 29, 33, 37, 44,
+        45, 46, 47, 48, 49, 50, 24, 25, 52, 53, 54, 55, 57, 58, 59, 60, 65, 66, 70, 71,
     ]
     .iter()
     .fold(0u8, |acc, &index| acc ^ b[index]);
 
     let order = [
-        18, 20, 52, 26, 30, 34, 58, 38, 40, 53, 42, 21, 27, 54, 55, 31, 35, 57, 39, 41, 43, 22, 28, 32, 60, 36, 23,
-        29, 33, 37, 44, 45, 59, 46, 47, 48, 49, 50, 24, 25, 65, 66, 70, 71,
+        18, 20, 52, 26, 30, 34, 58, 38, 40, 53, 42, 21, 27, 54, 55, 31, 35, 57, 39, 41, 43, 22, 28,
+        32, 60, 36, 23, 29, 33, 37, 44, 45, 59, 46, 47, 48, 49, 50, 24, 25, 65, 66, 70, 71,
     ];
     let mut bb: Vec<u8> = order.iter().map(|&index| b[index]).collect();
     bb.extend_from_slice(window_env);
@@ -238,15 +249,24 @@ mod tests {
 
     #[test]
     fn sm3_matches_standard_test_vectors() {
-        assert_eq!(hex(&sm3(b"abc")), "66c7f0f462eeedd9d1f2d46bdc10e4e24167c4875cf2f7a2297da02b8f4ba8e0");
+        assert_eq!(
+            hex(&sm3(b"abc")),
+            "66c7f0f462eeedd9d1f2d46bdc10e4e24167c4875cf2f7a2297da02b8f4ba8e0"
+        );
         let long = b"abcd".repeat(16);
-        assert_eq!(hex(&sm3(&long)), "debe9ff92275b8a138604889c18e5a4d6fdb70e5387e5765293dcba39c0c5732");
+        assert_eq!(
+            hex(&sm3(&long)),
+            "debe9ff92275b8a138604889c18e5a4d6fdb70e5387e5765293dcba39c0c5732"
+        );
     }
 
     #[test]
     fn rc4_matches_known_vector() {
         // RFC 6229-style check: key "Key", plaintext "Plaintext".
-        assert_eq!(hex(&rc4_encrypt(b"Plaintext", b"Key")), "bbf316e8d940af0ad3");
+        assert_eq!(
+            hex(&rc4_encrypt(b"Plaintext", b"Key")),
+            "bbf316e8d940af0ad3"
+        );
     }
 
     #[test]
@@ -266,6 +286,9 @@ mod tests {
         // 12-byte prefix + 44 + 65 (window env) + 1 bytes => 122 bytes => 163 chars, plus "=".
         assert_eq!(first.len(), 164);
         assert!(first.ends_with('='));
-        assert_ne!(first, ab_sign_at("aid=6383&web_rid=2", ua, 1_795_364_602_491));
+        assert_ne!(
+            first,
+            ab_sign_at("aid=6383&web_rid=2", ua, 1_795_364_602_491)
+        );
     }
 }

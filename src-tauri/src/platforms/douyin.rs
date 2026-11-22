@@ -15,27 +15,25 @@ use std::fmt;
 
 use reqwest::Url;
 use reqwest::header::{ACCEPT_LANGUAGE, COOKIE, HeaderMap, HeaderValue, REFERER, USER_AGENT};
-use serde::de::{Deserializer, MapAccess, Visitor};
 use serde::Deserialize;
+use serde::de::{Deserializer, MapAccess, Visitor};
 use serde_json::Value;
 
 use super::sign::ab_sign;
 use super::{
-    BoxFuture, FetchOptions, LiveInfo, Platform, PlatformAdapter, PlatformError, Quality, StreamVariant, build_client,
-    fallback_variant_index, select_variant_index, selected_stream,
+    BoxFuture, FetchOptions, LiveInfo, Platform, PlatformAdapter, PlatformError, Quality,
+    StreamVariant, build_client, fallback_variant_index, select_variant_index, selected_stream,
 };
 
 const ACCEPT_LANGUAGE_VALUE: &str = "zh-CN,zh;q=0.8,zh-TW;q=0.7,zh-HK;q=0.5,en-US;q=0.3,en;q=0.2";
 
 /// `DouyinLiveStream._get_pc_headers` user agent, also used to pull streams.
-pub const PC_USER_AGENT: &str =
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36";
+pub const PC_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36";
 const PC_DEFAULT_COOKIE: &str = "__ac_nonce=064caded4009deafd8b89";
 const LIVE_REFERER: &str = "https://live.douyin.com/";
 
 /// `_get_web_stream_data` headers.
-const WEB_API_USER_AGENT: &str =
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36";
+const WEB_API_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36";
 const WEB_API_REFERER: &str = "https://live.douyin.com/335354047186";
 const WEB_API_DEFAULT_COOKIE: &str = "ttwid=1%7CmDcInbJ7AJ-2PGtsgrG4xj7SOiNMzePqQBF1LMO2Qkg%7C1761107324%7Cbbf97c2cd9f8eae8e8c36db4ef50c323deaa4b161179170aaf659590867c162d";
 
@@ -80,7 +78,10 @@ impl DouyinLink {
 
     /// StreamCap sends short links and web profiles through `fetch_app_stream_data`.
     pub fn uses_app_flow(&self) -> bool {
-        matches!(self, DouyinLink::ShortLink { .. } | DouyinLink::WebProfile { .. })
+        matches!(
+            self,
+            DouyinLink::ShortLink { .. } | DouyinLink::WebProfile { .. }
+        )
     }
 }
 
@@ -254,13 +255,19 @@ fn classify_unparsable(body: &str, error: &serde_json::Error) -> PlatformError {
         if lower.contains("captcha") || lower.contains("verify") || lower.contains("验证") {
             return PlatformError::RateLimited("抖音返回了验证页面，可能触发风控".to_string());
         }
-        return PlatformError::RateLimited("抖音返回了网页而不是接口数据，可能触发风控".to_string());
+        return PlatformError::RateLimited(
+            "抖音返回了网页而不是接口数据，可能触发风控".to_string(),
+        );
     }
     PlatformError::Parse(format!("抖音接口数据无法解析: {error}"))
 }
 
 /// Classify a JSON response whose `status_code` is not zero.
-fn classify_api_status(status_code: i64, prompts: Option<&str>, message: Option<&str>) -> PlatformError {
+fn classify_api_status(
+    status_code: i64,
+    prompts: Option<&str>,
+    message: Option<&str>,
+) -> PlatformError {
     let prompts = prompts.unwrap_or_default();
     let message = message.unwrap_or_default();
     let detail = [prompts, message]
@@ -280,17 +287,24 @@ fn classify_api_status(status_code: i64, prompts: Option<&str>, message: Option<
     match status_code {
         // "该内容暂时无法无法查看": unknown or removed room.
         4001038 => PlatformError::InvalidUrl(detail),
-        _ if prompts.contains("繁忙") || prompts.contains("频繁") => PlatformError::RateLimited(detail),
+        _ if prompts.contains("繁忙") || prompts.contains("频繁") => {
+            PlatformError::RateLimited(detail)
+        }
         _ => PlatformError::Parse(detail),
     }
 }
 
 fn parse_envelope(body: &str) -> Result<ApiData, PlatformError> {
-    let envelope: ApiEnvelope = serde_json::from_str(body).map_err(|error| classify_unparsable(body, &error))?;
+    let envelope: ApiEnvelope =
+        serde_json::from_str(body).map_err(|error| classify_unparsable(body, &error))?;
     let data = envelope.data.unwrap_or_default();
     match envelope.status_code {
         Some(0) | None => Ok(data),
-        Some(code) => Err(classify_api_status(code, data.prompts.as_deref(), data.message.as_deref())),
+        Some(code) => Err(classify_api_status(
+            code,
+            data.prompts.as_deref(),
+            data.message.as_deref(),
+        )),
     }
 }
 
@@ -320,7 +334,9 @@ fn build_variants(stream_url: &StreamUrlRaw) -> Result<Vec<StreamVariant>, Platf
     }
 
     if flv.is_empty() && hls.is_empty() {
-        return Err(PlatformError::Parse("直播中但没有找到可用的流地址".to_string()));
+        return Err(PlatformError::Parse(
+            "直播中但没有找到可用的流地址".to_string(),
+        ));
     }
 
     // StreamGet indexes the FLV and HLS value lists independently.
@@ -329,12 +345,19 @@ fn build_variants(stream_url: &StreamUrlRaw) -> Result<Vec<StreamVariant>, Platf
         .map(|index| {
             let flv_entry = flv.get(index);
             let hls_entry = hls.get(index);
-            let name = flv_entry.or(hls_entry).map(|(name, _)| name.clone()).unwrap_or_default();
+            let name = flv_entry
+                .or(hls_entry)
+                .map(|(name, _)| name.clone())
+                .unwrap_or_default();
             StreamVariant {
                 name,
                 quality: Quality::from_index(index),
-                flv_url: flv_entry.map(|(_, url)| url.clone()).filter(|url| !url.is_empty()),
-                hls_url: hls_entry.map(|(_, url)| url.clone()).filter(|url| !url.is_empty()),
+                flv_url: flv_entry
+                    .map(|(_, url)| url.clone())
+                    .filter(|url| !url.is_empty()),
+                hls_url: hls_entry
+                    .map(|(_, url)| url.clone())
+                    .filter(|url| !url.is_empty()),
             }
         })
         .collect();
@@ -363,10 +386,19 @@ fn sdk_codec(sdk_params: Option<&Value>) -> String {
         Some(value) => value,
         None => return String::new(),
     };
-    object.get("VCodec").and_then(Value::as_str).unwrap_or_default().to_string()
+    object
+        .get("VCodec")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string()
 }
 
-fn room_snapshot(room: &RoomRaw, room_id: String, live_url: Option<String>, anchor_name: String) -> Result<RoomSnapshot, PlatformError> {
+fn room_snapshot(
+    room: &RoomRaw,
+    room_id: String,
+    live_url: Option<String>,
+    anchor_name: String,
+) -> Result<RoomSnapshot, PlatformError> {
     let is_live = room.status == Some(STATUS_LIVE);
     let variants = if is_live {
         let stream_url = room
@@ -406,16 +438,20 @@ pub fn parse_web_enter(body: &str, web_rid: &str) -> Result<RoomSnapshot, Platfo
         .as_ref()
         .and_then(|user| user.nickname.clone())
         .ok_or_else(|| PlatformError::Parse("接口数据缺少主播昵称".to_string()))?;
-    room_snapshot(room, web_rid.to_string(), Some(format!("https://live.douyin.com/{web_rid}")), anchor_name)
+    room_snapshot(
+        room,
+        web_rid.to_string(),
+        Some(format!("https://live.douyin.com/{web_rid}")),
+        anchor_name,
+    )
 }
 
 /// Parse a `webcast/room/reflow/info` response.
 pub fn parse_app_reflow(body: &str) -> Result<RoomSnapshot, PlatformError> {
     let data = parse_envelope(body)?;
-    let room = data
-        .room
-        .as_ref()
-        .ok_or_else(|| PlatformError::InvalidUrl("直播间不存在，或为不支持的 VR 直播".to_string()))?;
+    let room = data.room.as_ref().ok_or_else(|| {
+        PlatformError::InvalidUrl("直播间不存在，或为不支持的 VR 直播".to_string())
+    })?;
     let owner = room
         .owner
         .as_ref()
@@ -425,7 +461,10 @@ pub fn parse_app_reflow(body: &str) -> Result<RoomSnapshot, PlatformError> {
         .clone()
         .ok_or_else(|| PlatformError::Parse("接口数据缺少主播昵称".to_string()))?;
     let web_rid = owner.web_rid.clone().filter(|rid| !rid.is_empty());
-    let room_id = web_rid.clone().or_else(|| room.id_str.clone()).unwrap_or_default();
+    let room_id = web_rid
+        .clone()
+        .or_else(|| room.id_str.clone())
+        .unwrap_or_default();
     let live_url = web_rid.map(|rid| format!("https://live.douyin.com/{rid}"));
     room_snapshot(room, room_id, live_url, anchor_name)
 }
@@ -436,10 +475,11 @@ pub fn parse_reflow_redirect(final_url: &str) -> Result<Option<(String, String)>
     if !final_url.contains("reflow/") {
         return Ok(None);
     }
-    let url = Url::parse(final_url).map_err(|error| PlatformError::Parse(format!("跳转地址无效: {error}")))?;
+    let url = Url::parse(final_url)
+        .map_err(|error| PlatformError::Parse(format!("跳转地址无效: {error}")))?;
     let room_id = url
         .path_segments()
-        .and_then(|segments| segments.filter(|segment| !segment.is_empty()).last())
+        .and_then(|mut segments| segments.rfind(|segment| !segment.is_empty()))
         .map(str::to_string)
         .ok_or_else(|| PlatformError::Parse("跳转地址中没有直播间 ID".to_string()))?;
     let sec_user_id = url
@@ -485,7 +525,11 @@ pub fn parse_unique_id(html: &str) -> Option<String> {
 /// Turn a snapshot into `LiveInfo`, choosing the stream for `quality`.
 /// `primary_reachable` is the result of StreamGet's HEAD probe on the chosen
 /// HLS URL; when it failed, the neighbouring tier is used instead.
-pub fn build_live_info(snapshot: RoomSnapshot, quality: Quality, primary_reachable: bool) -> LiveInfo {
+pub fn build_live_info(
+    snapshot: RoomSnapshot,
+    quality: Quality,
+    primary_reachable: bool,
+) -> LiveInfo {
     let index = if primary_reachable {
         select_variant_index(snapshot.variants.len(), quality)
     } else {
@@ -520,11 +564,16 @@ pub fn stream_headers() -> BTreeMap<String, String> {
 }
 
 fn header_value(value: &str) -> Result<HeaderValue, PlatformError> {
-    HeaderValue::from_str(value).map_err(|_| PlatformError::InvalidUrl("Cookie 含有无法发送的字符".to_string()))
+    HeaderValue::from_str(value)
+        .map_err(|_| PlatformError::InvalidUrl("Cookie 含有无法发送的字符".to_string()))
 }
 
 fn user_cookie(options: &FetchOptions) -> Option<&str> {
-    options.cookies.as_deref().map(str::trim).filter(|cookie| !cookie.is_empty())
+    options
+        .cookies
+        .as_deref()
+        .map(str::trim)
+        .filter(|cookie| !cookie.is_empty())
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -535,7 +584,11 @@ impl DouyinAdapter {
         DouyinAdapter
     }
 
-    async fn get_text(client: &reqwest::Client, url: &str, headers: HeaderMap) -> Result<(String, String), PlatformError> {
+    async fn get_text(
+        client: &reqwest::Client,
+        url: &str,
+        headers: HeaderMap,
+    ) -> Result<(String, String), PlatformError> {
         let response = client.get(url).headers(headers).send().await?;
         let final_url = response.url().to_string();
         let status = response.status();
@@ -546,7 +599,12 @@ impl DouyinAdapter {
         Ok((final_url, body))
     }
 
-    async fn fetch_web(&self, client: &reqwest::Client, web_rid: &str, options: &FetchOptions) -> Result<RoomSnapshot, PlatformError> {
+    async fn fetch_web(
+        &self,
+        client: &reqwest::Client,
+        web_rid: &str,
+        options: &FetchOptions,
+    ) -> Result<RoomSnapshot, PlatformError> {
         let mut api = Url::parse(WEB_ENTER_API).expect("valid web enter API URL");
         api.query_pairs_mut()
             .append_pair("aid", "6383")
@@ -577,11 +635,19 @@ impl DouyinAdapter {
         parse_web_enter(&body, web_rid)
     }
 
-    async fn fetch_app(&self, client: &reqwest::Client, link: &DouyinLink, options: &FetchOptions) -> Result<RoomSnapshot, PlatformError> {
+    async fn fetch_app(
+        &self,
+        client: &reqwest::Client,
+        link: &DouyinLink,
+        options: &FetchOptions,
+    ) -> Result<RoomSnapshot, PlatformError> {
         let resolve_headers = || {
             let mut headers = HeaderMap::new();
             headers.insert(USER_AGENT, HeaderValue::from_static(MOBILE_USER_AGENT));
-            headers.insert(ACCEPT_LANGUAGE, HeaderValue::from_static(ACCEPT_LANGUAGE_VALUE));
+            headers.insert(
+                ACCEPT_LANGUAGE,
+                HeaderValue::from_static(ACCEPT_LANGUAGE_VALUE),
+            );
             headers
         };
 
@@ -592,7 +658,8 @@ impl DouyinAdapter {
             _ => {
                 let mut headers = resolve_headers();
                 headers.insert(COOKIE, HeaderValue::from_static(RESOLVE_COOKIE));
-                let (final_url, _) = Self::get_text(client, &link.normalized_url(), headers).await?;
+                let (final_url, _) =
+                    Self::get_text(client, &link.normalized_url(), headers).await?;
                 final_url
             }
         };
@@ -600,7 +667,10 @@ impl DouyinAdapter {
         if let Some((room_id, sec_user_id)) = parse_reflow_redirect(&final_url)? {
             let mut api = Url::parse(APP_REFLOW_API).expect("valid reflow API URL");
             api.query_pairs_mut()
-                .append_pair("verifyFp", "verify_lxj5zv70_7szNlAB7_pxNY_48Vh_ALKF_GA1Uf3yteoOY")
+                .append_pair(
+                    "verifyFp",
+                    "verify_lxj5zv70_7szNlAB7_pxNY_48Vh_ALKF_GA1Uf3yteoOY",
+                )
                 .append_pair("type_id", "0")
                 .append_pair("live_id", "1")
                 .append_pair("room_id", &room_id)
@@ -612,21 +682,28 @@ impl DouyinAdapter {
             api.query_pairs_mut().append_pair("a_bogus", &signature);
 
             let mut headers = resolve_headers();
-            headers.insert(COOKIE, header_value(user_cookie(options).unwrap_or_default())?);
+            headers.insert(
+                COOKIE,
+                header_value(user_cookie(options).unwrap_or_default())?,
+            );
             let (_, body) = Self::get_text(client, api.as_str(), headers).await?;
             return parse_app_reflow(&body);
         }
 
         // Profile link: find the 抖音号 and use the web flow.
-        let sec_uid = profile_sec_uid(&final_url)
-            .ok_or_else(|| PlatformError::InvalidUrl(format!("无法从链接中识别主播: {final_url}")))?;
+        let sec_uid = profile_sec_uid(&final_url).ok_or_else(|| {
+            PlatformError::InvalidUrl(format!("无法从链接中识别主播: {final_url}"))
+        })?;
         let mut headers = resolve_headers();
         headers.insert(COOKIE, HeaderValue::from_static(PROFILE_COOKIE));
-        let (_, html) = Self::get_text(client, &format!("{PROFILE_PAGE}{sec_uid}"), headers).await?;
+        let (_, html) =
+            Self::get_text(client, &format!("{PROFILE_PAGE}{sec_uid}"), headers).await?;
         let unique_id = parse_unique_id(&html)
             .ok_or_else(|| PlatformError::Parse("主页中没有找到抖音号 (unique_id)".to_string()))?;
         if unique_id.is_empty() {
-            return Err(PlatformError::InvalidUrl("该主播没有抖音号，无法通过主页链接定位直播间".to_string()));
+            return Err(PlatformError::InvalidUrl(
+                "该主播没有抖音号，无法通过主页链接定位直播间".to_string(),
+            ));
         }
         self.fetch_web(client, &unique_id, options).await
     }
@@ -636,7 +713,10 @@ impl DouyinAdapter {
     async fn probe(client: &reqwest::Client, url: &str, options: &FetchOptions) -> bool {
         let mut headers = HeaderMap::new();
         headers.insert(USER_AGENT, HeaderValue::from_static(PC_USER_AGENT));
-        headers.insert(ACCEPT_LANGUAGE, HeaderValue::from_static(ACCEPT_LANGUAGE_VALUE));
+        headers.insert(
+            ACCEPT_LANGUAGE,
+            HeaderValue::from_static(ACCEPT_LANGUAGE_VALUE),
+        );
         headers.insert(REFERER, HeaderValue::from_static(LIVE_REFERER));
         let cookie = user_cookie(options).unwrap_or(PC_DEFAULT_COOKIE);
         if let Ok(value) = HeaderValue::from_str(cookie) {
@@ -651,7 +731,11 @@ impl DouyinAdapter {
             .is_ok()
     }
 
-    async fn fetch_inner(&self, url: &str, options: &FetchOptions) -> Result<LiveInfo, PlatformError> {
+    async fn fetch_inner(
+        &self,
+        url: &str,
+        options: &FetchOptions,
+    ) -> Result<LiveInfo, PlatformError> {
         let link = parse_link(url)?;
         let client = build_client(options.proxy.as_deref(), true)?;
         let snapshot = match &link {
@@ -683,7 +767,11 @@ impl PlatformAdapter for DouyinAdapter {
         parse_link(url).is_ok()
     }
 
-    fn fetch<'a>(&'a self, url: &'a str, options: &'a FetchOptions) -> BoxFuture<'a, Result<LiveInfo, PlatformError>> {
+    fn fetch<'a>(
+        &'a self,
+        url: &'a str,
+        options: &'a FetchOptions,
+    ) -> BoxFuture<'a, Result<LiveInfo, PlatformError>> {
         Box::pin(self.fetch_inner(url, options))
     }
 }
@@ -694,7 +782,8 @@ mod tests {
 
     const WEB_LIVE: &str = include_str!("../../tests/fixtures/douyin/web_enter_live.json");
     const WEB_OFFLINE: &str = include_str!("../../tests/fixtures/douyin/web_enter_offline.json");
-    const WEB_NOT_FOUND: &str = include_str!("../../tests/fixtures/douyin/web_enter_not_found.json");
+    const WEB_NOT_FOUND: &str =
+        include_str!("../../tests/fixtures/douyin/web_enter_not_found.json");
     const WEB_BAD_ID: &str = include_str!("../../tests/fixtures/douyin/web_enter_busy.json");
     const APP_LIVE: &str = include_str!("../../tests/fixtures/douyin/app_reflow_live.json");
     const APP_OFFLINE: &str = include_str!("../../tests/fixtures/douyin/app_reflow_offline.json");
@@ -705,25 +794,33 @@ mod tests {
         let cases = [
             (
                 "https://live.douyin.com/745964462470",
-                DouyinLink::WebRoom { web_rid: "745964462470".into() },
+                DouyinLink::WebRoom {
+                    web_rid: "745964462470".into(),
+                },
                 "https://live.douyin.com/745964462470",
                 false,
             ),
             (
                 "https://v.douyin.com/iQFeBnt/",
-                DouyinLink::ShortLink { code: "iQFeBnt".into() },
+                DouyinLink::ShortLink {
+                    code: "iQFeBnt".into(),
+                },
                 "https://v.douyin.com/iQFeBnt/",
                 true,
             ),
             (
                 "https://live.douyin.com/yall1102",
-                DouyinLink::DouyinId { id: "yall1102".into() },
+                DouyinLink::DouyinId {
+                    id: "yall1102".into(),
+                },
                 "https://live.douyin.com/yall1102",
                 false,
             ),
             (
                 "https://v.douyin.com/CeiU5cbX",
-                DouyinLink::ShortLink { code: "CeiU5cbX".into() },
+                DouyinLink::ShortLink {
+                    code: "CeiU5cbX".into(),
+                },
                 "https://v.douyin.com/CeiU5cbX/",
                 true,
             ),
@@ -749,14 +846,20 @@ mod tests {
     fn normalizes_query_strings_missing_scheme_and_whitespace() {
         assert_eq!(
             parse_link("  live.douyin.com/745964462470?anchor_id=1&from=share ").unwrap(),
-            DouyinLink::WebRoom { web_rid: "745964462470".into() }
+            DouyinLink::WebRoom {
+                web_rid: "745964462470".into()
+            }
         );
         assert_eq!(
             parse_link("https://www.douyin.com/user/MS4wLjABAAAAx?from_tab_name=live").unwrap(),
-            DouyinLink::WebProfile { sec_uid: "MS4wLjABAAAAx".into() }
+            DouyinLink::WebProfile {
+                sec_uid: "MS4wLjABAAAAx".into()
+            }
         );
         assert_eq!(
-            parse_link("http://v.douyin.com/iQFeBnt").unwrap().normalized_url(),
+            parse_link("http://v.douyin.com/iQFeBnt")
+                .unwrap()
+                .normalized_url(),
             "https://v.douyin.com/iQFeBnt/"
         );
     }
@@ -784,8 +887,15 @@ mod tests {
         assert!(snapshot.is_live);
         assert_eq!(snapshot.anchor_name, "测试主播");
         assert_eq!(snapshot.title.as_deref(), Some("测试直播间"));
-        assert_eq!(snapshot.live_url.as_deref(), Some("https://live.douyin.com/100000000001"));
-        let names: Vec<&str> = snapshot.variants.iter().map(|variant| variant.name.as_str()).collect();
+        assert_eq!(
+            snapshot.live_url.as_deref(),
+            Some("https://live.douyin.com/100000000001")
+        );
+        let names: Vec<&str> = snapshot
+            .variants
+            .iter()
+            .map(|variant| variant.name.as_str())
+            .collect();
         assert_eq!(names, ["ORIGIN", "FULL_HD1", "HD1", "SD1", "SD2"]);
         let origin = &snapshot.variants[0];
         assert_eq!(origin.quality, Some(Quality::Od));
@@ -797,20 +907,52 @@ mod tests {
         let selected = info.selected.unwrap();
         assert_eq!(selected.requested, Quality::Hd);
         assert_eq!(selected.variant.name, "HD1");
-        assert_eq!(selected.record_url, selected.variant.hls_url.clone().unwrap());
-        assert_eq!(info.stream_headers.get("Referer").map(String::as_str), Some("https://live.douyin.com/"));
+        assert_eq!(
+            selected.record_url,
+            selected.variant.hls_url.clone().unwrap()
+        );
+        assert_eq!(
+            info.stream_headers.get("Referer").map(String::as_str),
+            Some("https://live.douyin.com/")
+        );
 
-        let od = build_live_info(snapshot, Quality::Od, true).selected.unwrap();
+        let od = build_live_info(snapshot, Quality::Od, true)
+            .selected
+            .unwrap();
         assert_eq!(od.variant.name, "ORIGIN");
-        assert_eq!(od.source_url(true, false).1, od.variant.flv_url.as_deref().unwrap());
+        assert_eq!(
+            od.source_url(true, false).1,
+            od.variant.flv_url.as_deref().unwrap()
+        );
     }
 
     #[test]
     fn unreachable_primary_stream_falls_back_like_streamget() {
         let snapshot = parse_web_enter(WEB_LIVE, "1").unwrap();
-        assert_eq!(build_live_info(snapshot.clone(), Quality::Od, false).selected.unwrap().variant.name, "FULL_HD1");
-        assert_eq!(build_live_info(snapshot.clone(), Quality::Sd, false).selected.unwrap().variant.name, "SD2");
-        assert_eq!(build_live_info(snapshot, Quality::Ld, false).selected.unwrap().variant.name, "SD1");
+        assert_eq!(
+            build_live_info(snapshot.clone(), Quality::Od, false)
+                .selected
+                .unwrap()
+                .variant
+                .name,
+            "FULL_HD1"
+        );
+        assert_eq!(
+            build_live_info(snapshot.clone(), Quality::Sd, false)
+                .selected
+                .unwrap()
+                .variant
+                .name,
+            "SD2"
+        );
+        assert_eq!(
+            build_live_info(snapshot, Quality::Ld, false)
+                .selected
+                .unwrap()
+                .variant
+                .name,
+            "SD1"
+        );
     }
 
     #[test]
@@ -818,16 +960,38 @@ mod tests {
         let mut snapshot = parse_web_enter(WEB_LIVE, "1").unwrap();
         snapshot.variants.truncate(3); // ORIGIN, FULL_HD1, HD1
         for quality in [Quality::Hd, Quality::Sd, Quality::Ld] {
-            assert_eq!(build_live_info(snapshot.clone(), quality, true).selected.unwrap().variant.name, "HD1");
+            assert_eq!(
+                build_live_info(snapshot.clone(), quality, true)
+                    .selected
+                    .unwrap()
+                    .variant
+                    .name,
+                "HD1"
+            );
         }
-        assert_eq!(build_live_info(snapshot.clone(), Quality::Uhd, true).selected.unwrap().variant.name, "FULL_HD1");
+        assert_eq!(
+            build_live_info(snapshot.clone(), Quality::Uhd, true)
+                .selected
+                .unwrap()
+                .variant
+                .name,
+            "FULL_HD1"
+        );
         // Fallback from LD on a padded list goes to index 3, which is padding for HD1 too.
-        assert_eq!(build_live_info(snapshot, Quality::Ld, false).selected.unwrap().variant.name, "HD1");
+        assert_eq!(
+            build_live_info(snapshot, Quality::Ld, false)
+                .selected
+                .unwrap()
+                .variant
+                .name,
+            "HD1"
+        );
     }
 
     #[test]
     fn h265_origin_is_recorded_from_hls() {
-        let body = WEB_LIVE.replace("\\\"VCodec\\\":\\\"h264\\\"", "\\\"VCodec\\\":\\\"h265\\\"");
+        // VCodec sits in doubly-escaped JSON inside stream_data; swap every occurrence.
+        let body = WEB_LIVE.replace("h264", "h265");
         assert_ne!(body, WEB_LIVE);
         let info = build_live_info(parse_web_enter(&body, "1").unwrap(), Quality::Od, true);
         let selected = info.selected.unwrap();
@@ -854,7 +1018,10 @@ mod tests {
         let live = parse_app_reflow(APP_LIVE).unwrap();
         assert!(live.is_live);
         assert_eq!(live.room_id, "100000000001");
-        assert_eq!(live.live_url.as_deref(), Some("https://live.douyin.com/100000000001"));
+        assert_eq!(
+            live.live_url.as_deref(),
+            Some("https://live.douyin.com/100000000001")
+        );
         assert_eq!(live.variants.len(), 5);
         assert_eq!(live.variants[0].name, "ORIGIN");
         let info = build_live_info(live, Quality::Ld, true);
@@ -875,42 +1042,82 @@ mod tests {
         );
         let profile = "https://www.iesdouyin.com/share/user/MS4wLjABAAAAfJdQ?sec_uid=MS4wLjABAAAAfJdQ&from_ssr=1";
         assert_eq!(parse_reflow_redirect(profile).unwrap(), None);
-        assert_eq!(profile_sec_uid(profile).as_deref(), Some("MS4wLjABAAAAfJdQ"));
         assert_eq!(
-            parse_reflow_redirect("https://webcast.amemv.com/douyin/webcast/reflow/1?u_code=x").unwrap_err().kind(),
+            profile_sec_uid(profile).as_deref(),
+            Some("MS4wLjABAAAAfJdQ")
+        );
+        assert_eq!(
+            parse_reflow_redirect("https://webcast.amemv.com/douyin/webcast/reflow/1?u_code=x")
+                .unwrap_err()
+                .kind(),
             "parse"
         );
-        assert_eq!(parse_unique_id(PROFILE_HTML).as_deref(), Some("test_unique_id"));
+        assert_eq!(
+            parse_unique_id(PROFILE_HTML).as_deref(),
+            Some("test_unique_id")
+        );
         assert_eq!(parse_unique_id("<html></html>"), None);
     }
 
     #[test]
     fn errors_are_classified_for_the_ui() {
-        assert_eq!(parse_web_enter(WEB_NOT_FOUND, "1").unwrap_err().kind(), "invalid_url");
-        assert_eq!(parse_web_enter(WEB_BAD_ID, "x").unwrap_err().kind(), "invalid_url");
+        assert_eq!(
+            parse_web_enter(WEB_NOT_FOUND, "1").unwrap_err().kind(),
+            "invalid_url"
+        );
+        assert_eq!(
+            parse_web_enter(WEB_BAD_ID, "x").unwrap_err().kind(),
+            "invalid_url"
+        );
         assert_eq!(parse_web_enter("", "1").unwrap_err().kind(), "rate_limited");
-        assert_eq!(parse_web_enter("<html>验证码</html>", "1").unwrap_err().kind(), "rate_limited");
-        assert_eq!(parse_web_enter("{\"data\": [1,2", "1").unwrap_err().kind(), "parse");
         assert_eq!(
-            parse_web_enter(r#"{"status_code":0,"data":{"data":[{"status":2}],"user":{"nickname":"a"}}}"#, "1")
-                .unwrap_err()
-                .kind(),
-            "parse"
-        );
-        assert_eq!(
-            parse_web_enter(r#"{"status_code":20003,"data":{"prompts":"请先登录"}}"#, "1").unwrap_err().kind(),
-            "auth_required"
-        );
-        assert_eq!(
-            parse_web_enter(r#"{"status_code":10011,"data":{"prompts":"当前服务繁忙，请稍后重试"}}"#, "1")
+            parse_web_enter("<html>验证码</html>", "1")
                 .unwrap_err()
                 .kind(),
             "rate_limited"
         );
         assert_eq!(
-            parse_web_enter(r#"{"status_code":0,"data":{"data":[]}}"#, "1").unwrap_err().kind(),
+            parse_web_enter("{\"data\": [1,2", "1").unwrap_err().kind(),
+            "parse"
+        );
+        assert_eq!(
+            parse_web_enter(
+                r#"{"status_code":0,"data":{"data":[{"status":2}],"user":{"nickname":"a"}}}"#,
+                "1"
+            )
+            .unwrap_err()
+            .kind(),
+            "parse"
+        );
+        assert_eq!(
+            parse_web_enter(
+                r#"{"status_code":20003,"data":{"prompts":"请先登录"}}"#,
+                "1"
+            )
+            .unwrap_err()
+            .kind(),
+            "auth_required"
+        );
+        assert_eq!(
+            parse_web_enter(
+                r#"{"status_code":10011,"data":{"prompts":"当前服务繁忙，请稍后重试"}}"#,
+                "1"
+            )
+            .unwrap_err()
+            .kind(),
+            "rate_limited"
+        );
+        assert_eq!(
+            parse_web_enter(r#"{"status_code":0,"data":{"data":[]}}"#, "1")
+                .unwrap_err()
+                .kind(),
             "invalid_url"
         );
-        assert_eq!(parse_app_reflow(r#"{"status_code":0,"data":{}}"#).unwrap_err().kind(), "invalid_url");
+        assert_eq!(
+            parse_app_reflow(r#"{"status_code":0,"data":{}}"#)
+                .unwrap_err()
+                .kind(),
+            "invalid_url"
+        );
     }
 }

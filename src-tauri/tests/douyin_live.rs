@@ -44,7 +44,14 @@ async fn report(adapter: &DouyinAdapter, url: &str, options: &FetchOptions) -> b
             );
             if let Some(selected) = &info.selected {
                 let (format, source) = selected.source_url(true, false);
-                println!("     selected={} ({:?}) source={format:?} {source}", selected.variant.name, selected.requested);
+                println!(
+                    "     selected={} ({:?}) source={format:?} {source}",
+                    selected.variant.name, selected.requested
+                );
+                println!(
+                    "     hls={}",
+                    selected.variant.hls_url.as_deref().unwrap_or("-")
+                );
                 println!("     headers={:?}", info.stream_headers);
             }
             true
@@ -69,8 +76,14 @@ async fn readme_links_resolve_against_live_douyin() {
     }
     if let Ok(live_url) = std::env::var("DOUYIN_LIVE_URL") {
         for quality in [Quality::Od, Quality::Hd, Quality::Ld] {
-            let options = FetchOptions { quality, ..FetchOptions::default() };
-            assert!(report(&adapter, &live_url, &options).await, "live room failed");
+            let options = FetchOptions {
+                quality,
+                ..FetchOptions::default()
+            };
+            assert!(
+                report(&adapter, &live_url, &options).await,
+                "live room failed"
+            );
         }
     }
     assert!(ok >= 1, "no README link resolved");

@@ -50,9 +50,13 @@ impl Platform {
 ///
 /// StreamCap has no separate 蓝光 tier; its quality help text documents
 /// index 0 as "原画或者蓝光".
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
+)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum Quality {
+    /// Default, as StreamCap `StreamManager.DEFAULT_QUALITY = VideoQuality.OD`.
+    #[default]
     Od,
     Uhd,
     Hd,
@@ -61,7 +65,13 @@ pub enum Quality {
 }
 
 impl Quality {
-    pub const ALL: [Quality; 5] = [Quality::Od, Quality::Uhd, Quality::Hd, Quality::Sd, Quality::Ld];
+    pub const ALL: [Quality; 5] = [
+        Quality::Od,
+        Quality::Uhd,
+        Quality::Hd,
+        Quality::Sd,
+        Quality::Ld,
+    ];
 
     /// Code stored in StreamCap's config, e.g. `"OD"`.
     pub fn code(self) -> &'static str {
@@ -110,13 +120,6 @@ impl Quality {
             .into_iter()
             .find(|quality| quality.code() == upper)
             .unwrap_or(Quality::Od)
-    }
-}
-
-impl Default for Quality {
-    fn default() -> Self {
-        // StreamCap `StreamManager.DEFAULT_QUALITY = VideoQuality.OD`.
-        Quality::Od
     }
 }
 
@@ -169,11 +172,17 @@ impl SelectedStream {
     /// Source URL StreamCap's `StreamManager._select_source_url` would record:
     /// FLV-preferred platforms use FLV unless the user chose HLS or the FLV
     /// stream is H.265; otherwise `record_url`.
-    pub fn source_url(&self, flv_preferred_platform: bool, prefer_hls: bool) -> (SourceFormat, &str) {
-        if flv_preferred_platform && !prefer_hls && self.flv_codec().as_deref() != Some("h265") {
-            if let Some(flv_url) = self.variant.flv_url.as_deref() {
-                return (SourceFormat::Flv, flv_url);
-            }
+    pub fn source_url(
+        &self,
+        flv_preferred_platform: bool,
+        prefer_hls: bool,
+    ) -> (SourceFormat, &str) {
+        if flv_preferred_platform
+            && !prefer_hls
+            && self.flv_codec().as_deref() != Some("h265")
+            && let Some(flv_url) = self.variant.flv_url.as_deref()
+        {
+            return (SourceFormat::Flv, flv_url);
         }
         match self.variant.hls_url.as_deref() {
             Some(hls_url) if hls_url == self.record_url => (SourceFormat::Hls, hls_url),
@@ -288,7 +297,11 @@ pub trait PlatformAdapter: Send + Sync {
     fn matches(&self, url: &str) -> bool;
 
     /// Resolve the link and fetch the room's current state.
-    fn fetch<'a>(&'a self, url: &'a str, options: &'a FetchOptions) -> BoxFuture<'a, Result<LiveInfo, PlatformError>>;
+    fn fetch<'a>(
+        &'a self,
+        url: &'a str,
+        options: &'a FetchOptions,
+    ) -> BoxFuture<'a, Result<LiveInfo, PlatformError>>;
 }
 
 /// All built-in adapters.
@@ -320,7 +333,11 @@ pub fn fallback_variant_index(variant_count: usize, quality: Quality) -> Option<
         return None;
     }
     let padded_index = quality.index();
-    let fallback = if padded_index < 4 { padded_index + 1 } else { padded_index - 1 };
+    let fallback = if padded_index < 4 {
+        padded_index + 1
+    } else {
+        padded_index - 1
+    };
     Some(fallback.min(variant_count - 1))
 }
 
@@ -353,7 +370,10 @@ pub fn normalize_proxy(proxy: &str) -> Option<String> {
 }
 
 /// Build an HTTP client for one fetch.
-pub(crate) fn build_client(proxy: Option<&str>, follow_redirects: bool) -> Result<reqwest::Client, PlatformError> {
+pub(crate) fn build_client(
+    proxy: Option<&str>,
+    follow_redirects: bool,
+) -> Result<reqwest::Client, PlatformError> {
     let mut builder = reqwest::Client::builder().timeout(REQUEST_TIMEOUT);
     builder = if follow_redirects {
         builder.redirect(reqwest::redirect::Policy::limited(10))
@@ -414,9 +434,15 @@ mod tests {
     #[test]
     fn record_url_prefers_hls_then_flv() {
         let both = variant("A", Some("https://h/a.m3u8"), Some("https://f/a.flv"));
-        assert_eq!(selected_stream(Quality::Od, &both).unwrap().record_url, "https://h/a.m3u8");
+        assert_eq!(
+            selected_stream(Quality::Od, &both).unwrap().record_url,
+            "https://h/a.m3u8"
+        );
         let flv_only = variant("B", Some(""), Some("https://f/b.flv"));
-        assert_eq!(selected_stream(Quality::Od, &flv_only).unwrap().record_url, "https://f/b.flv");
+        assert_eq!(
+            selected_stream(Quality::Od, &flv_only).unwrap().record_url,
+            "https://f/b.flv"
+        );
         assert!(selected_stream(Quality::Od, &variant("C", None, None)).is_none());
     }
 
@@ -424,26 +450,52 @@ mod tests {
     fn source_url_prefers_flv_unless_hls_requested_or_h265() {
         let h264 = selected_stream(
             Quality::Od,
-            &variant("ORIGIN", Some("https://h/a.m3u8?codec=h264"), Some("https://f/a.flv?x=1&codec=h264")),
+            &variant(
+                "ORIGIN",
+                Some("https://h/a.m3u8?codec=h264"),
+                Some("https://f/a.flv?x=1&codec=h264"),
+            ),
         )
         .unwrap();
-        assert_eq!(h264.source_url(true, false), (SourceFormat::Flv, "https://f/a.flv?x=1&codec=h264"));
-        assert_eq!(h264.source_url(true, true), (SourceFormat::Hls, "https://h/a.m3u8?codec=h264"));
-        assert_eq!(h264.source_url(false, false), (SourceFormat::Hls, "https://h/a.m3u8?codec=h264"));
+        assert_eq!(
+            h264.source_url(true, false),
+            (SourceFormat::Flv, "https://f/a.flv?x=1&codec=h264")
+        );
+        assert_eq!(
+            h264.source_url(true, true),
+            (SourceFormat::Hls, "https://h/a.m3u8?codec=h264")
+        );
+        assert_eq!(
+            h264.source_url(false, false),
+            (SourceFormat::Hls, "https://h/a.m3u8?codec=h264")
+        );
 
         let h265 = selected_stream(
             Quality::Od,
-            &variant("ORIGIN", Some("https://h/a.m3u8?codec=h265"), Some("https://f/a.flv?codec=h265")),
+            &variant(
+                "ORIGIN",
+                Some("https://h/a.m3u8?codec=h265"),
+                Some("https://f/a.flv?codec=h265"),
+            ),
         )
         .unwrap();
         assert_eq!(h265.flv_codec().as_deref(), Some("h265"));
-        assert_eq!(h265.source_url(true, false), (SourceFormat::Hls, "https://h/a.m3u8?codec=h265"));
+        assert_eq!(
+            h265.source_url(true, false),
+            (SourceFormat::Hls, "https://h/a.m3u8?codec=h265")
+        );
     }
 
     #[test]
     fn proxy_gets_http_scheme_when_missing() {
-        assert_eq!(normalize_proxy("127.0.0.1:7890").as_deref(), Some("http://127.0.0.1:7890"));
-        assert_eq!(normalize_proxy("socks5://127.0.0.1:1080").as_deref(), Some("socks5://127.0.0.1:1080"));
+        assert_eq!(
+            normalize_proxy("127.0.0.1:7890").as_deref(),
+            Some("http://127.0.0.1:7890")
+        );
+        assert_eq!(
+            normalize_proxy("socks5://127.0.0.1:1080").as_deref(),
+            Some("socks5://127.0.0.1:1080")
+        );
         assert_eq!(normalize_proxy("  "), None);
     }
 
