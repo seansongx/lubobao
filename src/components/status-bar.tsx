@@ -4,6 +4,8 @@ import { AlertTriangle, Cpu, HardDrive, Loader2, RotateCw, Timer, Wifi } from "l
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { formatBytes } from "@/components/format";
+import { useLibraryStats } from "@/components/use-library-stats";
 import { api, type FfmpegStatus } from "@/lib/api";
 import { useFfmpegStatus, useTasks } from "@/lib/use-backend";
 import { cn } from "@/lib/utils";
@@ -126,6 +128,36 @@ function FfmpegItem() {
   );
 }
 
+/** 剩余空间低于这个值时用琥珀色提醒（与录制引擎默认磁盘阈值 2 GB 同量级，留出余量）。 */
+const LOW_DISK_BYTES = 5 * 1024 ** 3;
+
+function DiskItem() {
+  const { stats, failed } = useLibraryStats();
+  const available = stats?.availableBytes ?? null;
+  const low = available !== null && available < LOW_DISK_BYTES;
+  const hint = !stats
+    ? failed
+      ? "无法读取磁盘空间"
+      : "正在读取磁盘空间"
+    : available === null
+      ? `无法查询 ${stats.root} 所在磁盘的剩余空间`
+      : [
+          `保存目录 ${stats.root} 所在磁盘剩余 ${formatBytes(available)}`,
+          stats.totalBytes !== null && `，共 ${formatBytes(stats.totalBytes)}`,
+          !stats.rootExists && "。保存目录不存在，显示的是上级目录所在磁盘",
+          low && "。剩余空间不足，录制可能会停止",
+        ]
+          .filter(Boolean)
+          .join("");
+
+  return (
+    <StatusItem hint={hint} className={cn(low && "text-status-retrying")}>
+      {low ? <AlertTriangle className="size-3.5" aria-hidden /> : <HardDrive className="size-3.5" aria-hidden />}
+      磁盘余量 <span className="tabular-nums">{available === null ? "—" : formatBytes(available)}</span>
+    </StatusItem>
+  );
+}
+
 export function StatusBar() {
   const tasks = useTasks();
   const recording = tasks.filter((task) => task.display === "recording");
@@ -148,11 +180,8 @@ export function StatusBar() {
         <span className="tabular-nums">{(bitrateKbps / 1000).toFixed(1)} Mbps</span>
       </StatusItem>
       <Separator orientation="vertical" className="h-3.5!" />
-      {/* 磁盘余量和下次检测在录制引擎、轮询调度接入后提供。 */}
-      <StatusItem hint="保存目录所在磁盘的剩余空间（尚未接入）">
-        <HardDrive className="size-3.5" aria-hidden />
-        磁盘余量 —
-      </StatusItem>
+      <DiskItem />
+      {/* 下次检测在轮询调度接入后提供。 */}
       <StatusItem hint="距离下一轮开播检测的时间（尚未接入）" className="ml-auto">
         <Timer className="size-3.5" aria-hidden />
         下次检测 —

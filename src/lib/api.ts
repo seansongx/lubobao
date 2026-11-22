@@ -242,6 +242,63 @@ export interface Settings {
   stream_end_notification_enabled: boolean;
 }
 
+// ---- 录像库（src-tauri/src/library） ----
+
+export type LibraryErrorKind =
+  | "root_missing"
+  | "root_not_directory"
+  | "permission_denied"
+  | "not_found"
+  | "invalid_path"
+  | "invalid_target"
+  | "open_failed"
+  | "io";
+
+/** 录像库命令失败时 Promise 以此对象 reject；root 为录像根目录的绝对路径。 */
+export interface LibraryError {
+  kind: LibraryErrorKind;
+  message: string;
+  root: string;
+}
+
+export function isLibraryError(value: unknown): value is LibraryError {
+  return isCommandError(value) && typeof (value as unknown as LibraryError).root === "string";
+}
+
+export interface LibraryEntry {
+  name: string;
+  /** 相对于录像根目录，`/` 分隔；传回 openLibraryFile 等命令。 */
+  path: string;
+  kind: "dir" | "file";
+  /** 字节，目录为 null。 */
+  size: number | null;
+  /** Unix 毫秒。 */
+  modifiedAt: number | null;
+  /** 目录下的子目录和录像文件数。 */
+  childCount: number | null;
+  /** 分段序号（`_000`）。 */
+  segment: number | null;
+  /** 同一次录制的分组键。 */
+  group: string | null;
+}
+
+export interface LibraryListing {
+  root: string;
+  /** 当前目录，根目录为 ""。 */
+  path: string;
+  /** 目录在前，文件按时间倒序，分段按序号。 */
+  entries: LibraryEntry[];
+}
+
+export interface LibraryStats {
+  root: string;
+  rootExists: boolean;
+  usedBytes: number;
+  fileCount: number;
+  availableBytes: number | null;
+  totalBytes: number | null;
+}
+
 // ---- 后端接口 ----
 
 export interface Backend {
@@ -260,6 +317,15 @@ export interface Backend {
   /** 部分更新，返回完整设置。任一项无效时整批不保存。 */
   updateSettings(values: Partial<Settings>): Promise<Settings>;
   listActivity(query?: ActivityQuery): Promise<ActivityPage>;
+  /** 列出录像根目录下的子目录；path 缺省为根目录。 */
+  listLibrary(path?: string): Promise<LibraryListing>;
+  getLibraryStats(): Promise<LibraryStats>;
+  /** 用系统默认播放器打开录像文件。 */
+  openLibraryFile(path: string): Promise<void>;
+  /** 在系统文件管理器中打开文件夹本身；path 为 "" 时打开根目录。 */
+  openLibraryFolder(path: string): Promise<void>;
+  /** 在系统文件管理器中显示并选中；path 为 "" 时打开根目录。 */
+  revealLibraryItem(path: string): Promise<void>;
 
   onFfmpegStatus(handler: (status: FfmpegStatus) => void): Promise<UnlistenFn>;
   onTaskUpdated(handler: (task: TaskSnapshot) => void): Promise<UnlistenFn>;
@@ -283,6 +349,11 @@ const tauriBackend: Backend = {
   getSettings: () => invoke("get_settings"),
   updateSettings: (values) => invoke("update_settings", { values }),
   listActivity: (query) => invoke("list_activity", { query: query ?? null }),
+  listLibrary: (path) => invoke("list_library", { path: path ?? null }),
+  getLibraryStats: () => invoke("get_library_stats"),
+  openLibraryFile: (path) => invoke("open_library_file", { path }),
+  openLibraryFolder: (path) => invoke("open_library_folder", { path }),
+  revealLibraryItem: (path) => invoke("reveal_library_item", { path }),
 
   onFfmpegStatus: (handler) => on("ffmpeg-status", handler),
   onTaskUpdated: (handler) => on("task-updated", handler),

@@ -1,6 +1,8 @@
 // 浏览器假数据（npm run dev，不在 Tauri 里时使用），方便调界面。
 // 任务覆盖七种显示状态；FFmpeg 状态可用地址参数切换：
 //   ?ffmpeg=checking | notInstalled | waiting | downloading | verifying | ready | updating | outdated | failed | fatal
+// 录像库用 ?library=missing 模拟根目录不存在；把设置 live_save_path 改成其他路径也视为不存在。
+// 动态有三天的历史记录，控制台可调用 window.__lubobaoMock.pushActivity("failure") 模拟新动态。
 // 缺省时模拟一次下载：下载中 → 校验 → 可用。控制台可调用 window.__lubobaoMock.setFfmpeg("failed")。
 // 显示状态的推导复刻 src-tauri/src/tasks/model.rs 的 derive_display，只用于假数据。
 
@@ -8,12 +10,17 @@ import type { UnlistenFn } from "@tauri-apps/api/event";
 
 import type {
   ActivityEntry,
+  ActivityKind,
   ActivityPage,
   AddTaskInput,
   Backend,
   CommandError,
   DisplayStatus,
   FfmpegStatus,
+  LibraryEntry,
+  LibraryError,
+  LibraryListing,
+  LibraryStats,
   LiveState,
   Monitoring,
   RecordState,
@@ -244,6 +251,193 @@ const defaultSettings: Settings = {
   stream_end_notification_enabled: false,
 };
 
+// ---- 录像库 ----
+
+/** 目录：子项名称 → 子目录或文件。文件为 [字节数, 距今分钟数]。 */
+interface MockDir {
+  [name: string]: MockDir | MockFile;
+}
+type MockFile = [number, number];
+
+const GB = 1024 ** 3;
+const MB = 1024 ** 2;
+
+function segments(prefix: string, count: number, ageMinutes: number, bytes: number): MockDir {
+  const dir: MockDir = {};
+  for (let i = 0; i < count; i++) {
+    dir[`${prefix}_${String(i).padStart(3, "0")}.ts`] = [bytes, ageMinutes - i * 30];
+  }
+  return dir;
+}
+
+function mockLibraryTree(): MockDir {
+  return {
+    抖音: {
+      一只小羊驼: {
+        // 正在录制的一次，最后一段仍在写入。
+        ...segments("一只小羊驼_2026-11-22_20-14-03", 3, 83, 1.3 * GB),
+        ...segments("一只小羊驼_2026-11-21_20-01-47", 5, 1_500, 1.4 * GB),
+        "一只小羊驼_2026-11-20_19-58-12.mp4": [5.62 * GB, 2_900],
+      },
+      甜品研究所: {
+        "甜品研究所_2026-11-19_14-00-05_000.ts": [820 * MB, 4_600],
+        "甜品研究所_2026-11-18_14-02-44_000.ts": [1.1 * GB, 6_100],
+      },
+      晚八点读书会: {},
+      阿星游戏: {
+        "阿星游戏_2026-11-22_21-01-30_000.ts": [312 * MB, 22],
+      },
+    },
+    快手: {
+      夜听电台: {
+        "夜听电台 第 12 期_2026-11-21_23-40-00_000.ts": [2.2 * GB, 1_300],
+        "夜听电台 第 12 期_2026-11-21_23-40-00_001.ts": [640 * MB, 1_270],
+      },
+    },
+    空目录: {},
+    "手动转存 (旧).mp4": [3.4 * GB, 20_000],
+  };
+}
+
+function isMockDir(node: MockDir | MockFile): node is MockDir {
+  return !Array.isArray(node);
+}
+
+function splitSegment(name: string): [string, number | null] {
+  const match = /^(.+)_(\d{3,})(\.[^.]+)$/.exec(name);
+  return match ? [match[1] + match[3], Number(match[2])] : [name, null];
+}
+
+/** 与 src-tauri/src/library 的排序一致：目录按名称；文件按同次录制分组，组按最新时间倒序，组内按序号。 */
+function sortEntries(entries: LibraryEntry[]): LibraryEntry[] {
+  const dirs = entries
+    .filter((entry) => entry.kind === "dir")
+    .sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
+  const files = entries.filter((entry) => entry.kind === "file");
+  const latest = new Map<string, number>();
+  for (const file of files) {
+    const key = file.group ?? file.name;
+    latest.set(key, Math.max(latest.get(key) ?? -Infinity, file.modifiedAt ?? -Infinity));
+  }
+  const groupOf = (entry: LibraryEntry) => entry.group ?? entry.name;
+  files.sort(
+    (a, b) =>
+      (latest.get(groupOf(b)) ?? 0) - (latest.get(groupOf(a)) ?? 0) ||
+      groupOf(b).localeCompare(groupOf(a)) ||
+      (a.segment ?? 0) - (b.segment ?? 0) ||
+      a.name.localeCompare(b.name),
+  );
+  return [...dirs, ...files];
+}
+
+function walkMock(dir: MockDir): { bytes: number; files: number } {
+  let bytes = 0;
+  let files = 0;
+  for (const node of Object.values(dir)) {
+    if (isMockDir(node)) {
+      const child = walkMock(node);
+      bytes += child.bytes;
+      files += child.files;
+    } else {
+      bytes += node[0];
+      files += 1;
+    }
+  }
+  return { bytes, files };
+}
+
+// ---- 动态历史 ----
+
+interface ActivitySeed {
+  task: TaskSnapshot | null;
+  kind: ActivityKind;
+  message: string;
+  detail?: Record<string, unknown>;
+}
+
+/** 三天的历史动态，按时间从旧到新返回。条数超过一页（50），方便检查分页。 */
+function seedActivity(tasks: TaskSnapshot[], now: number): { at: number; seed: ActivitySeed }[] {
+  const byName = (name: string) => tasks.find((task) => task.anchorName === name) ?? null;
+  const minute = 60_000;
+  const result: { at: number; seed: ActivitySeed }[] = [];
+  const push = (minutesAgo: number, seed: ActivitySeed) =>
+    result.push({ at: now - minutesAgo * minute, seed });
+
+  for (const task of tasks) push(4_400 - task.id * 3, { task, kind: "user_action", message: "添加任务" });
+  // 已删除的任务：动态保留，taskId 为空。
+  push(4_300, { task: null, kind: "user_action", message: "删除任务" });
+
+  // 前两天：每个录制任务每天开播、录制、重试、下播各一轮。
+  for (const day of [2, 1]) {
+    const base = day * 1_440;
+    for (const [offset, name] of [
+      [120, "一只小羊驼"],
+      [260, "甜品研究所"],
+      [300, "阿星游戏"],
+      [330, "山野徒步"],
+    ] as const) {
+      const task = byName(name);
+      const start = base + offset;
+      const filePath = `C:\\Users\\me\\Videos\\录播宝\\抖音\\${name}\\${name}_000.ts`;
+      push(start, { task, kind: "live_start", message: "检测到开播", detail: { title: "今晚见" } });
+      push(start - 1, { task, kind: "record_start", message: "开始录制", detail: { filePath, quality: "OD" } });
+      for (const retry of [0, 1]) {
+        push(start - 20 - retry * 15, {
+          task,
+          kind: "failure",
+          message: "检测失败：连接超时",
+          detail: { kind: "network" },
+        });
+      }
+      push(start - 110, { task, kind: "live_end", message: "已下播" });
+      push(start - 111, {
+        task,
+        kind: "record_end",
+        message: "录制结束",
+        detail: { filePath, durationMs: 110 * minute },
+      });
+    }
+    push(base + 30, { task: byName("街头篮球"), kind: "user_action", message: "暂停监控" });
+    push(base + 5, { task: byName("晚八点读书会"), kind: "live_start", message: "检测到开播" });
+  }
+
+  // 今天。
+  push(200, {
+    task: byName("晚八点读书会"),
+    kind: "live_start",
+    message: "检测到开播",
+    detail: { title: "共读《活着》" },
+  });
+  push(84, { task: byName("一只小羊驼"), kind: "live_start", message: "检测到开播", detail: { title: "晚间闲聊" } });
+  push(83, {
+    task: byName("一只小羊驼"),
+    kind: "record_start",
+    message: "开始录制",
+    detail: { filePath: "C:\\Users\\me\\Videos\\录播宝\\抖音\\一只小羊驼\\一只小羊驼_2026-11-22_20-14-03_000.ts", quality: "OD" },
+  });
+  push(40, {
+    task: byName("私密直播间"),
+    kind: "failure",
+    message: "检测失败：该直播间需要登录后观看，请在设置中填写 Cookie",
+    detail: { kind: "auth_required" },
+  });
+  push(22, { task: byName("阿星游戏"), kind: "record_start", message: "开始录制", detail: { quality: "OD" } });
+  push(1, {
+    task: byName("阿星游戏"),
+    kind: "failure",
+    message: "录制失败：磁盘空间不足：D:\\Records 剩余 1.2 GB，低于阈值 2 GB",
+    detail: { filePath: null },
+  });
+  push(0.2, {
+    task: byName("老王说车"),
+    kind: "failure",
+    message: "检测失败：连接超时，30 秒后重试",
+    detail: { kind: "network" },
+  });
+
+  return result.sort((a, b) => a.at - b.at);
+}
+
 type Handler<T> = (payload: T) => void;
 
 class Channel<T> {
@@ -345,7 +539,45 @@ export function createMockBackend(): Backend {
     return next;
   }
 
-  for (const task of tasks.slice().reverse()) log(task, "user_action", "添加任务");
+  for (const { at, seed } of seedActivity(tasks, now)) {
+    activity.unshift({
+      id: nextActivityId++,
+      at,
+      taskId: seed.task?.id ?? null,
+      anchorName: seed.task?.anchorName ?? "旧任务",
+      kind: seed.kind,
+      message: seed.message,
+      detail: seed.detail ?? null,
+    });
+  }
+
+  const libraryTree = mockLibraryTree();
+  let libraryForcedMissing = new URLSearchParams(window.location.search).get("library") === "missing";
+
+  const libraryExists = () =>
+    !libraryForcedMissing && settings.live_save_path === defaultSettings.live_save_path;
+
+  function libraryFailure(kind: LibraryError["kind"], message: string): LibraryError {
+    return { kind, message, root: settings.live_save_path };
+  }
+
+  /** 解析相对路径，规则与 Rust 一致：拒绝 ..、绝对路径和带 : 的片段。 */
+  function libraryLookup(path: string): { parts: string[]; node: MockDir | MockFile } {
+    const root = settings.live_save_path;
+    if (!libraryExists()) throw libraryFailure("root_missing", `录像目录不存在：${root}`);
+    if (/^[\\/]/.test(path)) throw libraryFailure("invalid_path", "路径必须相对于录像目录");
+    const parts = path.split(/[\\/]/).filter((part) => part !== "" && part !== ".");
+    let node: MockDir | MockFile = libraryTree;
+    for (const part of parts) {
+      if (part === ".." || part.includes(":")) throw libraryFailure("invalid_path", `路径片段无效：${part}`);
+      const next: MockDir | MockFile | undefined = isMockDir(node) ? node[part] : undefined;
+      if (!next) {
+        throw libraryFailure("not_found", `找不到 ${root}\\${parts.join("\\")}，可能已被移动或删除`);
+      }
+      node = next;
+    }
+    return { parts, node };
+  }
 
   const backend: Backend = {
     getFfmpegStatus: () => Promise.resolve(ffmpeg),
@@ -471,6 +703,70 @@ export function createMockBackend(): Backend {
       };
     },
 
+    async listLibrary(path = ""): Promise<LibraryListing> {
+      await delay(150);
+      const found = libraryLookup(path);
+      if (!isMockDir(found.node)) throw libraryFailure("invalid_target", `${path} 不是文件夹`);
+      const prefix = found.parts.length ? `${found.parts.join("/")}/` : "";
+      const entries = Object.entries(found.node).map(([name, node]): LibraryEntry => {
+        if (isMockDir(node)) {
+          return {
+            name,
+            path: prefix + name,
+            kind: "dir",
+            size: null,
+            modifiedAt: now - 30 * 60_000,
+            childCount: Object.keys(node).length,
+            segment: null,
+            group: null,
+          };
+        }
+        const [group, segment] = splitSegment(name);
+        return {
+          name,
+          path: prefix + name,
+          kind: "file",
+          size: Math.round(node[0]),
+          modifiedAt: now - node[1] * 60_000,
+          childCount: null,
+          segment,
+          group,
+        };
+      });
+      return { root: settings.live_save_path, path: found.parts.join("/"), entries: sortEntries(entries) };
+    },
+
+    async getLibraryStats(): Promise<LibraryStats> {
+      await delay(100);
+      const exists = libraryExists();
+      const usage = exists ? walkMock(libraryTree) : { bytes: 0, files: 0 };
+      return {
+        root: settings.live_save_path,
+        rootExists: exists,
+        usedBytes: Math.round(usage.bytes),
+        fileCount: usage.files,
+        availableBytes: Math.round(186.4 * GB),
+        totalBytes: Math.round(931.5 * GB),
+      };
+    },
+
+    async openLibraryFile(path) {
+      const found = libraryLookup(path);
+      if (isMockDir(found.node)) throw libraryFailure("invalid_target", `${path} 不是录像文件`);
+      console.info("[mock] 用系统播放器打开", path);
+    },
+
+    async openLibraryFolder(path) {
+      const found = libraryLookup(path);
+      if (!isMockDir(found.node)) throw libraryFailure("invalid_target", `${path} 不是文件夹`);
+      console.info("[mock] 打开文件夹", path || "（根目录）");
+    },
+
+    async revealLibraryItem(path) {
+      libraryLookup(path);
+      console.info("[mock] 在文件夹中显示", path || "（根目录）");
+    },
+
     onFfmpegStatus: (handler) => ffmpegChannel.subscribe(handler),
     onTaskUpdated: (handler) => updatedChannel.subscribe(handler),
     onTaskRemoved: (handler) => removedChannel.subscribe(handler),
@@ -484,6 +780,23 @@ export function createMockBackend(): Backend {
       if (status) setFfmpeg(status);
     },
     simulateDownload,
+    /** 切换录像根目录是否存在。 */
+    setLibraryMissing: (missing: boolean) => {
+      libraryForcedMissing = missing;
+    },
+    /** 模拟一条新动态，检查实时插入。 */
+    pushActivity: (kind: ActivityKind = "live_start") => {
+      const task = tasks[Math.floor(Math.random() * tasks.length)] ?? null;
+      const messages: Record<ActivityKind, string> = {
+        live_start: "检测到开播",
+        live_end: "已下播",
+        record_start: "开始录制",
+        record_end: "录制结束",
+        failure: "检测失败：连接超时",
+        user_action: "修改任务",
+      };
+      log(task, kind, messages[kind]);
+    },
     backend,
   };
 

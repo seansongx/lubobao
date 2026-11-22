@@ -1,6 +1,7 @@
 use tauri::Manager;
 
 pub mod ffmpeg;
+pub mod library;
 pub mod platforms;
 pub mod recorder;
 pub mod tasks;
@@ -35,7 +36,12 @@ pub fn run() {
             tasks::commands::stop_recording,
             tasks::commands::get_settings,
             tasks::commands::update_settings,
-            tasks::commands::list_activity
+            tasks::commands::list_activity,
+            library::commands::list_library,
+            library::commands::get_library_stats,
+            library::commands::open_library_file,
+            library::commands::open_library_folder,
+            library::commands::reveal_library_item
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
