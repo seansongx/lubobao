@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { AlertTriangle, Cpu, HardDrive, Loader2, RotateCw, Timer, Wifi } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -7,7 +7,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { formatBytes } from "@/components/format";
 import { useDiskSpace } from "@/components/use-library-space";
 import { api, type FfmpegStatus } from "@/lib/api";
-import { useFfmpegStatus, useTasks } from "@/lib/use-backend";
+import { useFfmpegStatus, useSchedulerStatus, useTasks } from "@/lib/use-backend";
 import { cn } from "@/lib/utils";
 
 interface StatusItemProps {
@@ -158,6 +158,37 @@ function DiskItem() {
   );
 }
 
+/** 下次检测倒计时：自己每秒刷新，不牵动整条状态栏。 */
+function NextCheckItem() {
+  const status = useSchedulerStatus();
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  let label = "—";
+  let hint = "正在读取调度状态";
+  if (status) {
+    if (status.nextCheckAt === null) {
+      hint = status.checking > 0 ? `正在检测 ${status.checking} 个直播间` : "没有排定的检测（无监控中的任务，或都在录制）";
+      label = status.checking > 0 ? "检测中" : "—";
+    } else {
+      const seconds = Math.max(0, Math.round((status.nextCheckAt - now) / 1000));
+      label = `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
+      hint = `下一次开播检测：${new Date(status.nextCheckAt).toLocaleTimeString("zh-CN", { hour12: false })}${
+        status.checking > 0 ? `，正在检测 ${status.checking} 个` : ""
+      }`;
+    }
+  }
+  return (
+    <StatusItem hint={hint} className="ml-auto">
+      <Timer className="size-3.5" aria-hidden />
+      下次检测 <span className="tabular-nums">{label}</span>
+    </StatusItem>
+  );
+}
+
 export function StatusBar() {
   const tasks = useTasks();
   const recording = tasks.filter((task) => task.display === "recording");
@@ -181,11 +212,7 @@ export function StatusBar() {
       </StatusItem>
       <Separator orientation="vertical" className="h-3.5!" />
       <DiskItem />
-      {/* 下次检测在轮询调度接入后提供。 */}
-      <StatusItem hint="距离下一轮开播检测的时间（尚未接入）" className="ml-auto">
-        <Timer className="size-3.5" aria-hidden />
-        下次检测 —
-      </StatusItem>
+      <NextCheckItem />
     </footer>
   );
 }

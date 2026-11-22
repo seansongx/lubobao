@@ -20,15 +20,16 @@ pub fn run() {
         // 关闭主窗口只隐藏到托盘，录制继续。
         .on_window_event(desktop::on_window_event)
         .setup(|app| {
-            ffmpeg::init(app.handle())?;
+            ffmpeg::tauri_glue::init(app.handle())?;
             tasks::tauri_glue::init(app.handle())?;
             scheduler::tauri_glue::init(app.handle())?;
             desktop::init(app.handle())?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            ffmpeg::get_ffmpeg_status,
-            ffmpeg::retry_ffmpeg_install,
+            ffmpeg::tauri_glue::get_ffmpeg_status,
+            ffmpeg::tauri_glue::retry_ffmpeg_install,
+            ffmpeg::tauri_glue::reverify_ffmpeg,
             tasks::commands::list_tasks,
             tasks::commands::add_task,
             tasks::commands::update_task,
@@ -36,6 +37,7 @@ pub fn run() {
             tasks::commands::set_monitoring,
             tasks::commands::stop_recording,
             tasks::commands::get_settings,
+            tasks::commands::get_setting_defaults,
             tasks::commands::update_settings,
             tasks::commands::list_activity,
             scheduler::tauri_glue::get_scheduler_status,

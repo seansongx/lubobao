@@ -54,6 +54,13 @@ pub fn get_settings(manager: Manager<'_>) -> Map<String, Value> {
     manager.settings()
 }
 
+/// 设置的默认值，与 `settings::defaults` 一致（保存目录是本机的默认目录）。
+/// 前端“恢复默认值”用它，不在前端另写一份。
+#[tauri::command]
+pub fn get_setting_defaults(manager: Manager<'_>) -> Map<String, Value> {
+    manager.defaults.clone()
+}
+
 #[tauri::command]
 pub fn update_settings(
     manager: Manager<'_>,
