@@ -1,0 +1,106 @@
+{
+  "tool": "ffmpeg",
+  "ffmpegVersion": "9.0.2",
+  "packageVersion": "9.0.1",
+  "aliases": {
+    "win32-arm64": "win32-x64"
+  },
+  "platforms": {
+    "win32-x64": {
+      "package": "@seankit/ffmpeg-win32-x64",
+      "version": "9.0.1",
+      "file": "seankit-ffmpeg-win32-x64-9.0.1.tgz",
+      "size": 39620321,
+      "sha256": "ce3e0270f78211008d4488a4d2b11c0cba87f5d22eefb16661e2455f2f37f6f4",
+      "integrity": "sha512-mWrCqcLWBgG186mwg0o0GRyPQ7dDW6WMjmJeD0FDjtBftgUaJrSXFgr4Czdm1WBfz/5Wp4aZZEM3p/hUA0knAg==",
+      "binary": "bin/ffmpeg.exe",
+      "binarySha256": "3256173f3f8bffd7df12227c68adf68025edb1832273a9530688a7bb1ed8edec",
+      "binarySize": 105423872,
+      "license": "GPL-3.0-or-later",
+      "rustTargets": [
+        "x86_64-pc-windows-msvc",
+        "aarch64-pc-windows-msvc"
+      ],
+      "urls": [
+        "https://registry.npmmirror.com/@seankit/ffmpeg-win32-x64/-/ffmpeg-win32-x64-9.0.1.tgz",
+        "https://registry.npmjs.org/@seankit/ffmpeg-win32-x64/-/ffmpeg-win32-x64-9.0.1.tgz"
+      ]
+    },
+    "darwin-arm64": {
+      "package": "@seankit/ffmpeg-darwin-arm64",
+      "version": "9.0.1",
+      "file": "seankit-ffmpeg-darwin-arm64-9.0.1.tgz",
+      "size": 29696004,
+      "sha256": "64c795a1de417c99380cc81a139ce9ee07f3f5f304bb3d515cefc5cd1142a5e4",
+      "integrity": "sha512-h1+K+Yl8zQ3Dzo/Jj5oTPSTAKvx9AzWlTqQr8Vx3+wgfTqwH+7qfHA1YWFyyduItwzJ9Bw5PQqo5k+nN2CZL9g==",
+      "binary": "bin/ffmpeg",
+      "binarySha256": "2e11c6f90993cdb79fff84d3f90044d28316b310e75b3e030cfc9a54f2c9d384",
+      "binarySize": 66332880,
+      "license": "GPL-3.0-or-later",
+      "rustTargets": [
+        "aarch64-apple-darwin"
+      ],
+      "urls": [
+        "https://registry.npmmirror.com/@seankit/ffmpeg-darwin-arm64/-/ffmpeg-darwin-arm64-9.0.1.tgz",
+        "https://registry.npmjs.org/@seankit/ffmpeg-darwin-arm64/-/ffmpeg-darwin-arm64-9.0.1.tgz"
+      ]
+    },
+    "darwin-x64": {
+      "package": "@seankit/ffmpeg-darwin-x64",
+      "version": "9.0.1",
+      "file": "seankit-ffmpeg-darwin-x64-9.0.1.tgz",
+      "size": 34431768,
+      "sha256": "fcb4c4bc46956471d9c0b80ece83b5449e94d6e1e38a91a7e94372246869f3cc",
+      "integrity": "sha512-/gYyy/5Hx/EyxnECFxYap3x7JMFa6L6dtAkKN8MvE7mlmF7mwtXoeS5NvDUdO7qpRkLlvmKG6KeGRzCkRRKW7Q==",
+      "binary": "bin/ffmpeg",
+      "binarySha256": "b25689cf2211c0582d317e849912769a1f1c93904fe102c485b5364a425633d1",
+      "binarySize": 94769296,
+      "license": "GPL-3.0-or-later",
+      "rustTargets": [
+        "x86_64-apple-darwin"
+      ],
+      "urls": [
+        "https://registry.npmmirror.com/@seankit/ffmpeg-darwin-x64/-/ffmpeg-darwin-x64-9.0.1.tgz",
+        "https://registry.npmjs.org/@seankit/ffmpeg-darwin-x64/-/ffmpeg-darwin-x64-9.0.1.tgz"
+      ]
+    },
+    "linux-x64": {
+      "package": "@seankit/ffmpeg-linux-x64",
+      "version": "9.0.1",
+      "file": "seankit-ffmpeg-linux-x64-9.0.1.tgz",
+      "size": 69695288,
+      "sha256": "437a7b81466919fb69ef5e956f99a7980baf0ab86510a1761f02f8573e6815f6",
+      "integrity": "sha512-jg1gJJdGM/RXukmQFkSQ2n4uKWR/k3foM5Ck4zz/zNbAuiaOjPv6cxPl/hGLexVjOKLIcWPrHtNcHz+hdby29A==",
+      "binary": "bin/ffmpeg",
+      "binarySha256": "384742b75419584d065bbf372613f9f7e8ccf22525b421c16a2ee679a78ee748",
+      "binarySize": 173534088,
+      "license": "GPL-3.0-or-later",
+      "rustTargets": [
+        "x86_64-unknown-linux-gnu"
+      ],
+      "urls": [
+        "https://registry.npmmirror.com/@seankit/ffmpeg-linux-x64/-/ffmpeg-linux-x64-9.0.1.tgz",
+        "https://registry.npmjs.org/@seankit/ffmpeg-linux-x64/-/ffmpeg-linux-x64-9.0.1.tgz"
+      ]
+    },
+    "linux-arm64": {
+      "package": "@seankit/ffmpeg-linux-arm64",
+      "version": "9.0.1",
+      "file": "seankit-ffmpeg-linux-arm64-9.0.1.tgz",
+      "size": 63915197,
+      "sha256": "1cfe2b1dfeb754fe501474ab598e339b3d76a0890a7f4529477a5469743e1a43",
+      "integrity": "sha512-6+UDxEVWlrdt2GNbvVdQEvOmTwJl2aBNFwKGPfEUYqvSa9xWcif2Y7D4ID6qqMd2fbn6+/Tmtgso9GdNq/e41g==",
+      "binary": "bin/ffmpeg",
+      "binarySha256": "091fe4df4902fedd20f4d5accab14d02947a531d14d789cc7e8f18b0a808e6d1",
+      "binarySize": 131591912,
+      "license": "GPL-3.0-or-later",
+      "rustTargets": [
+        "aarch64-unknown-linux-gnu"
+      ],
+      "urls": [
+        "https://registry.npmmirror.com/@seankit/ffmpeg-linux-arm64/-/ffmpeg-linux-arm64-9.0.1.tgz",
+        "https://registry.npmjs.org/@seankit/ffmpeg-linux-arm64/-/ffmpeg-linux-arm64-9.0.1.tgz"
+      ]
+    }
+  }
+}
