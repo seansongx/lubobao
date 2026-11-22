@@ -1,32 +1,92 @@
+/*
+ * 录播宝桌面主题：shadcn/ui Nova 样式 + Slate 基础色 + Teal 主色。
+ * 变量名沿用 shadcn/ui 语义名称；接入 Tailwind 时映射到同一组变量。
+ * 浅色取 Tailwind slate / teal 色阶原值；深色的背景、卡片、侧栏和边框改为中性石墨色，
+ * 避免 slate-950 偏蓝。原型见 docs/prototypes/redesign.html。
+ */
 :root {
   color-scheme: light;
-  --background: #fafafa;
-  --foreground: #18181b;
+
+  --background: #f8fafc; /* slate-50 */
+  --foreground: #0f172a; /* slate-900 */
   --card: #ffffff;
-  --border: #d4d4d8;
-  --muted-foreground: #52525b;
-  --primary: #18181b;
+  --card-foreground: #0f172a;
+  --popover: #ffffff;
+  --popover-foreground: #0f172a;
+
+  --primary: #0f766e; /* teal-700 */
   --primary-foreground: #ffffff;
-  --ring: #71717a;
-  --status-recording: #b91c1c;
-  --status-waiting: var(--muted-foreground);
-  --status-retrying: #92400e;
-  --radius: 0.5rem;
+  --secondary: #f1f5f9; /* slate-100 */
+  --secondary-foreground: #0f172a;
+  --muted: #f1f5f9; /* slate-100 */
+  --muted-foreground: #64748b; /* slate-500 */
+  --accent: #f1f5f9; /* slate-100，悬停与选中底色 */
+  --accent-foreground: #0f172a;
+  --destructive: #dc2626; /* red-600 */
+
+  --border: #e2e8f0; /* slate-200 */
+  --input: #e2e8f0;
+  --ring: #0f766e;
+
+  --sidebar: #f1f5f9; /* slate-100 */
+  --sidebar-foreground: #0f172a;
+  --sidebar-primary: #0f766e;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #ffffff;
+  --sidebar-accent-foreground: #0f172a;
+  --sidebar-border: #e2e8f0;
+  --sidebar-ring: #0f766e;
+
+  /* 任务状态：颜色之外必须同时显示文字或图标 */
+  --status-recording: #dc2626; /* red-600，实心红点 */
+  --status-waiting: #94a3b8; /* slate-400，空心灰圈 */
+  --status-checking: #2563eb; /* blue-600，旋转圆环 */
+  --status-retrying: #b45309; /* amber-700，保证小字对比度 */
+  --status-notify: var(--primary); /* 已开播 · 仅通知 */
+  --status-recording-soft: #fef2f2; /* 需处理行底色 */
+
+  --radius: 0.375rem;
   --task-row-height: 2.75rem;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
     color-scheme: dark;
-    --background: #18181b;
-    --foreground: #fafafa;
-    --card: #27272a;
-    --border: #52525b;
-    --muted-foreground: #a1a1aa;
-    --primary: #fafafa;
-    --primary-foreground: #18181b;
-    --ring: #a1a1aa;
-    --status-recording: #fca5a5;
-    --status-retrying: #fcd34d;
+
+    --background: #0e1116;
+    --foreground: #e2e8f0; /* slate-200 */
+    --card: #151a21;
+    --card-foreground: #e2e8f0;
+    --popover: #151a21;
+    --popover-foreground: #e2e8f0;
+
+    --primary: #2dd4bf; /* teal-400 */
+    --primary-foreground: #042f2e; /* teal-950 */
+    --secondary: #1b212a;
+    --secondary-foreground: #e2e8f0;
+    --muted: #1b212a;
+    --muted-foreground: #94a3b8; /* slate-400 */
+    --accent: #1b212a;
+    --accent-foreground: #e2e8f0;
+    --destructive: #f87171; /* red-400 */
+
+    --border: #252b35;
+    --input: #252b35;
+    --ring: #2dd4bf;
+
+    --sidebar: #0a0d11;
+    --sidebar-foreground: #e2e8f0;
+    --sidebar-primary: #2dd4bf;
+    --sidebar-primary-foreground: #042f2e;
+    --sidebar-accent: #151a21;
+    --sidebar-accent-foreground: #e2e8f0;
+    --sidebar-border: #252b35;
+    --sidebar-ring: #2dd4bf;
+
+    --status-recording: #f87171; /* red-400 */
+    --status-waiting: #64748b; /* slate-500 */
+    --status-checking: #60a5fa; /* blue-400 */
+    --status-retrying: #fbbf24; /* amber-400 */
+    --status-recording-soft: #2a1416;
   }
 }

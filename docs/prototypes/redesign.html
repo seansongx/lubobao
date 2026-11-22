@@ -1,0 +1,716 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>录播宝 · 新版原型</title>
+<style>
+:root {
+  color-scheme: light;
+  --background: #f5f7f9;
+  --card: #ffffff;
+  --sidebar: #eceff3;
+  --border: #dfe3e8;
+  --border-strong: #cbd2da;
+  --foreground: #0f172a;
+  --muted-foreground: #64748b;
+  --hover: #f0f3f6;
+  --selected: #e6f4f2;
+  --primary: #0f766e;
+  --primary-hover: #115e59;
+  --primary-foreground: #ffffff;
+  --primary-soft: #ccfbf1;
+  --status-recording: #dc2626;
+  --status-recording-soft: #fef2f2;
+  --status-checking: #2563eb;
+  --status-waiting: #94a3b8;
+  --status-retrying: #d97706;
+  --status-retrying-soft: #fffbeb;
+  --status-notify: #0f766e;
+  --radius: 0.375rem;
+  --task-row-height: 2.75rem;
+  --shadow: 0 8px 30px rgb(15 23 42 / 0.12);
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --background: #0e1116;
+  --card: #151a21;
+  --sidebar: #0a0d11;
+  --border: #252b35;
+  --border-strong: #343c48;
+  --foreground: #e6e9ee;
+  --muted-foreground: #8b94a3;
+  --hover: #1b212a;
+  --selected: #10302d;
+  --primary: #2dd4bf;
+  --primary-hover: #5eead4;
+  --primary-foreground: #042f2e;
+  --primary-soft: #133b37;
+  --status-recording: #f87171;
+  --status-recording-soft: #2a1416;
+  --status-checking: #60a5fa;
+  --status-waiting: #64748b;
+  --status-retrying: #fbbf24;
+  --status-retrying-soft: #2a2110;
+  --status-notify: #2dd4bf;
+  --shadow: 0 8px 30px rgb(0 0 0 / 0.5);
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  font: 13px/1.5 "Segoe UI", "Microsoft YaHei UI", "PingFang SC", system-ui, sans-serif;
+  background: var(--background);
+  color: var(--foreground);
+  -webkit-font-smoothing: antialiased;
+}
+button, input, select { font: inherit; color: inherit; }
+button { cursor: pointer; }
+.num { font-variant-numeric: tabular-nums; }
+.muted { color: var(--muted-foreground); }
+
+/* ---------- layout ---------- */
+.app { display: grid; grid-template-columns: 200px 1fr; grid-template-rows: 1fr 28px; height: 100vh; }
+.sidebar { grid-row: 1; background: var(--sidebar); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 14px 10px; gap: 2px; }
+.brand { display: flex; align-items: center; gap: 9px; padding: 2px 8px 16px; font-weight: 600; font-size: 14px; }
+.brand-mark { width: 26px; height: 26px; border-radius: 7px; background: var(--primary); color: var(--primary-foreground); display: grid; place-items: center; }
+.nav-btn { display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 10px; border: 0; border-radius: var(--radius); background: transparent; color: var(--muted-foreground); text-align: left; }
+.nav-btn:hover { background: var(--hover); color: var(--foreground); }
+.nav-btn.on { background: var(--card); color: var(--foreground); box-shadow: 0 0 0 1px var(--border); font-weight: 500; }
+.nav-btn .badge { margin-left: auto; font-size: 11px; min-width: 18px; padding: 0 5px; border-radius: 9px; text-align: center; background: var(--status-recording); color: #fff; }
+.nav-btn .badge.warn { background: var(--status-retrying); }
+.sidebar-foot { margin-top: auto; display: flex; flex-direction: column; gap: 2px; }
+
+.main { grid-row: 1; display: flex; min-width: 0; min-height: 0; }
+.content { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.page-head { display: flex; align-items: center; gap: 10px; padding: 14px 20px 0; }
+.page-head h1 { font-size: 17px; margin: 0; font-weight: 600; }
+.page-head .spacer { flex: 1; }
+
+.statusbar { grid-column: 1 / -1; display: flex; align-items: center; gap: 18px; padding: 0 12px; background: var(--sidebar); border-top: 1px solid var(--border); color: var(--muted-foreground); font-size: 12px; }
+.statusbar .item { display: flex; align-items: center; gap: 6px; }
+.statusbar .right { margin-left: auto; }
+.progress { width: 80px; height: 4px; border-radius: 2px; background: var(--border); overflow: hidden; }
+.progress > i { display: block; height: 100%; background: var(--primary); transition: width .3s; }
+
+/* ---------- controls ---------- */
+.btn { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--card); white-space: nowrap; }
+.btn:hover { background: var(--hover); }
+.btn.primary { background: var(--primary); border-color: var(--primary); color: var(--primary-foreground); font-weight: 500; }
+.btn.primary:hover { background: var(--primary-hover); }
+.btn.ghost { border-color: transparent; background: transparent; }
+.btn.ghost:hover { background: var(--hover); }
+.btn.danger { color: var(--status-recording); }
+.icon-btn { width: 28px; height: 28px; display: inline-grid; place-items: center; border: 0; border-radius: var(--radius); background: transparent; color: var(--muted-foreground); }
+.icon-btn:hover { background: var(--hover); color: var(--foreground); }
+.input { height: 30px; padding: 0 10px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--card); outline: none; min-width: 0; }
+.input:focus, .btn:focus-visible, .icon-btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+.search { position: relative; }
+.search svg { position: absolute; left: 9px; top: 8px; color: var(--muted-foreground); }
+.search .input { padding-left: 30px; width: 220px; }
+svg.i { width: 15px; height: 15px; flex: none; }
+
+/* ---------- stat filter strip ---------- */
+.stats { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; padding: 14px 20px 0; }
+.stat { text-align: left; border: 1px solid var(--border); background: var(--card); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; }
+.stat:hover { border-color: var(--border-strong); }
+.stat.on { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary); }
+.stat .label { display: flex; align-items: center; gap: 6px; color: var(--muted-foreground); font-size: 12px; }
+.stat .value { font-size: 20px; font-weight: 600; }
+
+.toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 12px 20px; }
+@media (max-width: 1400px) { .col-opt { display: none; } }
+@media (max-width: 1100px) { .inspector { width: 290px; } .search .input { width: 170px; } }
+@media (max-width: 900px) { .app { grid-template-columns: 56px 1fr; } .brand span:not(.brand-mark), .nav-btn { font-size: 0; } .nav-btn { justify-content: center; padding: 0; position: relative; } .nav-btn .badge { position: absolute; top: 2px; right: 4px; font-size: 10px; } .brand { justify-content: center; padding: 2px 0 16px; } .brand-text { display: none; } .stats { grid-template-columns: repeat(5, minmax(0,1fr)); gap: 6px; } .stat .value { font-size: 17px; } }
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); padding: 2px; }
+.seg button { white-space: nowrap; border: 0; background: transparent; height: 24px; padding: 0 10px; border-radius: 4px; color: var(--muted-foreground); }
+.seg button.on { background: var(--hover); color: var(--foreground); font-weight: 500; }
+
+/* ---------- table ---------- */
+.table-wrap { flex: 1; overflow: auto; margin: 0 20px 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); position: relative; }
+table { width: 100%; border-collapse: collapse; }
+th { position: sticky; top: 0; z-index: 1; background: var(--card); text-align: left; font-weight: 500; color: var(--muted-foreground); font-size: 12px; height: 34px; padding: 0 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+th.sort { cursor: pointer; user-select: none; }
+th.sort:hover { color: var(--foreground); }
+td { height: var(--task-row-height); padding: 0 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+tbody tr { cursor: default; }
+tbody tr:hover { background: var(--hover); }
+tbody tr.sel { background: var(--selected); }
+tbody tr.err { background: var(--status-recording-soft); }
+tbody tr.paused td:not(:first-child):not(:last-child) { opacity: .55; }
+tbody tr:last-child td { border-bottom: 0; }
+.cb { width: 15px; height: 15px; accent-color: var(--primary); }
+.streamer { display: flex; align-items: center; gap: 9px; }
+.avatar { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 600; color: #fff; flex: none; }
+.streamer .sub { font-size: 11px; color: var(--muted-foreground); }
+.plat { display: inline-flex; align-items: center; gap: 6px; }
+.plat i { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
+.row-actions { display: flex; gap: 2px; justify-content: flex-end; opacity: .65; }
+tr:hover .row-actions, tr.sel .row-actions { opacity: 1; }
+
+/* status pill */
+.st { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; }
+.st .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+.st.recording { color: var(--status-recording); font-weight: 500; }
+.st.recording .dot { background: var(--status-recording); animation: pulse 1.6s ease-in-out infinite; }
+.st.waiting { color: var(--muted-foreground); }
+.st.waiting .dot { border: 2px solid var(--status-waiting); }
+.st.checking { color: var(--status-checking); }
+.st.checking .dot { border: 2px solid var(--status-checking); border-right-color: transparent; animation: spin .9s linear infinite; }
+.st.retrying { color: var(--status-retrying); }
+.st.retrying .dot { background: var(--status-retrying); }
+.st.error { color: var(--status-recording); font-weight: 500; }
+.st.paused { color: var(--muted-foreground); }
+.st.paused .dot { background: var(--status-waiting); border-radius: 2px; width: 8px; height: 8px; }
+.st.notify { color: var(--status-notify); }
+@keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--status-recording) 55%, transparent); } 50% { box-shadow: 0 0 0 5px transparent; } }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.batchbar { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); display: flex; align-items: center; gap: 6px; padding: 6px 6px 6px 14px; border-radius: 10px; background: var(--foreground); color: var(--background); box-shadow: var(--shadow); z-index: 3; }
+.batchbar .btn { background: transparent; border-color: color-mix(in srgb, var(--background) 25%, transparent); color: var(--background); height: 28px; }
+.batchbar .btn:hover { background: color-mix(in srgb, var(--background) 12%, transparent); }
+
+/* ---------- inspector ---------- */
+.inspector { width: 340px; flex: none; border-left: 1px solid var(--border); background: var(--card); display: flex; flex-direction: column; min-height: 0; }
+.insp-head { display: flex; align-items: center; gap: 10px; padding: 14px 14px 12px; border-bottom: 1px solid var(--border); }
+.insp-head .avatar { width: 34px; height: 34px; font-size: 14px; }
+.insp-head .name { font-weight: 600; font-size: 14px; }
+.insp-body { overflow: auto; padding: 14px; display: flex; flex-direction: column; gap: 16px; }
+.preview { aspect-ratio: 16/9; border-radius: 8px; background: linear-gradient(135deg, #1e293b, #0f172a); position: relative; overflow: hidden; display: grid; place-items: center; color: #94a3b8; font-size: 12px; }
+.preview .live { position: absolute; left: 8px; top: 8px; background: #dc2626; color: #fff; font-size: 11px; font-weight: 600; padding: 1px 6px; border-radius: 4px; }
+.preview .meta { position: absolute; right: 8px; bottom: 8px; color: #e2e8f0; font-size: 11px; background: rgb(0 0 0 / .45); padding: 1px 6px; border-radius: 4px; }
+.section-title { font-size: 12px; font-weight: 600; color: var(--muted-foreground); margin: 0 0 8px; }
+.tri { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.tri div { border: 1px solid var(--border); border-radius: 6px; padding: 7px 9px; }
+.tri small { display: block; color: var(--muted-foreground); font-size: 11px; }
+.tri b { font-weight: 500; font-size: 12.5px; }
+.kv { display: grid; grid-template-columns: 76px 1fr; row-gap: 6px; font-size: 12.5px; }
+.kv dt { color: var(--muted-foreground); }
+.kv dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.timeline { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.timeline li { display: grid; grid-template-columns: 44px 10px 1fr; gap: 8px; align-items: start; font-size: 12.5px; }
+.timeline time { color: var(--muted-foreground); font-size: 11.5px; padding-top: 1px; }
+.timeline .tdot { width: 8px; height: 8px; border-radius: 50%; margin-top: 6px; background: var(--status-waiting); }
+.alert { display: flex; gap: 10px; padding: 10px 12px; border-radius: 8px; border: 1px solid color-mix(in srgb, var(--status-recording) 35%, transparent); background: var(--status-recording-soft); }
+.alert svg { color: var(--status-recording); margin-top: 2px; }
+.alert b { display: block; }
+.alert .acts { display: flex; gap: 6px; margin-top: 8px; }
+.insp-foot { margin-top: auto; padding: 12px 14px; border-top: 1px solid var(--border); display: flex; gap: 8px; }
+.insp-foot .btn { flex: 1; justify-content: center; }
+
+/* ---------- empty ---------- */
+.empty { padding: 60px 20px; text-align: center; color: var(--muted-foreground); }
+
+/* ---------- library ---------- */
+.crumbs { display: flex; align-items: center; gap: 4px; padding: 12px 20px; color: var(--muted-foreground); }
+.crumbs button { border: 0; background: transparent; padding: 2px 6px; border-radius: 4px; color: var(--muted-foreground); }
+.crumbs button:hover { background: var(--hover); color: var(--foreground); }
+.crumbs button.cur { color: var(--foreground); font-weight: 500; }
+.lib-grid { flex: 1; overflow: auto; padding: 0 20px 16px; display: flex; flex-direction: column; gap: 18px; }
+.group-title { display: flex; align-items: center; gap: 8px; font-weight: 600; margin-bottom: 8px; }
+.group-title .muted { font-weight: 400; font-size: 12px; }
+.files { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+.file { border: 1px solid var(--border); background: var(--card); border-radius: 8px; overflow: hidden; }
+.file:hover { border-color: var(--border-strong); }
+.thumb { aspect-ratio: 16/9; position: relative; display: grid; place-items: center; color: rgb(255 255 255 / .7); }
+.thumb .dur { position: absolute; right: 6px; bottom: 6px; background: rgb(0 0 0 / .55); color: #fff; font-size: 11px; padding: 0 5px; border-radius: 3px; }
+.thumb .tag { position: absolute; left: 6px; top: 6px; font-size: 10.5px; padding: 0 5px; border-radius: 3px; background: rgb(0 0 0 / .55); color: #fff; }
+.thumb .tag.rec { background: #dc2626; }
+.file-info { padding: 8px 10px; display: flex; align-items: center; gap: 6px; }
+.file-info .t { flex: 1; min-width: 0; }
+.file-info .t div { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-info small { color: var(--muted-foreground); font-size: 11.5px; }
+.conv { height: 3px; background: var(--border); }
+.conv i { display: block; height: 100%; background: var(--primary); }
+.folder-row { display: flex; gap: 10px; flex-wrap: wrap; }
+.folder { display: flex; align-items: center; gap: 10px; border: 1px solid var(--border); background: var(--card); border-radius: 8px; padding: 10px 14px; min-width: 200px; text-align: left; }
+.folder:hover { border-color: var(--border-strong); }
+.folder svg { color: var(--primary); width: 20px; height: 20px; }
+
+/* ---------- activity ---------- */
+.feed { flex: 1; overflow: auto; margin: 12px 20px 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); }
+.feed-day { padding: 8px 14px; font-size: 12px; font-weight: 600; color: var(--muted-foreground); background: var(--background); border-bottom: 1px solid var(--border); position: sticky; top: 0; }
+.feed-item { display: grid; grid-template-columns: 52px 28px 1fr auto; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+.feed-item:last-child { border-bottom: 0; }
+.feed-item .ic { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: var(--hover); color: var(--muted-foreground); }
+.feed-item .ic.red { background: var(--status-recording-soft); color: var(--status-recording); }
+.feed-item .ic.amber { background: var(--status-retrying-soft); color: var(--status-retrying); }
+.feed-item .ic.teal { background: var(--primary-soft); color: var(--primary); }
+.feed-item time { color: var(--muted-foreground); font-size: 12px; }
+.feed-item .desc { font-size: 12px; color: var(--muted-foreground); }
+
+/* ---------- settings ---------- */
+.settings { flex: 1; display: flex; min-height: 0; }
+.set-nav { width: 180px; padding: 14px 10px 14px 20px; display: flex; flex-direction: column; gap: 2px; }
+.set-nav button { text-align: left; border: 0; background: transparent; height: 32px; padding: 0 10px; border-radius: var(--radius); color: var(--muted-foreground); }
+.set-nav button:hover { background: var(--hover); color: var(--foreground); }
+.set-nav button.on { background: var(--card); color: var(--foreground); box-shadow: 0 0 0 1px var(--border); font-weight: 500; }
+.set-body { flex: 1; overflow: auto; padding: 14px 20px 30px 10px; }
+.card { border: 1px solid var(--border); border-radius: 8px; background: var(--card); margin-bottom: 14px; max-width: 760px; }
+.card-head { padding: 12px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; }
+.card-head h2 { font-size: 14px; margin: 0; font-weight: 600; flex: 1; }
+.field { display: flex; align-items: center; gap: 20px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.field:last-child { border-bottom: 0; }
+.field .lbl { flex: 1; }
+.field .lbl small { display: block; color: var(--muted-foreground); font-size: 12px; }
+.field .input, .field select { width: 220px; }
+select.input { padding-right: 6px; }
+.switch { width: 34px; height: 20px; border-radius: 10px; background: var(--border-strong); border: 0; position: relative; flex: none; transition: background .15s; }
+.switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: transform .15s; box-shadow: 0 1px 2px rgb(0 0 0 / .25); }
+.switch.on { background: var(--primary); }
+.switch.on::after { transform: translateX(14px); }
+.chan { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--border); }
+.chan:last-child { border-bottom: 0; }
+.chan .name { flex: 1; }
+.chip { font-size: 11px; padding: 1px 7px; border-radius: 9px; border: 1px solid var(--border); color: var(--muted-foreground); }
+.chip.ok { border-color: transparent; background: var(--primary-soft); color: var(--primary); }
+
+/* ---------- dialog ---------- */
+.overlay { position: fixed; inset: 0; background: rgb(15 23 42 / .35); display: grid; place-items: center; z-index: 10; }
+.overlay.anim { animation: fade .12s; }
+.overlay.anim .dialog { animation: rise .15s; }
+.dialog { width: 520px; max-width: calc(100vw - 32px); background: var(--card); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); }
+.dialog-head { display: flex; align-items: center; padding: 14px 16px 6px; }
+.dialog-head h2 { flex: 1; margin: 0; font-size: 15px; font-weight: 600; }
+.dialog-body { padding: 8px 16px 16px; display: flex; flex-direction: column; gap: 12px; }
+.dialog-foot { padding: 12px 16px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 8px; }
+.dialog textarea { width: 100%; min-height: 76px; resize: vertical; border-radius: var(--radius); border: 1px solid var(--border); background: var(--card); padding: 8px 10px; outline: none; font: inherit; color: inherit; }
+.dialog textarea:focus { outline: 2px solid var(--primary); outline-offset: 1px; }
+.parsed { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 8px; background: var(--hover); }
+.parsed.dup { background: var(--status-retrying-soft); }
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.form-grid label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted-foreground); }
+.form-grid .input { width: 100%; color: var(--foreground); }
+details summary { cursor: pointer; color: var(--muted-foreground); font-size: 12.5px; }
+details[open] summary { margin-bottom: 10px; }
+@keyframes fade { from { opacity: 0; } }
+@keyframes rise { from { opacity: 0; transform: translateY(6px); } }
+
+.toast { position: fixed; right: 16px; bottom: 40px; background: var(--foreground); color: var(--background); padding: 9px 14px; border-radius: 8px; box-shadow: var(--shadow); z-index: 20; animation: rise .15s; }
+</style>
+</head>
+<body>
+<div class="app" id="app"></div>
+<script>
+const I = {
+  tasks: '<path d="M3 5h18M3 12h18M3 19h18"/>',
+  library: '<path d="M4 4h16v16H4z"/><path d="m10 9 5 3-5 3z"/>',
+  activity: '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
+  settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+  play: '<path d="m7 4 13 8-13 8z"/>',
+  pause: '<path d="M7 4h3v16H7zM14 4h3v16h-3z"/>',
+  stop: '<rect x="6" y="6" width="12" height="12" rx="1"/>',
+  more: '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
+  close: '<path d="M18 6 6 18M6 6l12 12"/>',
+  folder: '<path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+  warn: '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/>',
+  bell: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/>',
+  disk: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 15h.01M11 15h6"/>',
+  cpu: '<rect x="5" y="5" width="14" height="14" rx="2"/><path d="M9 9h6v6H9zM9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+  moon: '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>',
+  edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>',
+  ext: '<path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
+  trash: '<path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/>',
+  check: '<path d="M20 6 9 17l-5-5"/>',
+  wifi: '<path d="M5 12.5a10 10 0 0 1 14 0M8.5 16a5 5 0 0 1 7 0M12 19.5h.01"/>',
+  chev: '<path d="m9 6 6 6-6 6"/>',
+  rec: '<circle cx="12" cy="12" r="6"/>',
+  info: '<circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/>',
+};
+const ic = (n, cls = 'i') => `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${I[n]}</svg>`;
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+const PLAT = {
+  douyin: { name: '抖音', color: '#111827' },
+  kuaishou: { name: '快手', color: '#f97316' },
+  huya: { name: '虎牙', color: '#eab308' },
+  douyu: { name: '斗鱼', color: '#f43f5e' },
+  bilibili: { name: 'B站', color: '#0ea5e9' },
+};
+const AV = ['#0f766e', '#7c3aed', '#db2777', '#2563eb', '#ea580c', '#059669', '#4f46e5', '#b45309'];
+const STATUS = {
+  recording: '录制中', checking: '检测中', waiting: '等待开播', retrying: '重试中',
+  error: '需处理', paused: '已暂停', notify: '已开播 · 仅通知',
+};
+
+let tasks = [
+  { id: 1, name: '一只小羊驼', room: '7381920045', plat: 'douyin', status: 'recording', q: '原画', fmt: 'TS', dur: 5025, size: 3.41, rate: 6.2, check: '刚刚' },
+  { id: 2, name: '夜听电台', room: '3829104', plat: 'kuaishou', status: 'recording', q: '超清', fmt: 'TS', dur: 1342, size: 0.92, rate: 4.1, check: '刚刚' },
+  { id: 3, name: '老王说车', room: '992817', plat: 'huya', status: 'retrying', q: '原画', fmt: 'FLV', dur: 0, size: 0, rate: 0, check: '12 秒前', retry: 2 },
+  { id: 4, name: '阿星游戏', room: '5521', plat: 'douyu', status: 'error', q: '原画', fmt: 'TS', dur: 0, size: 0, rate: 0, check: '1 分钟前', reason: '磁盘空间不足', detail: 'D:\\Records 剩余 1.2 GB，低于阈值 5 GB，已停止写入。' },
+  { id: 5, name: '甜品研究所', room: '7210334511', plat: 'douyin', status: 'waiting', q: '原画', fmt: 'TS', dur: 0, size: 0, rate: 0, check: '2 分钟前' },
+  { id: 6, name: '山野徒步', room: '21993840', plat: 'bilibili', status: 'checking', q: '高清', fmt: 'MP4', dur: 0, size: 0, rate: 0, check: '检测中' },
+  { id: 7, name: '晚八点读书会', room: '883021', plat: 'kuaishou', status: 'notify', q: '超清', fmt: 'TS', dur: 0, size: 0, rate: 0, check: '30 秒前' },
+  { id: 8, name: '码农日常', room: '7012938842', plat: 'douyin', status: 'waiting', q: '原画', fmt: 'TS', dur: 0, size: 0, rate: 0, check: '3 分钟前' },
+  { id: 9, name: '街头篮球', room: '110293', plat: 'huya', status: 'paused', q: '原画', fmt: 'TS', dur: 0, size: 0, rate: 0, check: '—' },
+  { id: 10, name: '深夜食堂', room: '4410', plat: 'douyu', status: 'waiting', q: '超清', fmt: 'TS', dur: 0, size: 0, rate: 0, check: '1 分钟前' },
+  { id: 11, name: '萌宠日记', room: '7399182001', plat: 'douyin', status: 'paused', q: '原画', fmt: 'TS', dur: 0, size: 0, rate: 0, check: '—' },
+];
+
+const state = {
+  page: 'tasks', filter: 'all', plat: 'all', q: '', sel: new Set(), active: 1,
+  sort: { key: 'status', dir: 1 }, setTab: 'record', libPath: [], dialog: null,
+  ffmpeg: 64,
+  theme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light',
+};
+document.documentElement.dataset.theme = state.theme;
+
+const fmtDur = s => { const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60; return [h, m, x].map(v => String(v).padStart(2, '0')).join(':'); };
+const avatar = t => `<span class="avatar" style="background:${AV[t.id % AV.length]}">${esc(t.name[0])}</span>`;
+const plat = p => `<span class="plat"><i style="background:${PLAT[p].color}"></i>${PLAT[p].name}</span>`;
+const stPill = t => {
+  if (t.status === 'recording') return `<span class="st recording"><span class="dot"></span>录制中 <span class="num">${fmtDur(t.dur)}</span></span>`;
+  if (t.status === 'retrying') return `<span class="st retrying"><span class="dot"></span>重试中 · 第 ${t.retry} 次</span>`;
+  if (t.status === 'error') return `<span class="st error">${ic('warn')}${esc(t.reason)}</span>`;
+  if (t.status === 'notify') return `<span class="st notify">${ic('bell')}已开播 · 仅通知</span>`;
+  return `<span class="st ${t.status}"><span class="dot"></span>${STATUS[t.status]}</span>`;
+};
+const ORDER = { error: 0, recording: 1, retrying: 2, notify: 3, checking: 4, waiting: 5, paused: 6 };
+const groupOf = s => s === 'recording' ? 'recording' : s === 'error' || s === 'retrying' ? 'issue' : s === 'paused' ? 'paused' : 'waiting';
+
+function visibleTasks() {
+  let r = tasks.filter(t =>
+    (state.filter === 'all' || groupOf(t.status) === state.filter) &&
+    (state.plat === 'all' || t.plat === state.plat) &&
+    (!state.q || (t.name + t.room).toLowerCase().includes(state.q.toLowerCase())));
+  const { key, dir } = state.sort;
+  r.sort((a, b) => {
+    const va = key === 'status' ? ORDER[a.status] : key === 'size' ? a.size : key === 'name' ? a.name : PLAT[a.plat].name;
+    const vb = key === 'status' ? ORDER[b.status] : key === 'size' ? b.size : key === 'name' ? b.name : PLAT[b.plat].name;
+    return (va > vb ? 1 : va < vb ? -1 : 0) * dir;
+  });
+  return r;
+}
+
+/* ---------------- render ---------------- */
+const SCROLLERS = ['.table-wrap', '.lib-grid', '.set-body', '.feed', '.insp-body'];
+function render() {
+  const keep = SCROLLERS.map(q => document.querySelector(q)?.scrollTop || 0);
+  draw();
+  SCROLLERS.forEach((q, i) => { const el = document.querySelector(q); if (el) el.scrollTop = keep[i]; });
+}
+function draw() {
+  const rec = tasks.filter(t => t.status === 'recording').length;
+  const issues = tasks.filter(t => t.status === 'error').length;
+  const nav = [['tasks', '直播间', rec ? `<span class="badge">${rec}</span>` : ''], ['library', '录像库', ''], ['activity', '动态', issues ? `<span class="badge warn">${issues}</span>` : ''], ['settings', '设置', '']];
+  const page = { tasks: renderTasks, library: renderLibrary, activity: renderActivity, settings: renderSettings }[state.page]();
+  const rate = tasks.reduce((s, t) => s + t.rate, 0).toFixed(1);
+  document.getElementById('app').innerHTML = `
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-mark">${ic('rec')}</span><span class="brand-text">录播宝</span></div>
+      ${nav.map(([id, l, b]) => `<button class="nav-btn ${state.page === id ? 'on' : ''}" data-page="${id}">${ic(id)}${l}${b}</button>`).join('')}
+      <div class="sidebar-foot">
+        <button class="nav-btn" data-theme-toggle>${ic(state.theme === 'dark' ? 'sun' : 'moon')}${state.theme === 'dark' ? '浅色模式' : '深色模式'}</button>
+      </div>
+    </aside>
+    <main class="main">${page}</main>
+    <footer class="statusbar">
+      <span class="item">${ic('cpu')}${state.ffmpeg < 100 ? `FFmpeg 下载中 <span class="progress"><i style="width:${state.ffmpeg}%"></i></span> <span class="num">${state.ffmpeg}%</span>` : `FFmpeg 7.1 已就绪`}</span>
+      <span class="item"><span class="st recording" style="font-weight:400"><span class="dot" style="width:7px;height:7px"></span></span>录制中 ${rec}</span>
+      <span class="item">${ic('wifi')}<span class="num">${rate} Mbps</span></span>
+      <span class="item">${ic('disk')}D:\\Records 剩余 <span class="num">186 GB</span></span>
+      <span class="item right">下次检测 <span class="num" id="countdown">02:41</span></span>
+    </footer>
+    ${state.dialog ? renderDialog() : ''}`;
+}
+
+function renderTasks() {
+  const list = visibleTasks();
+  const cnt = g => g === 'all' ? tasks.length : tasks.filter(t => groupOf(t.status) === g).length;
+  const stats = [['all', '全部任务', ''], ['recording', '录制中', 'recording'], ['waiting', '监控中', 'waiting'], ['issue', '需关注', 'error'], ['paused', '已暂停', 'paused']];
+  const allSel = list.length && list.every(t => state.sel.has(t.id));
+  const active = tasks.find(t => t.id === state.active);
+  const sortTh = (k, l) => `<th class="sort" data-sort="${k}">${l}${state.sort.key === k ? (state.sort.dir > 0 ? ' ↑' : ' ↓') : ''}</th>`;
+  return `
+  <section class="content">
+    <div class="page-head"><h1>直播间</h1><span class="spacer"></span>
+      <button class="btn primary" data-open-add>${ic('plus')}添加直播间</button></div>
+    <div class="stats">${stats.map(([k, l, s]) => `
+      <button class="stat ${state.filter === k ? 'on' : ''}" data-filter="${k}">
+        <span class="label">${s ? `<span class="st ${s}"><span class="dot"></span></span>` : ''}${l}</span>
+        <span class="value num">${cnt(k)}</span></button>`).join('')}</div>
+    <div class="toolbar">
+      <div class="search">${ic('search')}<input class="input" id="q" placeholder="搜索主播或房间号" value="${esc(state.q)}"></div>
+      <div class="seg">${[['all', '全部平台'], ...Object.entries(PLAT).map(([k, v]) => [k, v.name])].map(([k, l]) => `<button class="${state.plat === k ? 'on' : ''}" data-plat="${k}">${l}</button>`).join('')}</div>
+      <span class="spacer" style="flex:1"></span>
+      <span class="muted">${list.length} 项</span>
+    </div>
+    <div class="table-wrap">
+      ${list.length ? `<table>
+        <thead><tr>
+          <th style="width:36px"><input type="checkbox" class="cb" data-sel-all ${allSel ? 'checked' : ''}></th>
+          ${sortTh('status', '状态')}${sortTh('name', '主播')}${sortTh('plat', '平台')}
+          <th class="col-opt">画质 / 格式</th>${sortTh('size', '本次录制')}<th class="col-opt">最近检测</th><th style="width:100px"></th>
+        </tr></thead>
+        <tbody>${list.map(t => `
+          <tr data-row="${t.id}" class="${state.active === t.id ? 'sel' : ''} ${t.status === 'error' ? 'err' : ''} ${t.status === 'paused' ? 'paused' : ''}">
+            <td><input type="checkbox" class="cb" data-sel="${t.id}" ${state.sel.has(t.id) ? 'checked' : ''}></td>
+            <td>${stPill(t)}</td>
+            <td><div class="streamer">${avatar(t)}<div><div>${esc(t.name)}</div><div class="sub num">${t.room}</div></div></div></td>
+            <td>${plat(t.plat)}</td>
+            <td class="muted col-opt">${t.q} · ${t.fmt}</td>
+            <td class="num">${t.status === 'recording' ? `${t.size.toFixed(2)} GB <span class="muted">· ${t.rate} Mbps</span>` : '<span class="muted">—</span>'}</td>
+            <td class="muted col-opt">${t.check}</td>
+            <td><div class="row-actions">
+              ${t.status === 'recording' ? `<button class="icon-btn" title="停止录制" data-act="stop" data-id="${t.id}">${ic('stop')}</button>`
+                : t.status === 'paused' ? `<button class="icon-btn" title="开始监控" data-act="start" data-id="${t.id}">${ic('play')}</button>`
+                : `<button class="icon-btn" title="暂停监控" data-act="pause" data-id="${t.id}">${ic('pause')}</button>`}
+              <button class="icon-btn" title="打开文件夹">${ic('folder')}</button>
+              <button class="icon-btn" title="更多">${ic('more')}</button>
+            </div></td>
+          </tr>`).join('')}</tbody>
+      </table>` : `<div class="empty">没有符合条件的直播间<br><br><button class="btn" data-clear>清除筛选</button></div>`}
+      ${state.sel.size ? `<div class="batchbar">已选 ${state.sel.size} 项
+        <button class="btn" data-batch="start">${ic('play')}开始监控</button>
+        <button class="btn" data-batch="pause">${ic('pause')}暂停监控</button>
+        <button class="btn" data-batch="delete">${ic('trash')}删除</button>
+        <button class="icon-btn" style="color:inherit" data-batch="clear" title="取消选择">${ic('close')}</button></div>` : ''}
+    </div>
+  </section>
+  ${active ? renderInspector(active) : ''}`;
+}
+
+function renderInspector(t) {
+  const live = ['recording', 'notify', 'error'].includes(t.status);
+  const tri = [
+    ['监控', t.status === 'paused' ? '已暂停' : '已启用'],
+    ['直播间', live ? '已开播' : t.status === 'checking' ? '检测中' : t.status === 'retrying' ? '连接中' : '未开播'],
+    ['文件', t.status === 'recording' ? '写入中' : t.status === 'error' ? '已中断' : '未写入'],
+  ];
+  const tl = t.status === 'recording'
+    ? [['20:14', '开始录制 · 原画 1080p', 'var(--status-recording)'], ['20:14', '检测到开播', 'var(--primary)'], ['20:11', '未开播，等待下次检测', ''], ['19:00', '进入监控时间窗', '']]
+    : t.status === 'error'
+    ? [['21:02', '磁盘空间不足，已停止写入', 'var(--status-recording)'], ['20:40', '开始录制 · 原画', 'var(--status-recording)'], ['20:40', '检测到开播', 'var(--primary)']]
+    : [['21:30', '未开播，等待下次检测', ''], ['21:27', '未开播', ''], ['21:24', '开始监控', 'var(--primary)']];
+  return `
+  <aside class="inspector">
+    <div class="insp-head">${avatar(t)}<div style="flex:1;min-width:0"><div class="name">${esc(t.name)}</div><div class="muted" style="font-size:12px">${PLAT[t.plat].name} · ${t.room}</div></div>
+      <button class="icon-btn" title="在浏览器打开">${ic('ext')}</button>
+      <button class="icon-btn" data-close-insp title="关闭">${ic('close')}</button></div>
+    <div class="insp-body">
+      ${t.status === 'error' ? `<div class="alert">${ic('warn')}<div><b>${esc(t.reason)}</b><span class="muted">${esc(t.detail)}</span>
+        <div class="acts"><button class="btn primary">更换目录</button><button class="btn">打开录像库清理</button></div></div></div>` : ''}
+      <div class="preview">${live ? `<span class="live">LIVE</span><span class="meta">1920×1080 · 60fps</span>${ic('play', 'i')}` : '<span>未开播 · 无预览</span>'}</div>
+      <div><p class="section-title">状态</p><div class="tri">${tri.map(([k, v]) => `<div><small>${k}</small><b>${v}</b></div>`).join('')}</div></div>
+      <div><p class="section-title">录制参数</p><dl class="kv">
+        <dt>画质</dt><dd>${t.q}</dd><dt>格式</dt><dd>${t.fmt}，每 30 分钟分段</dd>
+        <dt>录后处理</dt><dd>转 MP4，保留原文件</dd><dt>保存到</dt><dd class="num">D:\\Records\\${esc(t.name)}</dd>
+        ${t.status === 'recording' ? `<dt>当前文件</dt><dd class="num">${esc(t.name)}_2026-11-22_20-14.ts</dd><dt>大小</dt><dd class="num">${t.size.toFixed(2)} GB · ${t.rate} Mbps</dd>` : ''}
+      </dl></div>
+      <div><p class="section-title">事件</p><ul class="timeline">${tl.map(([tm, d, c]) => `<li><time class="num">${tm}</time><span class="tdot" style="${c ? `background:${c}` : ''}"></span><span>${d}</span></li>`).join('')}</ul></div>
+    </div>
+    <div class="insp-foot">
+      ${t.status === 'recording' ? `<button class="btn danger" data-act="stop" data-id="${t.id}">${ic('stop')}停止录制</button>`
+        : t.status === 'paused' ? `<button class="btn primary" data-act="start" data-id="${t.id}">${ic('play')}开始监控</button>`
+        : `<button class="btn" data-act="pause" data-id="${t.id}">${ic('pause')}暂停监控</button>`}
+      <button class="btn">${ic('edit')}编辑</button>
+    </div>
+  </aside>`;
+}
+
+const FILES = [
+  { who: '一只小羊驼', name: '2026-11-22 20:14', dur: '01:23:45', size: '3.41 GB', tag: '录制中', rec: true, g: ['#0f766e', '#134e4a'] },
+  { who: '一只小羊驼', name: '2026-11-21 20:02', dur: '02:10:11', size: '5.62 GB', tag: 'MP4', g: ['#0f766e', '#1e293b'] },
+  { who: '一只小羊驼', name: '2026-11-20 19:58', dur: '01:48:30', size: '4.70 GB', tag: '转码中 62%', conv: 62, g: ['#155e75', '#1e293b'] },
+  { who: '夜听电台', name: '2026-11-22 23:40', dur: '00:22:22', size: '0.92 GB', tag: '录制中', rec: true, g: ['#7c3aed', '#1e1b4b'] },
+  { who: '夜听电台', name: '2026-11-21 23:31', dur: '01:05:09', size: '2.31 GB', tag: 'MP4', g: ['#6d28d9', '#0f172a'] },
+  { who: '阿星游戏', name: '2026-11-22 20:40', dur: '00:21:40', size: '1.12 GB', tag: '转码失败 · 保留 TS', g: ['#be123c', '#1f2937'] },
+];
+function renderLibrary() {
+  const path = ['D:\\Records', ...state.libPath];
+  const inFolder = state.libPath.length > 0;
+  const groups = {};
+  FILES.filter(f => !inFolder || f.who === state.libPath[0]).forEach(f => (groups[f.who] ||= []).push(f));
+  return `
+  <section class="content">
+    <div class="page-head"><h1>录像库</h1><span class="spacer"></span>
+      <div class="search">${ic('search')}<input class="input" placeholder="搜索文件"></div>
+      <button class="btn">${ic('folder')}打开目录</button></div>
+    <div class="crumbs">${path.map((p, i) => `${i ? ic('chev') : ''}<button class="${i === path.length - 1 ? 'cur' : ''}" data-crumb="${i}">${esc(p)}</button>`).join('')}</div>
+    <div class="lib-grid">
+      ${!inFolder ? `<div><div class="group-title">主播目录 <span class="muted">${Object.keys(groups).length} 个</span></div>
+        <div class="folder-row">${Object.entries(groups).map(([w, fs]) => `<button class="folder" data-folder="${esc(w)}">${ic('folder')}<span><div>${esc(w)}</div><small class="muted">${fs.length} 个文件</small></span></button>`).join('')}</div></div>` : ''}
+      ${Object.entries(groups).map(([w, fs]) => `<div>
+        <div class="group-title">${esc(w)} <span class="muted">${fs.length} 个文件</span></div>
+        <div class="files">${fs.map(f => `<div class="file">
+          <div class="thumb" style="background:linear-gradient(135deg,${f.g[0]},${f.g[1]})">${ic('play')}<span class="tag ${f.rec ? 'rec' : ''}">${f.tag}</span><span class="dur num">${f.dur}</span></div>
+          ${f.conv ? `<div class="conv"><i style="width:${f.conv}%"></i></div>` : ''}
+          <div class="file-info"><div class="t"><div class="num">${f.name}</div><small class="num">${f.size}</small></div>
+            <button class="icon-btn" title="在文件夹中显示">${ic('folder')}</button><button class="icon-btn" title="更多">${ic('more')}</button></div>
+        </div>`).join('')}</div></div>`).join('')}
+    </div>
+  </section>`;
+}
+
+function renderActivity() {
+  const items = [
+    ['今天', [
+      ['23:40', 'red', 'rec', '夜听电台 开始录制', '快手 · 超清 · TS'],
+      ['21:02', 'red', 'warn', '阿星游戏 录制中断：磁盘空间不足', 'D:\\Records 剩余 1.2 GB，低于阈值 5 GB', '处理'],
+      ['20:58', 'amber', 'wifi', '老王说车 连接中断，正在重试', '虎牙 · 第 2 次重试，间隔 30 秒'],
+      ['20:31', 'teal', 'bell', '晚八点读书会 已开播', '仅通知模式，未创建录像 · 已推送到桌面、飞书'],
+      ['20:14', 'red', 'rec', '一只小羊驼 开始录制', '抖音 · 原画 · TS'],
+      ['19:00', '', 'info', '进入定时监控时间窗', '19:00 – 02:00，共 9 个任务'],
+    ]],
+    ['昨天', [
+      ['23:58', 'teal', 'check', '一只小羊驼 转码完成', '5.62 GB · 已转为 MP4，原文件已保留'],
+      ['22:12', '', 'stop', '一只小羊驼 下播，录制结束', '时长 02:10:11'],
+    ]],
+  ];
+  return `
+  <section class="content">
+    <div class="page-head"><h1>动态</h1><span class="spacer"></span>
+      <div class="seg"><button class="on">全部</button><button>录制</button><button>异常</button><button>通知</button></div></div>
+    <div class="feed">${items.map(([d, rows]) => `<div class="feed-day">${d}</div>${rows.map(([t, c, i, title, desc, act]) => `
+      <div class="feed-item"><time class="num">${t}</time><span class="ic ${c}">${ic(i)}</span>
+        <div><div>${esc(title)}</div><div class="desc">${esc(desc)}</div></div>
+        ${act ? `<button class="btn" data-page="tasks">${act}</button>` : '<span></span>'}</div>`).join('')}`).join('')}</div>
+  </section>`;
+}
+
+const SW = on => `<button class="switch ${on ? 'on' : ''}" data-switch></button>`;
+function renderSettings() {
+  const tabs = [['record', '录制默认值'], ['output', '输出与命名'], ['post', '录后处理'], ['schedule', '调度与并发'], ['platform', '平台与账号'], ['notify', '通知渠道'], ['component', '组件'], ['appearance', '外观'], ['about', '关于']];
+  const f = (l, s, ctl) => `<div class="field"><div class="lbl">${l}${s ? `<small>${s}</small>` : ''}</div>${ctl}</div>`;
+  const sel = (...o) => `<select class="input">${o.map(x => `<option>${x}</option>`).join('')}</select>`;
+  const body = {
+    record: `<div class="card"><div class="card-head"><h2>录制默认值</h2><button class="btn ghost">恢复默认</button></div>
+      ${f('保存目录', '每个主播单独建子目录', `<div style="display:flex;gap:6px"><input class="input num" style="width:170px" value="D:\\Records"><button class="btn">选择</button></div>`)}
+      ${f('默认画质', '直播间没有该画质时自动降一级', sel('原画', '超清', '高清', '标清'))}
+      ${f('录制格式', '', sel('TS（推荐，断流不损坏）', 'FLV', 'MP4', 'MKV', '仅音频 M4A'))}
+      ${f('自动分段', '按时长切分文件', sel('每 30 分钟', '每 60 分钟', '每 2 小时', '不分段'))}
+      ${f('磁盘空间阈值', '剩余空间低于该值时停止写入并提醒', `<input class="input num" value="5 GB">`)}
+      ${f('录制时间字幕', '生成与视频同名的 SRT 文件', SW(false))}</div>`,
+    schedule: `<div class="card"><div class="card-head"><h2>调度与并发</h2><button class="btn ghost">恢复默认</button></div>
+      ${f('检测间隔', '每隔多久检查一次是否开播', `<input class="input num" value="180 秒">`)}
+      ${f('每平台并发请求', '过高可能触发平台风控', `<input class="input num" value="3">`)}
+      ${f('定时监控', '只在时间窗内检测', SW(true))}
+      ${f('时间窗', '', `<input class="input num" value="19:00 – 02:00">`)}
+      ${f('关闭窗口时', '', sel('隐藏到托盘，继续录制', '退出应用'))}
+      ${f('定时关机', '所有录制结束后关机', SW(false))}</div>`,
+    notify: `<div class="card"><div class="card-head"><h2>通知事件</h2></div>
+      ${f('开播时通知', '', SW(true))}${f('下播时通知', '', SW(true))}${f('录制异常时通知', '磁盘不足、凭据失效、连续重试失败', SW(true))}</div>
+      <div class="card"><div class="card-head"><h2>通知渠道</h2></div>
+      ${[['桌面通知', 'ok', '已启用'], ['飞书', 'ok', '测试通过'], ['钉钉', '', '未配置'], ['企业微信', '', '未配置'], ['Bark', '', '未配置'], ['ntfy', '', '未配置'], ['Server酱', '', '未配置'], ['Telegram', '', '未配置'], ['邮件', '', '未配置']]
+        .map(([n, c, s]) => `<div class="chan"><span class="name">${n}</span><span class="chip ${c}">${s}</span><button class="btn">${c ? '测试' : '配置'}</button></div>`).join('')}</div>`,
+    component: `<div class="card"><div class="card-head"><h2>FFmpeg</h2></div>
+      ${f('状态', state.ffmpeg < 100 ? `正在后台下载，可继续使用其他功能` : '已校验 SHA-256，离线可用', `<span class="chip ${state.ffmpeg >= 100 ? 'ok' : ''}">${state.ffmpeg < 100 ? `下载中 ${state.ffmpeg}%` : '7.1 · 已就绪'}</span>`)}
+      ${f('下载源', '国内镜像优先，失败自动切换备用源', sel('自动', '国内镜像', 'GitHub'))}
+      ${f('安装位置', '', `<span class="muted num">%LOCALAPPDATA%\\lubobao\\ffmpeg</span>`)}
+      ${f('重新校验', '文件损坏时可重新下载', `<button class="btn">重新校验</button>`)}</div>`,
+    appearance: `<div class="card"><div class="card-head"><h2>外观</h2></div>
+      ${f('主题', '', `<div class="seg"><button class="on">跟随系统</button><button>浅色</button><button>深色</button></div>`)}
+      ${f('语言', '', sel('简体中文', 'English'))}</div>`,
+  }[state.setTab] || `<div class="card"><div class="card-head"><h2>${tabs.find(t => t[0] === state.setTab)[1]}</h2></div><div class="empty">原型中暂未展开此分组</div></div>`;
+  return `
+  <section class="content">
+    <div class="page-head"><h1>设置</h1></div>
+    <div class="settings">
+      <nav class="set-nav">${tabs.map(([k, l]) => `<button class="${state.setTab === k ? 'on' : ''}" data-settab="${k}">${l}</button>`).join('')}</nav>
+      <div class="set-body">${body}</div>
+    </div>
+  </section>`;
+}
+
+function renderDialog() {
+  const d = state.dialog;
+  const dup = d.url.includes('7381920045');
+  const parsed = d.url.trim().length > 8;
+  const anim = d.fresh ? 'anim' : ''; d.fresh = false;
+  return `<div class="overlay ${anim}" data-overlay><div class="dialog" role="dialog" aria-modal="true">
+    <div class="dialog-head"><h2>添加直播间</h2><button class="icon-btn" data-close-dialog>${ic('close')}</button></div>
+    <div class="dialog-body">
+      <textarea id="add-url" placeholder="粘贴直播间链接，每行一个，可批量添加">${esc(d.url)}</textarea>
+      ${parsed ? (dup
+        ? `<div class="parsed dup">${ic('warn')}<div style="flex:1"><b>一只小羊驼</b> 已在任务列表中<div class="muted" style="font-size:12px">抖音 · 7381920045 · 正在录制</div></div><button class="btn" data-close-dialog>查看任务</button></div>`
+        : `<div class="parsed"><span class="avatar" style="background:#2563eb">甜</span><div style="flex:1"><b>甜品研究所</b><div class="muted" style="font-size:12px">抖音 · 已识别 · 当前未开播</div></div>${ic('check')}</div>`)
+        : `<div class="muted" style="font-size:12px">支持抖音、快手、虎牙、斗鱼、B站等平台的直播间链接或分享口令。试试粘贴任意链接。</div>`}
+      <div class="form-grid">
+        <label>画质<select class="input"><option>原画（默认）</option><option>超清</option><option>高清</option></select></label>
+        <label>录制方式<select class="input"><option>开播自动录制</option><option>仅通知，不录制</option></select></label>
+      </div>
+      <details><summary>高级选项：格式、分段、定时监控、保存目录</summary>
+        <div class="form-grid">
+          <label>格式<select class="input"><option>TS（默认）</option><option>FLV</option><option>MP4</option></select></label>
+          <label>分段<select class="input"><option>每 30 分钟（默认）</option><option>不分段</option></select></label>
+          <label>监控时间<select class="input"><option>全天</option><option>19:00 – 02:00</option></select></label>
+          <label>保存目录<input class="input" value="D:\\Records\\{主播名}"></label>
+        </div>
+      </details>
+    </div>
+    <div class="dialog-foot"><button class="btn" data-close-dialog>取消</button><button class="btn primary" data-add ${!parsed || dup ? 'disabled style="opacity:.5;cursor:not-allowed"' : ''}>添加并开始监控</button></div>
+  </div></div>`;
+}
+
+/* ---------------- events ---------------- */
+let toastTimer;
+function toast(msg) {
+  document.querySelector('.toast')?.remove();
+  const el = document.createElement('div'); el.className = 'toast'; el.textContent = msg; document.body.append(el);
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => el.remove(), 2200);
+}
+function setStatus(id, act) {
+  const t = tasks.find(x => x.id === id); if (!t) return;
+  if (act === 'stop' || act === 'pause') { t.status = 'paused'; t.dur = 0; t.size = 0; t.rate = 0; t.check = '—'; }
+  if (act === 'start') { t.status = 'checking'; t.check = '检测中'; setTimeout(() => { if (t.status === 'checking') { t.status = 'waiting'; t.check = '刚刚'; render(); } }, 1500); }
+}
+
+document.addEventListener('click', e => {
+  const el = e.target.closest('button, tr[data-row], [data-overlay], input[type=checkbox]');
+  if (!el) return;
+  const ds = el.dataset;
+  if (ds.page) { state.page = ds.page; }
+  else if ('themeToggle' in ds) { state.theme = state.theme === 'dark' ? 'light' : 'dark'; document.documentElement.dataset.theme = state.theme; }
+  else if (ds.filter) { state.filter = ds.filter; }
+  else if (ds.plat) { state.plat = ds.plat; }
+  else if (ds.sort) { state.sort = { key: ds.sort, dir: state.sort.key === ds.sort ? -state.sort.dir : 1 }; }
+  else if ('selAll' in ds) { const l = visibleTasks(); const all = l.every(t => state.sel.has(t.id)); l.forEach(t => all ? state.sel.delete(t.id) : state.sel.add(t.id)); }
+  else if (ds.sel) { const id = +ds.sel; state.sel.has(id) ? state.sel.delete(id) : state.sel.add(id); }
+  else if (ds.act) { e.stopPropagation(); setStatus(+ds.id, ds.act); toast({ stop: '已停止录制，文件已保存', pause: '已暂停监控', start: '已开始监控' }[ds.act]); }
+  else if (ds.batch) {
+    if (ds.batch === 'clear') state.sel.clear();
+    else if (ds.batch === 'delete') { tasks = tasks.filter(t => !state.sel.has(t.id)); toast(`已删除 ${state.sel.size} 个任务`); state.sel.clear(); }
+    else { const n = state.sel.size; state.sel.forEach(id => setStatus(id, ds.batch)); state.sel.clear(); toast(`${ds.batch === 'start' ? '已开始监控' : '已暂停监控'} ${n} 个任务`); }
+  }
+  else if (ds.row) { state.active = +ds.row; }
+  else if ('closeInsp' in ds) { state.active = null; }
+  else if ('clear' in ds) { state.filter = 'all'; state.plat = 'all'; state.q = ''; }
+  else if ('openAdd' in ds) { state.dialog = { url: '', fresh: true }; render(); document.getElementById('add-url').focus(); return; }
+  else if ('closeDialog' in ds || (ds.overlay !== undefined && e.target === el)) { state.dialog = null; }
+  else if ('add' in ds) {
+    if (el.disabled) return;
+    const id = Math.max(...tasks.map(t => t.id)) + 1;
+    tasks.push({ id, name: '甜品研究所 2', room: '7210339999', plat: 'douyin', status: 'checking', q: '原画', fmt: 'TS', dur: 0, size: 0, rate: 0, check: '检测中' });
+    state.dialog = null; state.active = id; setStatus(id, 'start'); toast('已添加，正在检测直播状态');
+  }
+  else if (ds.settab) { state.setTab = ds.settab; }
+  else if (ds.folder) { state.libPath = [ds.folder]; }
+  else if (ds.crumb !== undefined) { state.libPath = state.libPath.slice(0, +ds.crumb); }
+  else if ('switch' in ds) { el.classList.toggle('on'); return; }
+  else return;
+  render();
+});
+document.addEventListener('input', e => {
+  if (e.target.id === 'q') { state.q = e.target.value; render(); const q = document.getElementById('q'); q.focus(); q.setSelectionRange(q.value.length, q.value.length); }
+  if (e.target.id === 'add-url') { state.dialog.url = e.target.value; render(); const a = document.getElementById('add-url'); a.focus(); a.setSelectionRange(a.value.length, a.value.length); }
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && state.dialog) { state.dialog = null; render(); }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'n') { e.preventDefault(); state.dialog = { url: '', fresh: true }; render(); document.getElementById('add-url').focus(); }
+});
+
+/* live ticking */
+let cd = 161;
+setInterval(() => {
+  tasks.forEach(t => { if (t.status === 'recording') { t.dur++; t.size += t.rate / 8 / 1024; } });
+  if (state.ffmpeg < 100) state.ffmpeg = Math.min(100, state.ffmpeg + 2);
+  cd = cd > 0 ? cd - 1 : 180;
+  if (!state.dialog && !['INPUT', 'SELECT'].includes(document.activeElement?.tagName)) render();
+  const c = document.getElementById('countdown'); if (c) c.textContent = fmtDur(cd).slice(3);
+}, 1000);
+render();
+</script>
+</body>
+</html>
