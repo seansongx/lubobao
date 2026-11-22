@@ -1,15 +1,27 @@
-//! 系统通知：哪条动态在什么设置下发通知、文案是什么（纯函数），以及发送和授权。
+//! 系统通知：什么情况发、发什么（纯逻辑，配单元测试），以及发送和授权。
 //!
-//! 文案参照 StreamCap 的 `push_content` / `push_content_end`（「直播间状态更新：[room_name]
-//! 正在直播中」），去掉时间（系统通知自带），加上平台名。
+//! 规则与 StreamCap 对齐（见 `docs/feature-map.md` 的有意差异）：
+//! - 总开关 `system_notification_enabled`；
+//! - 开播（`stream_start_notification_enabled`，默认开）、下播（`stream_end_notification_enabled`，
+//!   默认关）：普通任务只在主窗口隐藏或最小化时发；「仅通知」任务不论窗口状态都发；
+//! - 任务进入「需处理」时发一次，不论窗口状态；恢复正常后再次进入才会再发。
+//!
+//! 文案参照 StreamCap 的 `push_content`（「直播间状态更新：[room_name] 正在直播中」），
+//! 去掉时间（系统通知自带），加上平台名。短时间内的多条开播（或下播）合并成一条。
 
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use serde::Deserialize;
 use serde_json::{Map, Value};
 use tauri_plugin_notification::{NotificationExt, PermissionState};
 
-use crate::tasks::{ActivityKind, DisplayStatus, TaskId};
+use crate::tasks::{ActivityEntry, ActivityKind, DisplayStatus, TaskId, TaskSnapshot};
+
+/// 合并窗口：第一条开播或下播之后等这么久，再把攒下的一起发出。
+pub const MERGE_WINDOW_MS: u64 = 3_000;
+
+/// 合并通知里最多列出的主播名。
+const MAX_LISTED: usize = 5;
 
 /// 通知相关的三个设置，键名同 StreamCap。缺省值与 `tasks::settings` 的默认值一致。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,28 +41,10 @@ impl NotifySettings {
         };
         NotifySettings {
             system: flag("system_notification_enabled", true),
-            stream_start: flag("stream_start_notification_enabled", false),
+            stream_start: flag("stream_start_notification_enabled", true),
             stream_end: flag("stream_end_notification_enabled", false),
         }
     }
-}
-
-/// `activity` 事件载荷中通知用得到的字段（见 `tasks::ActivityEntry`）。
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ActivityNotice {
-    pub task_id: Option<TaskId>,
-    pub anchor_name: String,
-    pub kind: ActivityKind,
-    pub message: String,
-}
-
-/// 收到动态时该任务的当前情况。
-#[derive(Debug, Clone, PartialEq)]
-pub struct TaskNotice {
-    pub platform_name: String,
-    pub display: DisplayStatus,
-    pub display_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -59,51 +53,169 @@ pub struct Notice {
     pub body: String,
 }
 
-/// 决定一条动态要不要发系统通知，要发时给出文案。
-///
-/// - 开播（live_start）：需要 `stream_start_notification_enabled`；
-/// - 下播（live_end）：需要 `stream_end_notification_enabled`；
-/// - 失败（failure）：只在任务当前显示为「需处理」时发，会自行重试的不打扰；
-/// - 都受总开关 `system_notification_enabled` 控制；其他动态不发。
-pub fn decide(
-    activity: &ActivityNotice,
-    task: Option<&TaskNotice>,
-    settings: &NotifySettings,
-) -> Option<Notice> {
-    if !settings.system {
-        return None;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LiveChange {
+    Start,
+    End,
+}
+
+/// 一条待发的开播或下播。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LiveItem {
+    pub change: LiveChange,
+    /// 「主播（平台）」。
+    pub who: String,
+    pub notify_only: bool,
+}
+
+/// 任务的通知相关信息，来自最近一次 `TaskEvent::Updated`。
+#[derive(Debug, Clone, PartialEq)]
+struct TaskInfo {
+    anchor_name: String,
+    platform_name: String,
+    notify_only: bool,
+    display: DisplayStatus,
+    display_reason: Option<String>,
+}
+
+impl TaskInfo {
+    fn who(&self) -> String {
+        who(&self.anchor_name, Some(&self.platform_name))
     }
-    let anchor = match activity.anchor_name.trim() {
+}
+
+fn who(anchor_name: &str, platform_name: Option<&str>) -> String {
+    let anchor = match anchor_name.trim() {
         "" => "直播间",
         name => name,
     };
-    let who = match task {
-        Some(task) => format!("{anchor}（{}）", task.platform_name),
+    match platform_name {
+        Some(platform) => format!("{anchor}（{platform}）"),
         None => anchor.to_string(),
-    };
-    match activity.kind {
-        ActivityKind::LiveStart if settings.stream_start => Some(Notice {
-            title: "开播提醒".into(),
-            body: format!("直播间状态更新：{who}正在直播中"),
-        }),
-        ActivityKind::LiveEnd if settings.stream_end => Some(Notice {
-            title: "下播提醒".into(),
-            body: format!("直播间状态更新：{who}直播已结束"),
-        }),
-        ActivityKind::Failure => {
-            let task = task.filter(|task| task.display == DisplayStatus::NeedsAction)?;
-            let reason = task
-                .display_reason
-                .as_deref()
-                .filter(|reason| !reason.trim().is_empty())
-                .unwrap_or(&activity.message);
-            Some(Notice {
-                title: "录播宝 · 需处理".into(),
-                body: format!("{who}：{reason}"),
-            })
-        }
-        _ => None,
     }
+}
+
+/// 跟踪任务状态，把任务事件变成待发的通知。不读设置、不看窗口：那些在发送时判断。
+#[derive(Debug, Default)]
+pub struct Tracker {
+    tasks: HashMap<TaskId, TaskInfo>,
+    /// 已经为这一轮「需处理」发过通知的任务。回到正常状态时移除。
+    needs_action_notified: HashSet<TaskId>,
+}
+
+impl Tracker {
+    /// 任务快照更新。任务进入「需处理」时返回一条通知（每轮只一次）。
+    ///
+    /// 检测中、重试中不算恢复正常：连续失败期间先重试、后需处理，或者需处理后的每次重新
+    /// 检测，都不会重复或漏掉通知。
+    pub fn on_updated(&mut self, task: &TaskSnapshot) -> Option<Notice> {
+        let info = TaskInfo {
+            anchor_name: task.config.anchor_name.clone(),
+            platform_name: task.platform_name.to_string(),
+            notify_only: task.config.notify_only,
+            display: task.display,
+            display_reason: task.display_reason.clone(),
+        };
+        let notice = match info.display {
+            DisplayStatus::NeedsAction => self.needs_action_notified.insert(task.id).then(|| {
+                let reason = info
+                    .display_reason
+                    .as_deref()
+                    .filter(|reason| !reason.trim().is_empty())
+                    .unwrap_or("需要处理");
+                Notice {
+                    title: "录播宝 · 需处理".into(),
+                    body: format!("{}：{reason}", info.who()),
+                }
+            }),
+            DisplayStatus::Checking | DisplayStatus::Retrying => None,
+            DisplayStatus::Recording
+            | DisplayStatus::Waiting
+            | DisplayStatus::Notify
+            | DisplayStatus::Paused => {
+                self.needs_action_notified.remove(&task.id);
+                None
+            }
+        };
+        self.tasks.insert(task.id, info);
+        notice
+    }
+
+    pub fn on_removed(&mut self, ids: &[TaskId]) {
+        for id in ids {
+            self.tasks.remove(id);
+            self.needs_action_notified.remove(id);
+        }
+    }
+
+    /// 动态。开播、下播返回待合并的一条，其余忽略（失败由 [`Tracker::on_updated`] 处理）。
+    pub fn on_activity(&self, entry: &ActivityEntry) -> Option<LiveItem> {
+        let change = match entry.kind {
+            ActivityKind::LiveStart => LiveChange::Start,
+            ActivityKind::LiveEnd => LiveChange::End,
+            _ => return None,
+        };
+        let task = entry.task_id.and_then(|id| self.tasks.get(&id));
+        Some(LiveItem {
+            change,
+            who: match task {
+                Some(task) => task.who(),
+                None => who(&entry.anchor_name, None),
+            },
+            notify_only: task.is_some_and(|task| task.notify_only),
+        })
+    }
+}
+
+/// 需处理的通知是否发：只看总开关。
+pub fn allow_needs_action(settings: &NotifySettings) -> bool {
+    settings.system
+}
+
+/// 把合并窗口内攒下的开播或下播变成至多一条通知。`background`：主窗口隐藏或最小化。
+pub fn live_notice(
+    change: LiveChange,
+    items: &[LiveItem],
+    settings: &NotifySettings,
+    background: bool,
+) -> Option<Notice> {
+    let enabled = match change {
+        LiveChange::Start => settings.stream_start,
+        LiveChange::End => settings.stream_end,
+    };
+    if !settings.system || !enabled {
+        return None;
+    }
+    let mut names: Vec<&str> = Vec::new();
+    for item in items {
+        if item.change == change
+            && (background || item.notify_only)
+            && !names.contains(&item.who.as_str())
+        {
+            names.push(&item.who);
+        }
+    }
+    let (title, verb) = match change {
+        LiveChange::Start => ("开播提醒", "正在直播中"),
+        LiveChange::End => ("下播提醒", "直播已结束"),
+    };
+    let body = match names.as_slice() {
+        [] => return None,
+        [one] => format!("直播间状态更新：{one}{verb}"),
+        many => {
+            let listed = many[..many.len().min(MAX_LISTED)].join("、");
+            let more = if many.len() > MAX_LISTED { " 等" } else { "" };
+            let verb = match change {
+                LiveChange::Start => "正在直播",
+                LiveChange::End => "已下播",
+            };
+            format!("{} 个直播间{verb}：{listed}{more}", many.len())
+        }
+    };
+    Some(Notice {
+        title: title.into(),
+        body,
+    })
 }
 
 /// 用户拒绝通知授权后置位，本次运行不再请求。
@@ -152,200 +264,257 @@ pub fn show(app: &tauri::AppHandle, notice: &Notice) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tasks::{LiveState, Monitoring, RecordState, TaskConfig};
     use serde_json::json;
 
-    fn activity(kind: ActivityKind) -> ActivityNotice {
-        ActivityNotice {
-            task_id: Some(1),
+    fn snapshot(id: TaskId, display: DisplayStatus, reason: Option<&str>) -> TaskSnapshot {
+        let config: TaskConfig = serde_json::from_value(json!({
+            "url": "https://live.douyin.com/1",
+            "platform": "douyin",
+            "roomId": "1",
+            "anchorId": null,
+            "anchorName": "偏暖的少年",
+            "liveUrl": "https://live.douyin.com/1",
+            "quality": "OD",
+            "notifyOnly": false,
+            "note": "",
+            "createdAt": 0,
+        }))
+        .expect("task config");
+        TaskSnapshot {
+            id,
+            config,
+            platform_name: "抖音",
+            monitoring: Monitoring::Enabled,
+            live: LiveState::Unknown,
+            record: RecordState::Idle,
+            record_held: false,
+            display,
+            display_reason: reason.map(str::to_string),
+        }
+    }
+
+    fn activity(task_id: Option<TaskId>, kind: ActivityKind) -> ActivityEntry {
+        ActivityEntry {
+            id: 1,
+            at: 0,
+            task_id,
             anchor_name: "偏暖的少年".into(),
             kind,
-            message: "检测失败：需要登录".into(),
+            message: "检测到开播".into(),
+            detail: None,
         }
     }
 
-    fn task(display: DisplayStatus) -> TaskNotice {
-        TaskNotice {
-            platform_name: "抖音".into(),
-            display,
-            display_reason: None,
+    fn item(change: LiveChange, who: &str, notify_only: bool) -> LiveItem {
+        LiveItem {
+            change,
+            who: who.into(),
+            notify_only,
         }
     }
 
-    fn all_on() -> NotifySettings {
-        NotifySettings {
-            system: true,
-            stream_start: true,
-            stream_end: true,
-        }
-    }
+    const DEFAULTS: NotifySettings = NotifySettings {
+        system: true,
+        stream_start: true,
+        stream_end: false,
+    };
 
     #[test]
-    fn defaults_match_streamcap_settings() {
-        assert_eq!(
-            NotifySettings::from_settings(&Map::new()),
-            NotifySettings {
-                system: true,
-                stream_start: false,
-                stream_end: false,
-            }
-        );
+    fn defaults_follow_streamcap_semantics() {
+        assert_eq!(NotifySettings::from_settings(&Map::new()), DEFAULTS);
         let map = json!({
             "system_notification_enabled": false,
-            "stream_start_notification_enabled": true,
+            "stream_start_notification_enabled": false,
             "stream_end_notification_enabled": true,
         });
         assert_eq!(
             NotifySettings::from_settings(map.as_object().unwrap()),
             NotifySettings {
                 system: false,
-                stream_start: true,
+                stream_start: false,
                 stream_end: true,
             }
         );
     }
 
     #[test]
+    fn defaults_match_the_task_settings_defaults() {
+        let defaults = crate::tasks::settings::defaults(std::path::Path::new("videos"));
+        assert_eq!(NotifySettings::from_settings(&defaults), DEFAULTS);
+    }
+
+    #[test]
     fn live_start_names_anchor_and_platform() {
-        let notice = decide(
-            &activity(ActivityKind::LiveStart),
-            Some(&task(DisplayStatus::Checking)),
-            &all_on(),
-        )
-        .unwrap();
+        let mut tracker = Tracker::default();
+        tracker.on_updated(&snapshot(1, DisplayStatus::Checking, None));
+        let live = tracker
+            .on_activity(&activity(Some(1), ActivityKind::LiveStart))
+            .unwrap();
+        assert_eq!(live, item(LiveChange::Start, "偏暖的少年（抖音）", false));
+        let notice = live_notice(LiveChange::Start, &[live], &DEFAULTS, true).unwrap();
         assert_eq!(notice.title, "开播提醒");
         assert_eq!(notice.body, "直播间状态更新：偏暖的少年（抖音）正在直播中");
     }
 
     #[test]
-    fn live_end_names_anchor_and_platform() {
-        let notice = decide(
-            &activity(ActivityKind::LiveEnd),
-            Some(&task(DisplayStatus::Waiting)),
-            &all_on(),
-        )
-        .unwrap();
-        assert_eq!(notice.title, "下播提醒");
-        assert_eq!(notice.body, "直播间状态更新：偏暖的少年（抖音）直播已结束");
+    fn regular_tasks_notify_only_while_the_window_is_in_the_background() {
+        let items = [item(LiveChange::Start, "A（抖音）", false)];
+        assert!(live_notice(LiveChange::Start, &items, &DEFAULTS, false).is_none());
+        assert!(live_notice(LiveChange::Start, &items, &DEFAULTS, true).is_some());
     }
 
     #[test]
-    fn live_start_and_end_follow_their_own_switches() {
-        let settings = NotifySettings {
-            system: true,
-            stream_start: false,
+    fn notify_only_tasks_always_notify_on_live_start() {
+        let items = [item(LiveChange::Start, "A（抖音）", true)];
+        assert!(live_notice(LiveChange::Start, &items, &DEFAULTS, false).is_some());
+    }
+
+    #[test]
+    fn live_switches_and_master_switch_apply() {
+        let start = [item(LiveChange::Start, "A", true)];
+        let end = [item(LiveChange::End, "A", true)];
+        // 下播默认关。
+        assert!(live_notice(LiveChange::End, &end, &DEFAULTS, true).is_none());
+        let both = NotifySettings {
             stream_end: true,
+            ..DEFAULTS
         };
-        let waiting = task(DisplayStatus::Waiting);
-        assert!(
-            decide(
-                &activity(ActivityKind::LiveStart),
-                Some(&waiting),
-                &settings
-            )
-            .is_none()
-        );
-        assert!(decide(&activity(ActivityKind::LiveEnd), Some(&waiting), &settings).is_some());
-        let settings = NotifySettings {
-            stream_start: true,
-            stream_end: false,
-            ..settings
-        };
-        assert!(
-            decide(
-                &activity(ActivityKind::LiveStart),
-                Some(&waiting),
-                &settings
-            )
-            .is_some()
-        );
-        assert!(decide(&activity(ActivityKind::LiveEnd), Some(&waiting), &settings).is_none());
-    }
-
-    #[test]
-    fn master_switch_silences_everything() {
-        let settings = NotifySettings {
-            system: false,
-            ..all_on()
-        };
-        let needs_action = task(DisplayStatus::NeedsAction);
-        for kind in [
-            ActivityKind::LiveStart,
-            ActivityKind::LiveEnd,
-            ActivityKind::Failure,
-        ] {
-            assert!(decide(&activity(kind), Some(&needs_action), &settings).is_none());
-        }
-    }
-
-    #[test]
-    fn failure_notifies_only_when_the_task_needs_action() {
-        let settings = NotifySettings {
-            system: true,
+        let notice = live_notice(LiveChange::End, &end, &both, true).unwrap();
+        assert_eq!(notice.title, "下播提醒");
+        assert_eq!(notice.body, "直播间状态更新：A直播已结束");
+        let no_start = NotifySettings {
             stream_start: false,
-            stream_end: false,
+            ..both
         };
-        let failure = activity(ActivityKind::Failure);
-        let notice = decide(&failure, Some(&task(DisplayStatus::NeedsAction)), &settings).unwrap();
+        assert!(live_notice(LiveChange::Start, &start, &no_start, true).is_none());
+        let silent = NotifySettings {
+            system: false,
+            ..both
+        };
+        assert!(live_notice(LiveChange::Start, &start, &silent, true).is_none());
+        assert!(live_notice(LiveChange::End, &end, &silent, true).is_none());
+        assert!(!allow_needs_action(&silent));
+        assert!(allow_needs_action(&DEFAULTS));
+    }
+
+    #[test]
+    fn several_live_starts_merge_into_one_notice() {
+        let items = [
+            item(LiveChange::Start, "A（抖音）", false),
+            item(LiveChange::Start, "B（快手直播）", false),
+            item(LiveChange::Start, "A（抖音）", false),
+            item(LiveChange::End, "C（抖音）", false),
+            item(LiveChange::Start, "D（抖音）", false),
+        ];
+        let notice = live_notice(LiveChange::Start, &items, &DEFAULTS, true).unwrap();
+        assert_eq!(
+            notice.body,
+            "3 个直播间正在直播：A（抖音）、B（快手直播）、D（抖音）"
+        );
+        // 窗口在前台时只列出「仅通知」的任务。
+        let mixed = [
+            item(LiveChange::Start, "A", false),
+            item(LiveChange::Start, "B", true),
+        ];
+        let notice = live_notice(LiveChange::Start, &mixed, &DEFAULTS, false).unwrap();
+        assert_eq!(notice.body, "直播间状态更新：B正在直播中");
+    }
+
+    #[test]
+    fn long_merged_lists_are_truncated() {
+        let items: Vec<_> = (1..=7)
+            .map(|n| item(LiveChange::Start, &format!("主播{n}"), false))
+            .collect();
+        let notice = live_notice(LiveChange::Start, &items, &DEFAULTS, true).unwrap();
+        assert_eq!(
+            notice.body,
+            "7 个直播间正在直播：主播1、主播2、主播3、主播4、主播5 等"
+        );
+    }
+
+    #[test]
+    fn needs_action_notifies_once_per_episode() {
+        let mut tracker = Tracker::default();
+        assert!(
+            tracker
+                .on_updated(&snapshot(1, DisplayStatus::Waiting, None))
+                .is_none()
+        );
+        let notice = tracker
+            .on_updated(&snapshot(1, DisplayStatus::NeedsAction, Some("需要登录")))
+            .unwrap();
         assert_eq!(notice.title, "录播宝 · 需处理");
-        assert_eq!(notice.body, "偏暖的少年（抖音）：检测失败：需要登录");
-        for display in [
-            DisplayStatus::Retrying,
-            DisplayStatus::Waiting,
-            DisplayStatus::Recording,
-            DisplayStatus::Paused,
-        ] {
-            assert!(decide(&failure, Some(&task(display)), &settings).is_none());
-        }
-        assert!(decide(&failure, None, &settings).is_none());
+        assert_eq!(notice.body, "偏暖的少年（抖音）：需要登录");
+        // 重新检测（检测中）后仍需处理：不重复。
+        assert!(
+            tracker
+                .on_updated(&snapshot(1, DisplayStatus::Checking, None))
+                .is_none()
+        );
+        assert!(
+            tracker
+                .on_updated(&snapshot(1, DisplayStatus::NeedsAction, Some("需要登录")))
+                .is_none()
+        );
+        // 恢复正常后再次需处理：再发一次。
+        tracker.on_updated(&snapshot(1, DisplayStatus::Waiting, None));
+        assert!(
+            tracker
+                .on_updated(&snapshot(1, DisplayStatus::NeedsAction, None))
+                .is_some()
+        );
     }
 
     #[test]
-    fn failure_prefers_the_current_display_reason() {
-        let mut needs_action = task(DisplayStatus::NeedsAction);
-        needs_action.display_reason = Some("磁盘空间不足：剩余 0.8 GB".into());
-        let notice = decide(
-            &activity(ActivityKind::Failure),
-            Some(&needs_action),
-            &all_on(),
-        )
-        .unwrap();
-        assert_eq!(notice.body, "偏暖的少年（抖音）：磁盘空间不足：剩余 0.8 GB");
+    fn retrying_then_needs_action_still_notifies() {
+        // 连续失败先可重试、后需处理：动态已去重不再写，通知仍要发。
+        let mut tracker = Tracker::default();
+        assert!(
+            tracker
+                .on_updated(&snapshot(1, DisplayStatus::Retrying, Some("网络错误")))
+                .is_none()
+        );
+        assert!(
+            tracker
+                .on_updated(&snapshot(1, DisplayStatus::Checking, None))
+                .is_none()
+        );
+        let notice = tracker
+            .on_updated(&snapshot(1, DisplayStatus::NeedsAction, Some("风控")))
+            .unwrap();
+        assert_eq!(notice.body, "偏暖的少年（抖音）：风控");
     }
 
     #[test]
-    fn other_activity_kinds_do_not_notify() {
-        let recording = task(DisplayStatus::Recording);
+    fn removed_tasks_are_forgotten() {
+        let mut tracker = Tracker::default();
+        tracker.on_updated(&snapshot(1, DisplayStatus::NeedsAction, None));
+        tracker.on_removed(&[1]);
+        assert!(
+            tracker
+                .on_updated(&snapshot(1, DisplayStatus::NeedsAction, None))
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn other_activity_is_ignored_and_unknown_tasks_fall_back() {
+        let tracker = Tracker::default();
         for kind in [
             ActivityKind::RecordStart,
             ActivityKind::RecordEnd,
+            ActivityKind::Failure,
             ActivityKind::Warning,
             ActivityKind::UserAction,
         ] {
-            assert!(decide(&activity(kind), Some(&recording), &all_on()).is_none());
+            assert!(tracker.on_activity(&activity(Some(1), kind)).is_none());
         }
-    }
-
-    #[test]
-    fn missing_anchor_name_and_task_fall_back() {
-        let mut live = activity(ActivityKind::LiveStart);
-        live.anchor_name = "  ".into();
-        let notice = decide(&live, None, &all_on()).unwrap();
-        assert_eq!(notice.body, "直播间状态更新：直播间正在直播中");
-    }
-
-    #[test]
-    fn parses_the_activity_event_payload() {
-        let payload = json!({
-            "id": 7,
-            "at": 1_700_000_000_000_i64,
-            "taskId": 3,
-            "anchorName": "主播",
-            "kind": "live_start",
-            "message": "检测到开播",
-            "detail": null,
-        });
-        let notice: ActivityNotice = serde_json::from_value(payload).unwrap();
-        assert_eq!(notice.task_id, Some(3));
-        assert_eq!(notice.kind, ActivityKind::LiveStart);
+        let mut entry = activity(None, ActivityKind::LiveStart);
+        entry.anchor_name = " ".into();
+        assert_eq!(
+            tracker.on_activity(&entry),
+            Some(item(LiveChange::Start, "直播间", false))
+        );
     }
 }

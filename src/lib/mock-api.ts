@@ -1,5 +1,6 @@
 // 浏览器假数据（npm run dev，不在 Tauri 里时使用），方便调界面。
-// 退出确认：控制台调用 window.__lubobaoMock.requestQuit() 模拟托盘「退出」。
+// 桌面外壳：控制台调用 window.__lubobaoMock.requestQuit() 模拟托盘「退出」，requestClose()
+// 模拟关闭主窗口（按 close_window_action），requestPauseAll() 模拟托盘「全部暂停监控」。
 // 显示状态的推导复刻 src-tauri/src/tasks/model.rs 的 derive_display，只用于假数据。
 //
 // 数据
@@ -55,6 +56,7 @@ import type {
   UsageSnapshot,
   LiveState,
   Monitoring,
+  PauseAllPrompt,
   Platform,
   QuitState,
   RecordState,
@@ -317,8 +319,9 @@ const defaultSettings: Settings = {
   custom_script_command: "",
   platform_cookies: {},
   system_notification_enabled: true,
-  stream_start_notification_enabled: false,
+  stream_start_notification_enabled: true,
   stream_end_notification_enabled: false,
+  close_window_action: "ask",
 };
 
 /** 与 src-tauri/src/tasks/settings.rs 的 ENUM_SETTINGS 一致。 */
@@ -326,6 +329,7 @@ const enumSettings: Partial<Record<keyof Settings, readonly string[]>> = {
   record_quality: ["OD", "UHD", "HD", "SD", "LD"],
   video_format: ["TS", "MP4", "FLV", "MKV", "MOV", "NUT", "WAV", "MP3", "WMA", "M4A", "AAC"],
   default_live_source: ["FLV", "HLS"],
+  close_window_action: ["ask", "tray", "quit"],
 };
 
 /** 复刻 settings.rs 的 validate：类型一致、数值为正、整数项必须为整数、枚举项取合法值。 */
@@ -707,6 +711,8 @@ export function createMockBackend(): Backend {
   const activityChannel = new Channel<ActivityEntry>();
   const schedulerChannel = new Channel<SchedulerStatus>();
   const quitChannel = new Channel<QuitState>();
+  const closeChannel = new Channel<void>();
+  const pauseAllChannel = new Channel<PauseAllPrompt>();
 
   // 假调度：每 180 秒一轮检测。
   const MOCK_INTERVAL_MS = 180_000;
@@ -737,6 +743,25 @@ export function createMockBackend(): Backend {
     } else {
       console.info("[mock] 没有录制，直接退出");
     }
+  }
+
+  function performClose(action: "tray" | "quit") {
+    if (action === "tray") console.info("[mock] 隐藏到托盘");
+    else requestQuit();
+  }
+  function requestClose() {
+    const action = settings.close_window_action;
+    if (action === "ask") closeChannel.emit();
+    else performClose(action);
+  }
+  function pauseAll() {
+    const ids = tasks.filter((task) => task.monitoring === "enabled").map((task) => task.id);
+    void backend.setMonitoring(ids, false);
+  }
+  function requestPauseAll() {
+    const recording = schedulerStatus().recording;
+    if (recording > 0) pauseAllChannel.emit({ recording });
+    else pauseAll();
   }
 
   let ffmpeg: FfmpegStatus = { state: "checking" };
@@ -1256,6 +1281,15 @@ export function createMockBackend(): Backend {
       return quit;
     },
     onQuitState: (handler) => quitChannel.subscribe(handler),
+    async resolveClose(choice, remember) {
+      if (remember) settings = { ...settings, close_window_action: choice };
+      performClose(choice);
+    },
+    async confirmPauseAll() {
+      pauseAll();
+    },
+    onClosePrompt: (handler) => closeChannel.subscribe(handler),
+    onPauseAllPrompt: (handler) => pauseAllChannel.subscribe(handler),
   };
 
   (window as unknown as { __lubobaoMock: unknown }).__lubobaoMock = {
@@ -1266,6 +1300,8 @@ export function createMockBackend(): Backend {
     },
     simulateDownload,
     requestQuit,
+    requestClose,
+    requestPauseAll,
     goLive,
     endLive,
     setStopSupported: (value: boolean) => {

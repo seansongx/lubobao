@@ -21,10 +21,11 @@ fn default_save_dir(app: &tauri::AppHandle, data_dir: &Path) -> PathBuf {
         .unwrap_or_else(|_| data_dir.join("recordings"))
 }
 
-/// 把任务变化转成 `task-updated`、`task-removed`、`activity` 事件。
+/// 把任务变化转成 `task-updated`、`task-removed`、`activity` 事件，并交给桌面外壳（通知）。
 fn event_listener(app: &tauri::AppHandle) -> Listener {
     let handle = app.clone();
     Box::new(move |event| {
+        crate::desktop::on_task_event(&handle, &event);
         let _ = match event {
             TaskEvent::Updated(snapshot) => handle.emit(TASK_UPDATED_EVENT, *snapshot),
             TaskEvent::Removed(ids) => handle.emit(TASK_REMOVED_EVENT, json!({ "ids": ids })),

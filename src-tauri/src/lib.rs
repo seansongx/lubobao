@@ -17,7 +17,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
-        // 关闭主窗口只隐藏到托盘，录制继续。
+        // 关闭主窗口：按设置隐藏到托盘（录制继续）、退出或询问。
         .on_window_event(desktop::on_window_event)
         .setup(|app| {
             ffmpeg::tauri_glue::init(app.handle())?;
@@ -45,6 +45,8 @@ pub fn run() {
             desktop::quit::confirm_quit,
             desktop::quit::cancel_quit,
             desktop::debug_desktop_action,
+            desktop::close::resolve_close,
+            desktop::tray::confirm_pause_all,
             library::commands::list_library,
             library::commands::get_disk_space,
             library::commands::get_library_usage,
@@ -54,7 +56,7 @@ pub fn run() {
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        // 退出前先确认（有录制时），再停止调度和所有录制，等文件收尾；macOS 点 Dock 图标
-        // 时重新显示窗口。
+        // 退出前停止调度和所有录制，等文件收尾（确认在退出入口处理）；系统直接结束时同步兜底；
+        // macOS 点 Dock 图标时重新显示窗口。
         .run(|app, event| desktop::on_run_event(app, &event));
 }

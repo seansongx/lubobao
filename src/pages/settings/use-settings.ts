@@ -61,6 +61,7 @@ const fieldLabels: Partial<Record<SettingKey, string>> = {
   system_notification_enabled: "系统通知",
   stream_start_notification_enabled: "开播通知",
   stream_end_notification_enabled: "下播通知",
+  close_window_action: "关闭窗口时",
 };
 
 /** 后端校验信息形如「设置项 loop_time_seconds 的值无效：0」，从中找出字段名。 */

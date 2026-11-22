@@ -7,7 +7,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use serde::{Deserialize, Serialize};
 use tauri::Manager;
 
-use super::notify::{self, Notice};
+use super::notify::{self, Notice, NotifySettings};
+use crate::tasks::TaskManager;
 
 const STATE_FILE: &str = "desktop.json";
 
@@ -34,9 +35,13 @@ fn read_flags(path: &PathBuf) -> DesktopFlags {
         .unwrap_or_default()
 }
 
-/// 提示「录播宝仍在后台运行」，整个安装只提示一次。
+/// 提示「录播宝仍在后台运行」，整个安装只提示一次。只在隐藏到托盘时调用，受系统通知总开关
+/// 控制；总开关关闭时不算提示过，打开后第一次隐藏再提示。
 pub fn show_once(app: &tauri::AppHandle) {
-    if HANDLED.swap(true, Ordering::SeqCst) {
+    let enabled = app
+        .try_state::<std::sync::Arc<TaskManager>>()
+        .is_some_and(|tasks| NotifySettings::from_settings(&tasks.settings()).system);
+    if !enabled || HANDLED.swap(true, Ordering::SeqCst) {
         return;
     }
     let Some(path) = state_path(app) else {
