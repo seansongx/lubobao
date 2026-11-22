@@ -62,16 +62,41 @@ pub fn on_exit_requested(app: &tauri::AppHandle, code: Option<i32>, api: &tauri:
 /// 系统直接结束进程时的收尾时限，短于注销、关机的宽限时间（Windows 约 5 秒起）。
 const EXIT_FALLBACK_LIMIT: Duration = Duration::from_secs(4);
 
+/// 系统直接结束进程时该怎么收尾。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExitFallback {
+    /// 收尾还没开始：限时同步收尾。
+    Shutdown,
+    /// 已经开始、还没完成：限时等它完成。
+    WaitForShutdown,
+    /// 已经完成：什么都不做。
+    Done,
+}
+
+/// `started`：这次之前收尾是否已经开始（`EXIT_STARTED` 置位前的值）；`ready`：是否已完成。
+fn exit_fallback(started: bool, ready: bool) -> ExitFallback {
+    match (started, ready) {
+        (_, true) => ExitFallback::Done,
+        (true, false) => ExitFallback::WaitForShutdown,
+        (false, false) => ExitFallback::Shutdown,
+    }
+}
+
 /// 处理 `RunEvent::Exit`：没经过 [`on_exit_requested`] 的退出（macOS Dock 菜单的「退出」、
-/// 注销或关机）在这里同步收尾，最多 [`EXIT_FALLBACK_LIMIT`]。收尾已经开始时只等它完成，
-/// 已经完成时直接返回，不会重复执行。
+/// Windows 注销或关机）在这里同步收尾，最多 [`EXIT_FALLBACK_LIMIT`]。收尾已经开始时只等它
+/// 完成，已经完成时直接返回，不会重复执行。Linux 的 SIGTERM 由桌面层转成 `app.exit(0)`。
 pub fn on_exit(app: &tauri::AppHandle) {
     let deadline = Instant::now() + EXIT_FALLBACK_LIMIT;
-    if EXIT_STARTED.swap(true, Ordering::SeqCst) {
-        while !EXIT_READY.load(Ordering::SeqCst) && Instant::now() < deadline {
-            std::thread::sleep(Duration::from_millis(50));
+    let started = EXIT_STARTED.swap(true, Ordering::SeqCst);
+    match exit_fallback(started, EXIT_READY.load(Ordering::SeqCst)) {
+        ExitFallback::Done => return,
+        ExitFallback::WaitForShutdown => {
+            while !EXIT_READY.load(Ordering::SeqCst) && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            return;
         }
-        return;
+        ExitFallback::Shutdown => {}
     }
     let scheduler = app
         .try_state::<Arc<Scheduler>>()
@@ -98,4 +123,18 @@ pub fn on_exit(app: &tauri::AppHandle) {
 #[tauri::command]
 pub fn get_scheduler_status(scheduler: tauri::State<'_, Arc<Scheduler>>) -> SchedulerStatus {
     scheduler.status()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn exit_fallback_shuts_down_only_once() {
+        assert_eq!(exit_fallback(false, false), ExitFallback::Shutdown);
+        assert_eq!(exit_fallback(true, false), ExitFallback::WaitForShutdown);
+        assert_eq!(exit_fallback(true, true), ExitFallback::Done);
+        // 已完成时不管是否记为开始，都不再执行。
+        assert_eq!(exit_fallback(false, true), ExitFallback::Done);
+    }
 }

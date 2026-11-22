@@ -44,6 +44,8 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Securit
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"
+# 桌面层监听 SIGTERM（注销、关机），与通用依赖的 tokio 合并特性。
+tokio = { version = "1", features = ["signal"] }
 
 [dev-dependencies]
 tempfile = "3"

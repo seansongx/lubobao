@@ -519,13 +519,13 @@ export function NotifySection({ ctx }: SectionProps) {
   return (
     <SettingsCard
       title="托盘与通知"
-      description="开播时如果窗口在后台就发系统通知；「仅通知」的直播间总是提醒；需要处理的问题也会提醒"
+      description="开播时如果窗口在后台就发系统通知；「仅通知」的直播间总会提醒；需要处理的问题也会提醒"
       onReset={() => void ctx.reset(groupKeys.notify)}
     >
       <SelectField
         label="关闭窗口时"
         description="最小化到托盘后继续在后台检测和录制；托盘不可用时直接退出"
-        value={settings.close_window_action}
+        value={closeWindowOptions.some((option) => option.value === settings.close_window_action) ? settings.close_window_action : "ask"}
         options={closeWindowOptions}
         error={ctx.errors.close_window_action}
         onChange={(value) => bind(ctx, "close_window_action").save(value as Settings["close_window_action"])}
@@ -539,7 +539,7 @@ export function NotifySection({ ctx }: SectionProps) {
       />
       <SwitchField
         label="开播通知"
-        description="窗口在后台时，主播开播发系统通知"
+        description="普通直播间开播时通知（窗口在后台时）；「仅通知」的直播间总会提醒"
         checked={settings.stream_start_notification_enabled}
         disabled={off}
         error={ctx.errors.stream_start_notification_enabled}

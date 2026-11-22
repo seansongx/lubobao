@@ -3,7 +3,9 @@
 //! 规则与 StreamCap 对齐（见 `docs/feature-map.md` 的有意差异）：
 //! - 总开关 `system_notification_enabled`；
 //! - 开播（`stream_start_notification_enabled`，默认开）、下播（`stream_end_notification_enabled`，
-//!   默认关）：普通任务只在主窗口隐藏或最小化时发；「仅通知」任务不论窗口状态都发；
+//!   默认关）：普通任务只在主窗口隐藏或最小化时发；
+//! - 「仅通知」任务开播：只看总开关，不受开播开关和窗口状态影响（否则关掉开播通知后，这类
+//!   任务既不录也不提醒）；下播仍看下播开关，但不论窗口状态；
 //! - 任务进入「需处理」时发一次，不论窗口状态；恢复正常后再次进入才会再发。
 //!
 //! 文案参照 StreamCap 的 `push_content`（「直播间状态更新：[room_name] 正在直播中」），
@@ -179,19 +181,21 @@ pub fn live_notice(
     settings: &NotifySettings,
     background: bool,
 ) -> Option<Notice> {
-    let enabled = match change {
+    if !settings.system {
+        return None;
+    }
+    let switch = match change {
         LiveChange::Start => settings.stream_start,
         LiveChange::End => settings.stream_end,
     };
-    if !settings.system || !enabled {
-        return None;
-    }
+    let wanted = |item: &LiveItem| match (change, item.notify_only) {
+        (LiveChange::Start, true) => true,
+        (LiveChange::End, true) => switch,
+        (_, false) => switch && background,
+    };
     let mut names: Vec<&str> = Vec::new();
     for item in items {
-        if item.change == change
-            && (background || item.notify_only)
-            && !names.contains(&item.who.as_str())
-        {
+        if item.change == change && wanted(item) && !names.contains(&item.who.as_str()) {
             names.push(&item.who);
         }
     }
@@ -371,9 +375,36 @@ mod tests {
     }
 
     #[test]
+    fn notify_only_live_start_ignores_the_start_switch_but_not_the_master_switch() {
+        let items = [
+            item(LiveChange::Start, "仅通知", true),
+            item(LiveChange::Start, "普通", false),
+        ];
+        let no_start = NotifySettings {
+            stream_start: false,
+            ..DEFAULTS
+        };
+        let notice = live_notice(LiveChange::Start, &items, &no_start, true).unwrap();
+        assert_eq!(notice.body, "直播间状态更新：仅通知正在直播中");
+        let silent = NotifySettings {
+            system: false,
+            ..DEFAULTS
+        };
+        assert!(live_notice(LiveChange::Start, &items, &silent, true).is_none());
+        // 下播仍看下播开关（默认关），开启后不论窗口状态。
+        let end = [item(LiveChange::End, "仅通知", true)];
+        assert!(live_notice(LiveChange::End, &end, &DEFAULTS, false).is_none());
+        let with_end = NotifySettings {
+            stream_end: true,
+            ..DEFAULTS
+        };
+        assert!(live_notice(LiveChange::End, &end, &with_end, false).is_some());
+    }
+
+    #[test]
     fn live_switches_and_master_switch_apply() {
-        let start = [item(LiveChange::Start, "A", true)];
-        let end = [item(LiveChange::End, "A", true)];
+        let start = [item(LiveChange::Start, "A", false)];
+        let end = [item(LiveChange::End, "A", false)];
         // 下播默认关。
         assert!(live_notice(LiveChange::End, &end, &DEFAULTS, true).is_none());
         let both = NotifySettings {

@@ -20,10 +20,15 @@ pub enum CloseAction {
     Ask,
     Tray,
     Quit,
+    /// 退出确认或收尾期间：只把窗口显示出来，让用户看到对话框。
+    ShowWindow,
 }
 
-/// 关窗时怎么做。设置缺失或无法识别时按 `ask`。
-pub fn close_action(setting: Option<&str>, tray_available: bool) -> CloseAction {
+/// 关窗时怎么做。`quitting`：正在确认退出或收尾。设置缺失或无法识别时按 `ask`。
+pub fn close_action(setting: Option<&str>, tray_available: bool, quitting: bool) -> CloseAction {
+    if quitting {
+        return CloseAction::ShowWindow;
+    }
     if !tray_available {
         return CloseAction::Quit;
     }
@@ -45,15 +50,19 @@ fn setting(app: &tauri::AppHandle) -> Option<String> {
 
 /// 主窗口的 `CloseRequested`（已阻止关闭，主线程）。
 pub fn on_close_requested(app: &tauri::AppHandle) {
-    let action = close_action(setting(app).as_deref(), tray::available(app));
+    let quitting = quit::phase(app) != quit::QuitPhase::Idle;
+    let action = close_action(setting(app).as_deref(), tray::available(app), quitting);
     perform(app, action);
 }
 
 fn perform(app: &tauri::AppHandle, action: CloseAction) {
     match action {
         CloseAction::Ask => {
+            // 窗口可能是最小化后从任务栏关闭的，先显示出来，对话框才看得见。
+            super::show_main_window(app);
             let _ = app.emit(CLOSE_PROMPT_EVENT, ());
         }
+        CloseAction::ShowWindow => super::show_main_window(app),
         CloseAction::Tray => {
             if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
                 let _ = window.hide();
@@ -65,7 +74,7 @@ fn perform(app: &tauri::AppHandle, action: CloseAction) {
 }
 
 /// 关窗三选一的结果。`choice` 为 `tray` 或 `quit`（取消不调用）；`remember` 时写入设置，
-/// 以后不再询问，可在设置页改回。
+/// 以后不再询问，可在设置页改回。保存失败时仍执行所选操作，再以错误返回保存失败的原因。
 #[tauri::command]
 pub fn resolve_close(app: tauri::AppHandle, choice: String, remember: bool) -> Result<(), String> {
     let action = match choice.as_str() {
@@ -73,12 +82,22 @@ pub fn resolve_close(app: tauri::AppHandle, choice: String, remember: bool) -> R
         "quit" => CloseAction::Quit,
         other => return Err(format!("未知的选择：{other}")),
     };
-    if remember && let Some(tasks) = app.try_state::<Arc<TaskManager>>() {
-        let mut values = Map::new();
-        values.insert(CLOSE_WINDOW_SETTING.into(), Value::String(choice));
-        tasks
-            .update_settings(values)
-            .map_err(|error| error.message)?;
+    let mut saved = Ok(());
+    if remember {
+        saved = match app.try_state::<Arc<TaskManager>>() {
+            Some(tasks) => {
+                let mut values = Map::new();
+                values.insert(CLOSE_WINDOW_SETTING.into(), Value::String(choice));
+                tasks
+                    .update_settings(values)
+                    .map(|_| ())
+                    .map_err(|error| error.message)
+            }
+            None => Err("任务数据没有打开".into()),
+        };
+        if let Err(message) = &saved {
+            eprintln!("录播宝没有记住关窗选择：{message}");
+        }
     }
     // 托盘在选择期间不会消失，但仍按当前是否可用决定。
     let action = match action {
@@ -86,7 +105,7 @@ pub fn resolve_close(app: tauri::AppHandle, choice: String, remember: bool) -> R
         action => action,
     };
     perform(&app, action);
-    Ok(())
+    saved
 }
 
 #[cfg(test)]
@@ -95,21 +114,33 @@ mod tests {
 
     #[test]
     fn follows_the_remembered_choice() {
-        assert_eq!(close_action(Some("tray"), true), CloseAction::Tray);
-        assert_eq!(close_action(Some("quit"), true), CloseAction::Quit);
-        assert_eq!(close_action(Some("ask"), true), CloseAction::Ask);
+        assert_eq!(close_action(Some("tray"), true, false), CloseAction::Tray);
+        assert_eq!(close_action(Some("quit"), true, false), CloseAction::Quit);
+        assert_eq!(close_action(Some("ask"), true, false), CloseAction::Ask);
     }
 
     #[test]
     fn asks_when_the_setting_is_missing_or_unknown() {
-        assert_eq!(close_action(None, true), CloseAction::Ask);
-        assert_eq!(close_action(Some("minimize"), true), CloseAction::Ask);
+        assert_eq!(close_action(None, true, false), CloseAction::Ask);
+        assert_eq!(
+            close_action(Some("minimize"), true, false),
+            CloseAction::Ask
+        );
     }
 
     #[test]
     fn quits_when_there_is_no_tray() {
         for setting in [None, Some("ask"), Some("tray"), Some("quit")] {
-            assert_eq!(close_action(setting, false), CloseAction::Quit);
+            assert_eq!(close_action(setting, false, false), CloseAction::Quit);
+        }
+    }
+
+    #[test]
+    fn only_shows_the_window_while_quitting() {
+        for setting in [None, Some("ask"), Some("tray"), Some("quit")] {
+            for tray in [true, false] {
+                assert_eq!(close_action(setting, tray, true), CloseAction::ShowWindow);
+            }
         }
     }
 
