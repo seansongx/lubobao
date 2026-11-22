@@ -33,8 +33,12 @@ export default defineConfig(() => ({
         }
       : undefined,
     watch: {
-      // 3. tell Vite to ignore watching `src-tauri`
-      ignored: ["**/src-tauri/**"],
+      // 3. tell Vite to ignore watching `src-tauri`, and the session worktrees under `.claude/`
+      ignored: ["**/src-tauri/**", "**/.claude/**"],
     },
+  },
+  // Only scan the app entry for dependencies, not HTML files in docs/, website/ or worktrees.
+  optimizeDeps: {
+    entries: ["index.html"],
   },
 }));
