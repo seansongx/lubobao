@@ -1,4 +1,4 @@
-//! 动态记录：开播、下播、开始录制、录制结束、失败和用户操作。
+//! 动态记录：开播、下播、开始录制、录制结束、转为 MP4、失败和用户操作。
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -16,6 +16,8 @@ pub enum ActivityKind {
     /// 不影响录制、但用户应当知道的问题，例如代理协议不支持而改为直连。
     Warning,
     UserAction,
+    /// 录后转 MP4：开始和完成。转换失败记为 `Failure`，退出时中止记为 `Warning`。
+    Convert,
 }
 
 impl ActivityKind {
@@ -28,6 +30,7 @@ impl ActivityKind {
             ActivityKind::Failure => "failure",
             ActivityKind::Warning => "warning",
             ActivityKind::UserAction => "user_action",
+            ActivityKind::Convert => "convert",
         }
     }
 
@@ -40,6 +43,7 @@ impl ActivityKind {
             ActivityKind::Failure,
             ActivityKind::Warning,
             ActivityKind::UserAction,
+            ActivityKind::Convert,
         ]
         .into_iter()
         .find(|kind| kind.as_str() == value)

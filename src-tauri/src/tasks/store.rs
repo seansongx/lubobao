@@ -351,7 +351,16 @@ impl Db<'_> {
         }
         if !query.kinds.is_empty() {
             let marks = vec!["?"; query.kinds.len()].join(", ");
-            sql.push_str(&format!(" AND kind IN ({marks})"));
+            if query.kinds.contains(&ActivityKind::Convert) {
+                // 「转为 MP4」也包括转换的失败和提醒（detail.kind 为 convert），让一次转换的
+                // 结局在这个筛选下看得到；它们仍分别出现在「失败」「提醒」里。
+                sql.push_str(&format!(
+                    " AND (kind IN ({marks}) OR (json_valid(detail) \
+                     AND json_extract(detail, '$.kind') = 'convert'))"
+                ));
+            } else {
+                sql.push_str(&format!(" AND kind IN ({marks})"));
+            }
             args.extend(
                 query
                     .kinds

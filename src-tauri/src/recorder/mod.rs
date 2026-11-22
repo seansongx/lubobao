@@ -27,6 +27,7 @@
 pub mod command;
 pub mod naming;
 pub mod outcome;
+pub mod postprocess;
 pub mod process_guard;
 pub mod progress;
 

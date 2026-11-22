@@ -1,4 +1,4 @@
-// 动态：按时间倒序列出开播、下播、录制、失败和用户操作，向下滚动分页加载，收到 activity 事件实时插入。
+// 动态：按时间倒序列出开播、下播、录制、转为 MP4、失败和用户操作，向下滚动分页加载，收到 activity 事件实时插入。
 // 数据来自 Rust TaskManager::list_activity（src-tauri/src/tasks/activity.rs）。
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -7,6 +7,7 @@ import {
   CircleAlert,
   CircleDot,
   CircleStop,
+  FileVideo,
   Loader2,
   MousePointerClick,
   Radio,
@@ -43,6 +44,7 @@ const KIND_FILTERS: { value: ActivityKind; label: string }[] = [
   { value: "live_end", label: "下播" },
   { value: "record_start", label: "开始录制" },
   { value: "record_end", label: "录制结束" },
+  { value: "convert", label: "转为 MP4" },
   { value: "failure", label: "失败" },
   { value: "warning", label: "提醒" },
   { value: "user_action", label: "用户操作" },
@@ -88,10 +90,14 @@ function visual(entry: ActivityEntry): { icon: LucideIcon; tone: Tone; label: st
       return { icon: Square, tone: "muted", label: "录制结束" };
     case "failure": {
       const kind = str(entry.detail?.kind);
+      if (kind === "convert") return { icon: AlertTriangle, tone: "failure", label: "转为 MP4 失败" };
       return kind && RETRYABLE.has(kind)
         ? { icon: RotateCw, tone: "retrying", label: "检测失败，重试中" }
         : { icon: AlertTriangle, tone: "failure", label: "失败" };
     }
+    // 录后转 MP4 的开始和完成；转换失败记为 failure（detail.kind 为 convert）。
+    case "convert":
+      return { icon: FileVideo, tone: "notify", label: "转为 MP4" };
     case "user_action":
       return { icon: MousePointerClick, tone: "muted", label: "用户操作" };
     // 录制仍在进行，只是有需要留意的情况（例如 SOCKS 代理无法用于录制，已直连）。
@@ -113,6 +119,7 @@ function describe(entry: ActivityEntry): string | null {
   const quality = str(detail.quality);
   if (quality) parts.push(QUALITY_LABEL[quality] ?? quality);
   if (typeof detail.durationMs === "number") parts.push(`时长 ${formatDuration(detail.durationMs)}`);
+  if (typeof detail.durationSecs === "number") parts.push(`时长 ${formatDuration(detail.durationSecs * 1000)}`);
   const filePath = str(detail.filePath);
   if (filePath) parts.push(basename(filePath));
   const failureKind = entry.kind === "failure" ? str(detail.kind) : null;

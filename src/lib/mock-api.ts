@@ -505,6 +505,14 @@ function seedActivity(tasks: TaskSnapshot[], now: number): { at: number; seed: A
         message: "录制结束",
         detail: { filePath, durationMs: 110 * minute },
       });
+      const mp4 = filePath.replace(/\.ts$/, ".mp4");
+      push(start - 112, { task, kind: "convert", message: "开始转为 MP4", detail: { filePath, targetPath: mp4 } });
+      push(start - 113, {
+        task,
+        kind: "convert",
+        message: "已转为 MP4",
+        detail: { filePath: mp4, sourcePath: filePath, durationSecs: 110 * 60, originalDeleted: false },
+      });
     }
     push(base + 30, { task: byName("街头篮球"), kind: "user_action", message: "暂停监控" });
     push(base + 5, { task: byName("晚八点读书会"), kind: "live_start", message: "检测到开播" });
@@ -836,7 +844,13 @@ export function createMockBackend(): Backend {
       const current = tasks.find((item) => item.id === id);
       if (current?.record.state !== "finishing") return;
       const idle = patchTask(id, { record: { state: "idle" } });
-      if (idle) log(idle, "record_end", message);
+      if (idle) {
+        log(idle, "record_end", message);
+        if (settings.convert_to_mp4) {
+          log(idle, "convert", "开始转为 MP4");
+          setTimeout(() => log(idle, "convert", "已转为 MP4"), 1000);
+        }
+      }
       schedulerChannel.emit(schedulerStatus());
     }, 1500);
     schedulerChannel.emit(schedulerStatus());
@@ -1113,7 +1127,10 @@ export function createMockBackend(): Backend {
         (entry) =>
           (query.taskId === undefined || entry.taskId === query.taskId) &&
           (query.before === undefined || entry.id < query.before) &&
-          (!query.kinds?.length || query.kinds.includes(entry.kind)),
+          (!query.kinds?.length ||
+            query.kinds.includes(entry.kind) ||
+            // 与 Rust 一致：「转为 MP4」也包括转换的失败和提醒。
+            (query.kinds.includes("convert") && entry.detail?.kind === "convert")),
       );
       const items = matching.slice(0, limit);
       return {
@@ -1258,6 +1275,7 @@ export function createMockBackend(): Backend {
         failure: "检测失败：连接超时",
         warning: "代理是 SOCKS，录制不支持，本次直连录制",
         user_action: "修改任务",
+        convert: "已转为 MP4",
       };
       log(task, kind, messages[kind]);
     },
