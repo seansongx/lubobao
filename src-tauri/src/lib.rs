@@ -2,6 +2,7 @@ use tauri::Manager;
 
 pub mod ffmpeg;
 pub mod platforms;
+pub mod recorder;
 pub mod tasks;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
