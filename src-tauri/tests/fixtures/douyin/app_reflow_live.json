@@ -1,0 +1,99 @@
+{
+  "data": {
+    "room": {
+      "id_str": "7000000000000000002",
+      "status": 2,
+      "title": "测试直播间",
+      "owner": {
+        "nickname": "测试主播",
+        "web_rid": "100000000001",
+        "sec_uid": "MS4wLjABAAAAtest_sec_uid"
+      },
+      "stream_url": {
+        "flv_pull_url": {
+          "FULL_HD1": "http://pull-flv-test.douyincdn.com/stage/stream-100000000000000020_uhd.flv?expire=1800000000&sign=redacted",
+          "HD1": "http://pull-flv-test.douyincdn.com/stage/stream-100000000000000021_hd.flv?expire=1800000000&sign=redacted",
+          "SD1": "http://pull-flv-test.douyincdn.com/stage/stream-100000000000000022_ld.flv?expire=1800000000&sign=redacted",
+          "SD2": "http://pull-flv-test.douyincdn.com/stage/stream-100000000000000023_sd.flv?expire=1800000000&sign=redacted"
+        },
+        "hls_pull_url_map": {
+          "FULL_HD1": "http://pull-flv-test.douyincdn.com/stage/stream-100000000000000024_uhd.m3u8?expire=1800000000&sign=redacted",
+          "HD1": "http://pull-flv-test.douyincdn.com/stage/stream-100000000000000025_hd.m3u8?expire=1800000000&sign=redacted",
+          "SD1": "http://pull-flv-test.douyincdn.com/stage/stream-100000000000000026_ld.m3u8?expire=1800000000&sign=redacted",
+          "SD2": "http://pull-flv-test.douyincdn.com/stage/stream-100000000000000027_sd.m3u8?expire=1800000000&sign=redacted"
+        },
+        "stream_orientation": 1,
+        "live_core_sdk_data": {
+          "pull_data": {
+            "stream_data": "{\"common\":null,\"data\":{\"ld\":{\"main\":{\"flv\":\"http://pull-flv-test.douyincdn.com/stage/stream-100000000000000028_ld.flv?expire=1800000000&sign=redacted\",\"hls\":\"http://pull-flv-test.douyincdn.com/stage/stream-100000000000000029_ld.m3u8?expire=1800000000&sign=redacted\",\"sdk_params\":\"{\\\"BufferDataMs\\\":1000,\\\"EnableLowLatencyFLV\\\":1,\\\"ReportPlayingWhenSessionStop\\\":1,\\\"FastOpenDuration\\\":-1800,\\\"LiveIOConfig\\\":{\\\"LiveIOExperimentParam\\\":{\\\"enable_aggr_p2p_stream_id\\\":1,\\\"p2p_setting_use_https_domain\\\":1}},\\\"VCodec\\\":\\\"h264\\\",\\\"NetworkAdapt\\\":{\\\"HurryTime\\\":3500,\\\"SlowTime\\\":1500,\\\"HurryType\\\":0,\\\"HurryStopType\\\":1,\\\"HurryStartMs\\\":4000,\\\"Enabled\\\":0,\\\"SlowMillisecond\\\":1500,\\\"HurryMillisecond\\\":3500,\\\"HurrySpeed\\\":1.1,\\\"SlowSpeed\\\":0.9},\\\"EnableRTMAudioCodeType\\\":1,\\\"PlayingIntervalMs\\\":20000,\\\"P2PFastOpenDuration\\\":-1500,\\\"vbitrate\\\":1000000,\\\"resolution\\\":\\\"540x960\\\",\\\"gop\\\":2,\\\"drType\\\":\\\"sdr\\\",\\\"fps\\\":25}\"}},\"ao\":{\"main\":{\"flv\":\"http://pull-flv-test.douyincdn.com/stage/stream-100000000000000030.flv?expire=1800000000&sign=redacted\",\"hls\":\"\",\"sdk_params\":\"{\\\"EnableRTMAudioCodeType\\\":1,\\\"BufferDataMs\\\":1000,\\\"EnableLowLatencyFLV\\\":1,\\\"LiveIOConfig\\\":{\\\"LiveIOExperimentParam\\\":{\\\"p2p_setting_use_https_domain\\\":1,\\\"enable_aggr_p2p_stream_id\\\":1}},\\\"FastOpenDuration\\\":-1800,\\\"VCodec\\\":\\\"h264\\\",\\\"ReportPlayingWhenSessionStop\\\":1,\\\"NetworkAdapt\\\":{\\\"Enabled\\\":0,\\\"HurryType\\\":0,\\\"HurryMillisecond\\\":3500,\\\"SlowTime\\\":1500,\\\"HurrySpeed\\\":1.1,\\\"SlowSpeed\\\":0.9,\\\"HurryStopType\\\":1,\\\"SlowMillisecond\\\":1500,\\\"HurryStartMs\\\":4000,\\\"HurryTime\\\":3500},\\\"PlayingIntervalMs\\\":20000,\\\"P2PFastOpenDuration\\\":-1500,\\\"vbitrate\\\":0,\\\"resolution\\\":\\\"\\\",\\\"gop\\\":2,\\\"drType\\\":\\\"sdr\\\",\\\"fps\\\":0}\"}},\"uhd\":{\"main\":{\"flv\":\"http://pull-flv-test.douyincdn.com/stage/stream-100000000000000031_uhd.flv?expire=1800000000&sign=redacted\",\"hls\":\"http://pull-flv-test.douyincdn.com/stage/stream-100000000000000032_uhd.m3u8?expire=1800000000&sign=redacted\",\"sdk_params\":\"{\\\"FastOpenDuration\\\":-1800,\\\"EnableRTMAudioCodeType\\\":1,\\\"BufferDataMs\\\":1000,\\\"PlayingIntervalMs\\\":20000,\\\"P2PFastOpenDuration\\\":-1500,\\\"ReportPlayingWhenSessionStop\\\":1,\\\"NetworkAdapt\\\":{\\\"SlowMillisecond\\\":1500,\\\"SlowTime\\\":1500,\\\"HurryStartMs\\\":4000,\\\"HurryTime\\\":3500,\\\"HurrySpeed\\\":1.1,\\\"SlowSpeed\\\":0.9,\\\"HurryType\\\":0,\\\"HurryStopType\\\":1,\\\"HurryMillisecond\\\":3500,\\\"Enabled\\\":0},\\\"EnableLowLatencyFLV\\\":1,\\\"VCodec\\\":\\\"h264\\\",\\\"LiveIOConfig\\\":{\\\"LiveIOExperimentParam\\\":{\\\"enable_aggr_p2p_stream_id\\\":1,\\\"p2p_setting_use_https_domain\\\":1}},\\\"vbitrate\\\":6000000,\\\"resolution\\\":\\\"1080x1920\\\",\\\"gop\\\":2,\\\"drType\\\":\\\"sdr\\\",\\\"fps\\\":29}\"}},\"sd\":{\"main\":{\"flv\":\"http://pull-flv-test.douyincdn.com/stage/stream-100000000000000033_sd.flv?expire=1800000000&sign=redacted\",\"hls\":\"http://pull-flv-test.douyincdn.com/stage/stream-100000000000000034_sd.m3u8?expire=1800000000&sign=redacted\",\"sdk_params\":\"{\\\"FastOpenDuration\\\":-1800,\\\"LiveIOConfig\\\":{\\\"LiveIOExperimentParam\\\":{\\\"enable_aggr_p2p_stream_id\\\":1,\\\"p2p_setting_use_https_domain\\\":1}},\\\"PlayingIntervalMs\\\":20000,\\\"NetworkAdapt\\\":{\\\"HurryStopType\\\":1,\\\"SlowSpeed\\\":0.9,\\\"Enabled\\\":0,\\\"SlowMillisecond\\\":1500,\\\"HurryStartMs\\\":4000,\\\"HurryType\\\":0,\\\"HurrySpeed\\\":1.1,\\\"SlowTime\\\":1500,\\\"HurryTime\\\":3500,\\\"HurryMillisecond\\\":3500},\\\"VCodec\\\":\\\"h264\\\",\\\"P2PFastOpenDuration\\\":-1500,\\\"EnableLowLatencyFLV\\\":1,\\\"EnableRTMAudioCodeType\\\":1,\\\"ReportPlayingWhenSessionStop\\\":1,\\\"BufferDataMs\\\":1000,\\\"vbitrate\\\":2000000,\\\"resolution\\\":\\\"720x1280\\\",\\\"gop\\\":2,\\\"drType\\\":\\\"sdr\\\",\\\"fps\\\":29}\"}},\"origin\":{\"main\":{\"flv\":\"http://pull-flv-test.douyincdn.com/stage/stream-100000000000000035_or4.flv?expire=1800000000&sign=redacted\",\"hls\":\"http://pull-flv-test.douyincdn.com/stage/stream-100000000000000036_or4.m3u8?expire=1800000000&sign=redacted\",\"sdk_params\":\"{\\\"NetworkAdapt\\\":{\\\"SlowSpeed\\\":0.9,\\\"SlowTime\\\":1500,\\\"HurryStartMs\\\":4000,\\\"HurryTime\\\":3500,\\\"HurryType\\\":0,\\\"HurryStopType\\\":1,\\\"HurryMillisecond\\\":3500,\\\"Enabled\\\":0,\\\"SlowMillisecond\\\":1500,\\\"HurrySpeed\\\":1.1},\\\"EnableRTMAudioCodeType\\\":1,\\\"FastOpenDuration\\\":-1800,\\\"LiveIOConfig\\\":{\\\"LiveIOExperimentParam\\\":{\\\"enable_aggr_p2p_stream_id\\\":1,\\\"p2p_setting_use_https_domain\\\":1}},\\\"VCodec\\\":\\\"h264\\\",\\\"BufferDataMs\\\":1000,\\\"EnableLowLatencyFLV\\\":1,\\\"ReportPlayingWhenSessionStop\\\":1,\\\"PlayingIntervalMs\\\":20000,\\\"P2PFastOpenDuration\\\":-1500,\\\"vbitrate\\\":4498000,\\\"resolution\\\":\\\"1080x1920\\\",\\\"gop\\\":2,\\\"drType\\\":\\\"sdr\\\",\\\"fps\\\":29}\"}},\"md\":{\"main\":{\"flv\":\"http://pull-flv-test.douyincdn.com/stage/stream-100000000000000037_md.flv?expire=1800000000&sign=redacted\",\"hls\":\"http://pull-flv-test.douyincdn.com/stage/stream-100000000000000038_md.m3u8?expire=1800000000&sign=redacted\",\"sdk_params\":\"{\\\"BufferDataMs\\\":1000,\\\"EnableRTMAudioCodeType\\\":1,\\\"ReportPlayingWhenSessionStop\\\":1,\\\"VCodec\\\":\\\"h264\\\",\\\"NetworkAdapt\\\":{\\\"SlowSpeed\\\":0.9,\\\"SlowTime\\\":1500,\\\"HurryTime\\\":3500,\\\"HurryType\\\":0,\\\"HurryStopType\\\":1,\\\"HurryMillisecond\\\":3500,\\\"Enabled\\\":0,\\\"SlowMillisecond\\\":1500,\\\"HurryStartMs\\\":4000,\\\"HurrySpeed\\\":1.1},\\\"P2PFastOpenDuration\\\":-1500,\\\"FastOpenDuration\\\":-1800,\\\"LiveIOConfig\\\":{\\\"LiveIOExperimentParam\\\":{\\\"p2p_setting_use_https_domain\\\":1,\\\"enable_aggr_p2p_stream_id\\\":1}},\\\"EnableLowLatencyFLV\\\":1,\\\"PlayingIntervalMs\\\":20000,\\\"vbitrate\\\":800000,\\\"resolution\\\":\\\"360x640\\\",\\\"gop\\\":2,\\\"drType\\\":\\\"sdr\\\",\\\"fps\\\":15}\"}},\"hd\":{\"main\":{\"flv\":\"http://pull-flv-test.douyincdn.com/stage/stream-100000000000000039_hd.flv?expire=1800000000&sign=redacted\",\"hls\":\"http://pull-flv-test.douyincdn.com/stage/stream-100000000000000040_hd.m3u8?expire=1800000000&sign=redacted\",\"sdk_params\":\"{\\\"P2PFastOpenDuration\\\":-1500,\\\"NetworkAdapt\\\":{\\\"Enabled\\\":0,\\\"HurryType\\\":0,\\\"HurryTime\\\":3500,\\\"SlowTime\\\":1500,\\\"HurryStartMs\\\":4000,\\\"HurrySpeed\\\":1.1,\\\"SlowSpeed\\\":0.9,\\\"SlowMillisecond\\\":1500,\\\"HurryStopType\\\":1,\\\"HurryMillisecond\\\":3500},\\\"BufferDataMs\\\":1000,\\\"EnableRTMAudioCodeType\\\":1,\\\"PlayingIntervalMs\\\":20000,\\\"FastOpenDuration\\\":-1800,\\\"LiveIOConfig\\\":{\\\"LiveIOExperimentParam\\\":{\\\"enable_aggr_p2p_stream_id\\\":1,\\\"p2p_setting_use_https_domain\\\":1}},\\\"EnableLowLatencyFLV\\\":1,\\\"ReportPlayingWhenSessionStop\\\":1,\\\"VCodec\\\":\\\"h264\\\",\\\"vbitrate\\\":4000000,\\\"resolution\\\":\\\"720x1280\\\",\\\"gop\\\":2,\\\"drType\\\":\\\"sdr\\\",\\\"fps\\\":29}\"}}}}",
+            "options": {
+              "default_quality": {
+                "name": "超清",
+                "sdk_key": "hd",
+                "v_codec": "",
+                "resolution": "",
+                "level": 0,
+                "v_bit_rate": 0,
+                "additional_content": "",
+                "fps": 0,
+                "disable": 0
+              },
+              "qualities": [
+                {
+                  "name": "标清",
+                  "sdk_key": "ld",
+                  "v_codec": "264",
+                  "resolution": "540x960",
+                  "level": 1,
+                  "v_bit_rate": 1000000,
+                  "additional_content": "",
+                  "fps": 25,
+                  "disable": 0
+                },
+                {
+                  "name": "高清",
+                  "sdk_key": "sd",
+                  "v_codec": "264",
+                  "resolution": "720x1280",
+                  "level": 2,
+                  "v_bit_rate": 2000000,
+                  "additional_content": "",
+                  "fps": 29,
+                  "disable": 0
+                },
+                {
+                  "name": "超清",
+                  "sdk_key": "hd",
+                  "v_codec": "264",
+                  "resolution": "720x1280",
+                  "level": 3,
+                  "v_bit_rate": 4000000,
+                  "additional_content": "",
+                  "fps": 29,
+                  "disable": 0
+                },
+                {
+                  "name": "蓝光",
+                  "sdk_key": "uhd",
+                  "v_codec": "264",
+                  "resolution": "1080x1920",
+                  "level": 4,
+                  "v_bit_rate": 4498000,
+                  "additional_content": "",
+                  "fps": 29,
+                  "disable": 0
+                }
+              ],
+              "vpass_default": false,
+              "quality_strategy": ""
+            }
+          }
+        }
+      }
+    }
+  },
+  "extra": {
+    "now": 1795364602491
+  },
+  "status_code": 0
+}
