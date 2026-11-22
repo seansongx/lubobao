@@ -106,6 +106,7 @@ mod tests {
             monitoring: Monitoring::Enabled,
             live: LiveState::Unknown,
             record: RecordState::Idle,
+            held: false,
         }
     }
 

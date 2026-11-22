@@ -17,6 +17,7 @@ import type {
   LiveState,
   Monitoring,
   RecordState,
+  SchedulerStatus,
   Settings,
   TaskId,
   TaskMutation,
@@ -116,6 +117,7 @@ function snapshot(id: TaskId, seed: MockSeed, createdAt: number): TaskSnapshot {
     monitoring: seed.monitoring,
     live: seed.live,
     record: seed.record,
+    recordHeld: false,
     display,
     displayReason: displayReason(display, seed.live, seed.record),
   };
@@ -282,6 +284,23 @@ export function createMockBackend(): Backend {
   const updatedChannel = new Channel<TaskSnapshot>();
   const removedChannel = new Channel<{ ids: TaskId[] }>();
   const activityChannel = new Channel<ActivityEntry>();
+  const schedulerChannel = new Channel<SchedulerStatus>();
+
+  // 假调度：每 180 秒一轮检测。
+  const MOCK_INTERVAL_MS = 180_000;
+  let nextCheckAt = now + 42_000;
+  function schedulerStatus(): SchedulerStatus {
+    return {
+      nextCheckAt: tasks.some((task) => task.monitoring === "enabled") ? nextCheckAt : null,
+      checking: 0,
+      recording: tasks.filter((task) => task.display === "recording").length,
+    };
+  }
+  setInterval(() => {
+    if (Date.now() < nextCheckAt) return;
+    nextCheckAt += MOCK_INTERVAL_MS;
+    schedulerChannel.emit(schedulerStatus());
+  }, 1000);
 
   let ffmpeg: FfmpegStatus = { state: "checking" };
   let simulation: ReturnType<typeof setInterval> | undefined;
@@ -340,8 +359,17 @@ export function createMockBackend(): Backend {
 
   function rederive(task: TaskSnapshot, patch: Partial<TaskSnapshot>): TaskSnapshot {
     const next = { ...task, ...patch };
-    next.display = deriveDisplay(next.monitoring, next.live, next.record, next.notifyOnly);
-    next.displayReason = displayReason(next.display, next.live, next.record);
+    // 与 Rust 一致：手动停止后仍在直播时按仅通知显示。
+    next.display = deriveDisplay(
+      next.monitoring,
+      next.live,
+      next.record,
+      next.notifyOnly || next.recordHeld,
+    );
+    next.displayReason =
+      next.display === "notify" && next.recordHeld && !next.notifyOnly
+        ? "已手动停止录制，下次开播时自动录制"
+        : displayReason(next.display, next.live, next.record);
     return next;
   }
 
@@ -434,21 +462,43 @@ export function createMockBackend(): Backend {
           result.push(task);
           continue;
         }
+        // 与 Rust 一致：暂停监控时停止录制（假数据直接结束）；重新启用时清除录制失败和手动停止。
         const recording = task.record.state === "recording" || task.record.state === "finishing";
+        const record: RecordState =
+          (!enabled && recording) || (enabled && task.record.state === "failed")
+            ? { state: "idle" }
+            : task.record;
         const next = rederive(task, {
           monitoring,
-          live: recording ? task.live : { state: "unknown" },
-          // 与 Rust 一致：重新启用监控时清除录制失败。
-          record: enabled && task.record.state === "failed" ? { state: "idle" } : task.record,
+          live: { state: "unknown" },
+          record,
+          recordHeld: enabled ? false : task.recordHeld,
         });
         replace(next);
         log(next, "user_action", enabled ? "开始监控" : "暂停监控");
+        if (!enabled && recording) log(next, "record_end", "录制结束");
         result.push(next);
       }
       return result;
     },
 
-    stopRecording: () => reject("not_implemented", "录制功能尚未接入"),
+    async stopRecording(ids) {
+      const result: TaskSnapshot[] = [];
+      for (const id of ids) {
+        const task = tasks.find((item) => item.id === id);
+        if (!task) continue;
+        if (task.record.state !== "recording") {
+          result.push(task);
+          continue;
+        }
+        const next = rederive(task, { record: { state: "idle" }, recordHeld: true });
+        replace(next);
+        log(next, "record_end", "录制结束");
+        result.push(next);
+      }
+      schedulerChannel.emit(schedulerStatus());
+      return result;
+    },
 
     getSettings: () => Promise.resolve(settings),
     async updateSettings(values) {
@@ -475,6 +525,8 @@ export function createMockBackend(): Backend {
     onTaskUpdated: (handler) => updatedChannel.subscribe(handler),
     onTaskRemoved: (handler) => removedChannel.subscribe(handler),
     onActivity: (handler) => activityChannel.subscribe(handler),
+    getSchedulerStatus: () => Promise.resolve(schedulerStatus()),
+    onSchedulerStatus: (handler) => schedulerChannel.subscribe(handler),
   };
 
   (window as unknown as { __lubobaoMock: unknown }).__lubobaoMock = {

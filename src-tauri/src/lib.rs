@@ -3,6 +3,7 @@ use tauri::Manager;
 pub mod ffmpeg;
 pub mod platforms;
 pub mod recorder;
+pub mod scheduler;
 pub mod tasks;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -22,6 +23,7 @@ pub fn run() {
         .setup(|app| {
             ffmpeg::init(app.handle())?;
             tasks::init(app.handle())?;
+            scheduler::init(app.handle())?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -35,8 +37,15 @@ pub fn run() {
             tasks::commands::stop_recording,
             tasks::commands::get_settings,
             tasks::commands::update_settings,
-            tasks::commands::list_activity
+            tasks::commands::list_activity,
+            scheduler::get_scheduler_status
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            // 退出前停止调度和所有录制，等文件收尾。
+            if let tauri::RunEvent::ExitRequested { api, .. } = &event {
+                scheduler::on_exit_requested(app, api);
+            }
+        });
 }

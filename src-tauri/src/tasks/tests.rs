@@ -633,14 +633,14 @@ fn lists_activity_with_paging_and_filters() {
 }
 
 #[test]
-fn stop_recording_reports_not_implemented() {
+fn stop_recording_without_scheduler_reports_not_implemented() {
     let dir = tempfile::tempdir().unwrap();
     let (manager, _) = open(dir.path());
     let error = manager.stop_recording(&[1]).unwrap_err();
     assert_eq!(error.kind, ErrorKind::NotImplemented);
     assert_eq!(
         serde_json::to_value(&error).unwrap(),
-        json!({ "kind": "not_implemented", "message": "录制功能尚未接入" })
+        json!({ "kind": "not_implemented", "message": "录制调度尚未启动" })
     );
 }
 

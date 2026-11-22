@@ -7,7 +7,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, Weak};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
@@ -49,6 +49,17 @@ pub enum TaskEvent {
 }
 
 pub type Listener = Box<dyn Fn(TaskEvent) + Send + Sync>;
+
+/// 调度器提供给任务核心的回调。任务核心不持有调度器（用 `Weak` 避免循环引用），
+/// 调用时不持有任务锁。
+pub trait SchedulerHook: Send + Sync {
+    /// 任务集合或监控意图变了，请尽快重新排期（新任务、恢复监控立即检测）。
+    fn wake(&self);
+    /// 请求停止这个任务的录制（包括正在启动的录制）。有录制时返回 true。
+    fn stop_recording(&self, id: TaskId) -> bool;
+    /// 设置已保存，下一轮按新设置检测。
+    fn settings_changed(&self);
+}
 
 /// 命令失败时返回给前端的结构化错误：`{ kind, message }`。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -206,6 +217,7 @@ pub struct TaskManager {
     inner: Mutex<Inner>,
     defaults: Map<String, Value>,
     listener: Listener,
+    hook: OnceLock<Weak<dyn SchedulerHook>>,
 }
 
 fn user_action(task: &Task, message: &str, detail: Option<Value>) -> NewActivity {
@@ -234,6 +246,7 @@ impl TaskManager {
             }),
             defaults: settings::defaults(save_dir),
             listener,
+            hook: OnceLock::new(),
         };
         manager.recover_interrupted()?;
         Ok(manager)
@@ -243,6 +256,21 @@ impl TaskManager {
         self.inner
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// 登记调度器。只能登记一次，之后的调用被忽略。
+    pub fn set_scheduler_hook(&self, hook: Weak<dyn SchedulerHook>) {
+        let _ = self.hook.set(hook);
+    }
+
+    fn scheduler(&self) -> Option<Arc<dyn SchedulerHook>> {
+        self.hook.get().and_then(Weak::upgrade)
+    }
+
+    fn wake_scheduler(&self) {
+        if let Some(hook) = self.scheduler() {
+            hook.wake();
+        }
     }
 
     fn emit_all(&self, events: Vec<TaskEvent>) {
@@ -423,6 +451,7 @@ impl TaskManager {
             monitoring: Monitoring::Enabled,
             live,
             record: RecordState::Idle,
+            held: false,
         };
         let snapshot = task.snapshot();
         inner.tasks.insert(id, task);
@@ -432,6 +461,7 @@ impl TaskManager {
             TaskEvent::Updated(Box::new(snapshot.clone())),
             TaskEvent::Activity(entry),
         ]);
+        self.wake_scheduler();
         Ok(TaskMutation::Added { task: snapshot })
     }
 
@@ -533,6 +563,7 @@ impl TaskManager {
         drop(guard);
         events.insert(0, TaskEvent::Updated(Box::new(snapshot.clone())));
         self.emit_all(events);
+        self.wake_scheduler();
         Ok(TaskMutation::Updated { task: snapshot })
     }
 
@@ -577,11 +608,19 @@ impl TaskManager {
         let mut events = vec![TaskEvent::Removed(removed.clone())];
         events.extend(entries.into_iter().map(TaskEvent::Activity));
         self.emit_all(events);
+        // 正在启动、还没写入录制状态的录制不会被上面的检查拦住，一并停止。
+        if let Some(hook) = self.scheduler() {
+            for id in &removed {
+                hook.stop_recording(*id);
+            }
+            hook.wake();
+        }
         Ok(removed)
     }
 
-    /// 批量启用或暂停监控。重新启用时一并清除录制失败（例如磁盘不足），给用户一个
-    /// 「处理完了，重新开始」的入口。返回这些任务的快照（含未变化的任务）。
+    /// 批量启用或暂停监控。重新启用时一并清除录制失败（例如磁盘不足）和手动停止的
+    /// 保持状态，给用户一个「处理完了，重新开始」的入口。暂停时与 StreamCap 一样
+    /// 停止正在进行的录制。返回这些任务的快照（含未变化的任务）。
     pub fn set_monitoring(
         &self,
         ids: &[TaskId],
@@ -625,6 +664,9 @@ impl TaskManager {
             if clears_failure(task) {
                 updated.record = RecordState::Idle;
             }
+            if enabled {
+                updated.held = false;
+            }
             // 暂停后旧的检测结果不再有效，重新启用时从未知开始。
             if !updated.record.is_active() {
                 updated.live = LiveState::Unknown;
@@ -640,6 +682,14 @@ impl TaskManager {
             .collect();
         drop(guard);
         self.emit_all(events);
+        if let Some(hook) = self.scheduler() {
+            if !enabled {
+                for task in &changed {
+                    hook.stop_recording(task.id);
+                }
+            }
+            hook.wake();
+        }
         Ok(snapshots)
     }
 
@@ -694,6 +744,10 @@ impl TaskManager {
                 .ok()
         });
         let updated = inner.tasks.get_mut(&id).expect("task exists");
+        // 下播后手动停止的保持状态结束，下一次开播照常录制。
+        if matches!(live, LiveState::Offline { .. }) {
+            updated.held = false;
+        }
         updated.live = live;
         let snapshot = updated.snapshot();
         drop(guard);
@@ -837,14 +891,40 @@ impl TaskManager {
         self.lock()
             .store
             .transaction(|db| db.save_settings(&values))?;
+        if let Some(hook) = self.scheduler() {
+            hook.settings_changed();
+        }
         Ok(self.settings())
     }
 
-    pub fn stop_recording(&self, _ids: &[TaskId]) -> CommandResult<Vec<TaskSnapshot>> {
-        Err(CommandError::new(
-            ErrorKind::NotImplemented,
-            "录制功能尚未接入",
-        ))
+    /// 手动停止录制（含正在启动的录制）。停止请求立即返回；录制状态随后经由收尾中
+    /// 回到空闲，通过 `task-updated` 推送。被停止的任务在本次直播中不再自动录制，
+    /// 直到检测到下播或用户重新启用监控。没有录制的任务原样返回。
+    pub fn stop_recording(&self, ids: &[TaskId]) -> CommandResult<Vec<TaskSnapshot>> {
+        let hook = self
+            .scheduler()
+            .ok_or_else(|| CommandError::new(ErrorKind::NotImplemented, "录制调度尚未启动"))?;
+        let mut events = Vec::new();
+        for id in ids {
+            if !hook.stop_recording(*id) {
+                continue;
+            }
+            let mut inner = self.lock();
+            if let Some(task) = inner.tasks.get_mut(id)
+                && !task.held
+            {
+                task.held = true;
+                events.push(TaskEvent::Updated(Box::new(task.snapshot())));
+            }
+        }
+        let snapshots = {
+            let inner = self.lock();
+            ids.iter()
+                .filter_map(|id| inner.tasks.get(id).map(Task::snapshot))
+                .collect()
+        };
+        self.emit_all(events);
+        Ok(snapshots)
     }
 }
 

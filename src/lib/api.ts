@@ -93,6 +93,8 @@ export interface TaskSnapshot {
   monitoring: Monitoring;
   live: LiveState;
   record: RecordState;
+  /** 用户手动停止了录制：本次直播不再自动录制，下播或重新启用监控后恢复。此时 display 为 notify。 */
+  recordHeld: boolean;
   display: DisplayStatus;
   displayReason: string | null;
 }
@@ -242,6 +244,18 @@ export interface Settings {
   stream_end_notification_enabled: boolean;
 }
 
+// ---- 调度（src-tauri/src/scheduler/mod.rs） ----
+
+/** 状态栏用的调度概况，变化时通过 scheduler-status 事件推送。 */
+export interface SchedulerStatus {
+  /** 最近一次排定的检测（Unix 毫秒）；没有排定的检测时为 null（无监控任务，或都在检测、录制）。 */
+  nextCheckAt: number | null;
+  /** 正在请求平台的任务数。 */
+  checking: number;
+  /** 正在录制（含启动中、收尾中）的任务数。 */
+  recording: number;
+}
+
 // ---- 后端接口 ----
 
 export interface Backend {
@@ -254,17 +268,22 @@ export interface Backend {
   deleteTasks(ids: TaskId[]): Promise<TaskId[]>;
   /** 只改监控意图。 */
   setMonitoring(ids: TaskId[], enabled: boolean): Promise<TaskSnapshot[]>;
-  /** 录制引擎接入前返回 not_implemented。 */
+  /**
+   * 手动停止录制，立即返回；录制状态随后经 finishing 回到 idle（task-updated 推送）。
+   * 被停止的任务 recordHeld 为 true：本次直播不再自动录制。
+   */
   stopRecording(ids: TaskId[]): Promise<TaskSnapshot[]>;
   getSettings(): Promise<Settings>;
   /** 部分更新，返回完整设置。任一项无效时整批不保存。 */
   updateSettings(values: Partial<Settings>): Promise<Settings>;
   listActivity(query?: ActivityQuery): Promise<ActivityPage>;
+  getSchedulerStatus(): Promise<SchedulerStatus>;
 
   onFfmpegStatus(handler: (status: FfmpegStatus) => void): Promise<UnlistenFn>;
   onTaskUpdated(handler: (task: TaskSnapshot) => void): Promise<UnlistenFn>;
   onTaskRemoved(handler: (payload: { ids: TaskId[] }) => void): Promise<UnlistenFn>;
   onActivity(handler: (entry: ActivityEntry) => void): Promise<UnlistenFn>;
+  onSchedulerStatus(handler: (status: SchedulerStatus) => void): Promise<UnlistenFn>;
 }
 
 function on<T>(event: string, handler: (payload: T) => void): Promise<UnlistenFn> {
@@ -283,11 +302,13 @@ const tauriBackend: Backend = {
   getSettings: () => invoke("get_settings"),
   updateSettings: (values) => invoke("update_settings", { values }),
   listActivity: (query) => invoke("list_activity", { query: query ?? null }),
+  getSchedulerStatus: () => invoke("get_scheduler_status"),
 
   onFfmpegStatus: (handler) => on("ffmpeg-status", handler),
   onTaskUpdated: (handler) => on("task-updated", handler),
   onTaskRemoved: (handler) => on("task-removed", handler),
   onActivity: (handler) => on("activity", handler),
+  onSchedulerStatus: (handler) => on("scheduler-status", handler),
 };
 
 /** 是否运行在浏览器假数据模式。 */
