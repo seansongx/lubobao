@@ -18,7 +18,8 @@
 | 输出 | TS 分段录制；录后转 MP4，默认保留原件；转码失败保留原件 | 转出的 MP4 可播放 |
 | 桌面行为 | 关闭窗口隐藏到托盘、托盘菜单；有录制时退出先确认并正常收尾；开播、录制失败的系统通知；单实例 | 托盘恢复后状态一致；退出后没有残留 ffmpeg |
 | Linux 命令行（无界面） | 独立的命令行程序，不依赖 Tauri、GTK 或 WebKit，复用同一套核心逻辑：后台常驻监控并自动录制；用子命令添加、查看、暂停、删除直播间，停止录制，查看和修改设置；FFmpeg 自动下载或指定系统 ffmpeg；日志输出到终端；收到 SIGINT、SIGTERM 时正常收尾；提供 systemd 服务示例。Docker 镜像：推送到 GHCR，amd64、arm64 多架构，内置已校验的 FFmpeg，数据和录像挂载到卷，时区可配置，`docker stop` 时正常收尾；附 `docker compose` 示例 | 在没有图形环境的 Linux（CI 或容器）中跑通「添加 → 开播自动录 → 停止 → 文件可播放」；x64、arm64 各打一个包；镜像在 CI 中构建，并用同样流程验证一次 |
-| 发布 | GitHub Actions 在 Windows、macOS、Linux 上跑测试；打包 Windows 安装包、macOS（arm64、x64）、Linux（AppImage、deb）；应用图标；版本号；安装包放在国内可快速下载的位置；官网下载区 | Windows 实机安装、运行全流程；macOS、Linux 由 CI 构建和测试，实机验收待有设备 |
+| 发布 | GitHub Actions 在 Windows、macOS、Linux 上跑测试；打包 Windows 安装包、macOS（arm64、x64）、Linux（AppImage、deb）；应用图标；版本号。GitHub Release 由人工发布后，Actions 把安装包上传到 xiaofany.com 分发平台（R2，dl.xiaofany.cn）。官网 lubobao.xiaofany.com 部署在国内备案服务器，页脚显示备案号；下载区读取 xiaofany.com 的版本接口，下载按钮走 `xiaofany.com/dl/lubobao/…`，GitHub Releases 作为备用。macOS 只做 ad-hoc 签名，官网提供 `curl … install.sh \| sh` 一键安装（校验 SHA-256），下载页和 Release 说明写清首次打开步骤 | Windows 实机安装、运行全流程；macOS、Linux 由 CI 构建和测试，实机验收待有设备；安装脚本在 CI 的 macOS 上跑通一次 |
+| 自动更新 | 用 `tauri-plugin-updater` 做应用内自动更新：启动时和「关于」里检查 xiaofany.com 的 Tauri 升级接口，显示版本和更新说明，下载时显示进度，校验更新签名后安装并重启；有录制时先确认，按退出流程收尾后再安装。更新签名私钥只存在 GitHub Secrets 里。deb 安装的用户如果插件不支持，就提示手动下载 | 从旧版本升级到新版本：Windows 实机验证一次，macOS、Linux AppImage 待有设备；签名不符时拒绝安装；没有新版本时提示已是最新 |
 
 暂不包含：其他平台、桌面通知以外的通知渠道、定时关机、英文界面、统计与公告、录后脚本、时间字幕、应用内播放器、Web 远程管理、代码签名（Windows SmartScreen 和 macOS Gatekeeper 会提示未签名，需购买证书后加入）。
 
