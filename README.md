@@ -27,6 +27,20 @@ npm run tauri build
 
 ## 目录结构
 
-- `src/` 包含前端 TypeScript 代码和样式。
+- `index.html` 和 `src/` 是桌面应用的前端入口、TypeScript 代码和样式。
 - `src-tauri/src/` 包含 Rust 桌面端入口。
 - `src-tauri/tauri.conf.json` 配置应用标识、窗口和打包选项。
+- `website/` 是独立的官网目录，包含首页和同域加载的样式，可直接作为静态站点发布。
+
+## 官网预览与 Nginx 部署
+
+直接打开 `website/index.html` 即可预览。若本机已安装 Python，也可以在仓库根目录运行 `python -m http.server 8080 --bind 127.0.0.1 --directory website`，然后访问 `http://127.0.0.1:8080/`。
+
+发布时，将 `website/` 的内容复制到官网子域名专用的站点目录，例如 `/var/www/lubobao-site/`。将子域名解析到服务器，在该子域名的 Nginx HTTPS 站点配置中设置以下两项，沿用服务器的证书管理方式：
+
+```nginx
+root /var/www/lubobao-site;
+index index.html;
+```
+
+修改 Nginx 配置后，先执行 `nginx -t`，通过后再重载。以后更新首页只需同步静态文件。

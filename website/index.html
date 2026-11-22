@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="录播宝是一款开发中的桌面直播录制工具，计划支持直播间监控、自动录制和本地保存。">
+    <title>录播宝 · 桌面直播录制工具</title>
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <strong class="brand"><i aria-hidden="true"></i>录播宝</strong>
+      <nav aria-label="主导航"><a href="#progress">开发进度</a><a href="https://github.com/xsong13/lubobao">GitHub</a></nav>
+    </header>
+    <main>
+      <section class="hero" aria-labelledby="intro">
+        <div>
+          <p class="eyebrow">桌面直播录制工具 · 开发中</p>
+          <h1 id="intro">开播后，<br>自动录到电脑里。</h1>
+          <p class="lead">录播宝计划支持抖音、快手等平台。添加你关注的直播间，让桌面端监控开播，把录像保存到本地。</p>
+          <a class="button" href="#progress">查看开发进度</a>
+        </div>
+        <figure>
+          <figcaption>录制任务 <small>规划预览</small></figcaption>
+          <ul class="tasks">
+            <li><span>音乐直播间</span><strong class="live">● 录制中</strong></li>
+            <li><span>游戏直播间</span><strong>等待开播</strong></li>
+            <li><span>旅行直播间</span><strong>已保存</strong></li>
+          </ul>
+        </figure>
+      </section>
+      <section id="progress" aria-labelledby="roadmap">
+        <h2 id="roadmap">开发进度</h2>
+        <dl>
+          <div><dt>桌面端基础框架</dt><dd>已完成 · Tauri 桌面窗口与前后端通信示例。</dd></div>
+          <div><dt>直播间解析与监控</dt><dd>规划中 · 通过直播间链接识别主播并检测开播。</dd></div>
+          <div><dt>自动录制与保存</dt><dd>规划中 · 开播时开始录制，输出文件到电脑。</dd></div>
+        </dl>
+      </section>
+    </main>
+  </body>
+</html>

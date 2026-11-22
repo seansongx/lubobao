@@ -1,0 +1,30 @@
+:root {
+  color-scheme: light;
+  --background: #fafafa;
+  --foreground: #18181b;
+  --card: #ffffff;
+  --border: #d4d4d8;
+  --muted-foreground: #52525b;
+  --primary: #205f44;
+  --primary-foreground: #ffffff;
+  --ring: #327852;
+  --status-recording: #b91c1c;
+  --status-waiting: var(--muted-foreground);
+  --status-retrying: #92400e;
+  --radius: 0.5rem;
+  --task-row-height: 2.75rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --background: #18181b;
+    --foreground: #fafafa;
+    --card: #27272a;
+    --border: #52525b;
+    --muted-foreground: #a1a1aa;
+    --ring: #86d3ac;
+    --status-recording: #fca5a5;
+    --status-retrying: #fcd34d;
+  }
+}
