@@ -5,7 +5,6 @@ name: Release
 on:
   push:
     tags: ["v*"]
-    branches: [ci/actions]  # TEMP: verify before workflow is on main
   workflow_dispatch:
 
 concurrency:
