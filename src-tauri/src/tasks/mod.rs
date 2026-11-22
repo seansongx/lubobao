@@ -666,8 +666,9 @@ impl TaskManager {
             if enabled {
                 updated.held = false;
             }
-            // 暂停后旧的检测结果不再有效，重新启用时从未知开始。
-            if !updated.record.is_active() {
+            // 暂停后旧的检测结果不再有效，从未知开始。重新启用时一律重置（包括暂停时停下、
+            // 还在收尾的录制），调度据此立即检测；暂停时正在写文件的保留直播状态。
+            if enabled || !updated.record.is_active() {
                 updated.live = LiveState::Unknown;
             }
             events.push(TaskEvent::Updated(Box::new(updated.snapshot())));

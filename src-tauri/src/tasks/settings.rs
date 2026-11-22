@@ -36,6 +36,7 @@ pub fn defaults(save_dir: &Path) -> Map<String, Value> {
         "folder_name_title": false,
         "enable_proxy": true,
         "proxy_address": "",
+        "default_platform_with_proxy": "tiktok, sooplive, pandalive, winktv, flextv, popkontv, twitch, liveme, showroom, chzzk, shopee, shp, youtu, youtube, lang",
         "execute_custom_script": false,
         "custom_script_command": "",
         "system_notification_enabled": true,

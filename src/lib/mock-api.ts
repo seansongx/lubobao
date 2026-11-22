@@ -239,6 +239,8 @@ const defaultSettings: Settings = {
   folder_name_title: false,
   enable_proxy: true,
   proxy_address: "",
+  default_platform_with_proxy:
+    "tiktok, sooplive, pandalive, winktv, flextv, popkontv, twitch, liveme, showroom, chzzk, shopee, shp, youtu, youtube, lang",
   execute_custom_script: false,
   custom_script_command: "",
   system_notification_enabled: true,
@@ -491,10 +493,22 @@ export function createMockBackend(): Backend {
           result.push(task);
           continue;
         }
-        const next = rederive(task, { record: { state: "idle" }, recordHeld: true });
-        replace(next);
-        log(next, "record_end", "录制结束");
-        result.push(next);
+        // 与 Rust 一致：先进入收尾中，ffmpeg 写完文件尾后回到空闲。
+        const { filePath, startedAt } = task.record;
+        const finishing = rederive(task, {
+          record: { state: "finishing", filePath, startedAt },
+          recordHeld: true,
+        });
+        replace(finishing);
+        setTimeout(() => {
+          const current = tasks.find((item) => item.id === id);
+          if (current?.record.state !== "finishing") return;
+          const idle = rederive(current, { record: { state: "idle" } });
+          replace(idle);
+          log(idle, "record_end", "录制结束");
+          schedulerChannel.emit(schedulerStatus());
+        }, 1500);
+        result.push(finishing);
       }
       schedulerChannel.emit(schedulerStatus());
       return result;

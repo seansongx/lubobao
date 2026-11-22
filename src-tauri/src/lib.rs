@@ -44,8 +44,8 @@ pub fn run() {
         .expect("error while building tauri application")
         .run(|app, event| {
             // 退出前停止调度和所有录制，等文件收尾。
-            if let tauri::RunEvent::ExitRequested { api, .. } = &event {
-                scheduler::tauri_glue::on_exit_requested(app, api);
+            if let tauri::RunEvent::ExitRequested { code, api, .. } = &event {
+                scheduler::tauri_glue::on_exit_requested(app, *code, api);
             }
         });
 }

@@ -170,6 +170,8 @@ export type ActivityKind =
   | "record_start"
   | "record_end"
   | "failure"
+  /** 不影响录制、但用户应当知道的问题，例如代理协议不支持而改为直连。 */
+  | "warning"
   | "user_action";
 
 export interface ActivityEntry {
@@ -237,6 +239,8 @@ export interface Settings {
   folder_name_title: boolean;
   enable_proxy: boolean;
   proxy_address: string;
+  /** 录制和检测使用代理的平台键，逗号分隔（StreamCap 默认只有海外平台）。 */
+  default_platform_with_proxy: string;
   execute_custom_script: boolean;
   custom_script_command: string;
   system_notification_enabled: boolean;

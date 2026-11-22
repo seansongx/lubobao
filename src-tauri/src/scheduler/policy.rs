@@ -1,6 +1,6 @@
 //! 调度用到的纯函数：设置取值、退避时长、录制请求的组装。不发请求，便于单独测试。
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use serde_json::{Map, Value};
@@ -59,10 +59,51 @@ pub fn max_concurrent(settings: &Map<String, Value>) -> usize {
         .unwrap_or(DEFAULT_MAX_CONCURRENT)
 }
 
-/// 用户启用代理且填了地址时的代理地址（设置 `enable_proxy`、`proxy_address`）。
-pub fn proxy(settings: &Map<String, Value>) -> Option<String> {
+/// 设置 `default_platform_with_proxy` 中列出的平台键。与 StreamCap `is_use_proxy` 一样，
+/// 中英文逗号都可分隔，空格忽略。
+pub fn proxy_platforms(settings: &Map<String, Value>) -> Vec<String> {
+    text(settings, "default_platform_with_proxy")
+        .replace('，', ",")
+        .split(',')
+        .map(|key| key.trim().to_ascii_lowercase())
+        .filter(|key| !key.is_empty())
+        .collect()
+}
+
+/// 这个平台要用的代理地址：启用代理、填了地址，且平台在 `default_platform_with_proxy`
+/// 中（StreamCap `is_use_proxy`）。检测和录制都按这个规则。
+pub fn proxy(settings: &Map<String, Value>, platform: Platform) -> Option<String> {
     let address = text(settings, "proxy_address").trim();
-    (flag(settings, "enable_proxy", true) && !address.is_empty()).then(|| address.to_string())
+    (flag(settings, "enable_proxy", true)
+        && !address.is_empty()
+        && proxy_platforms(settings)
+            .iter()
+            .any(|key| key == platform.key()))
+    .then(|| address.to_string())
+}
+
+/// 录制用的代理，以及不能用时给用户的提示。FFmpeg 只支持 HTTP 代理；SOCKS、HTTPS 等
+/// 协议的代理只用于检测，录制改为直连，否则每次录制都会失败。
+pub fn recording_proxy(
+    settings: &Map<String, Value>,
+    platform: Platform,
+) -> (Option<String>, Option<String>) {
+    let Some(address) = proxy(settings, platform) else {
+        return (None, None);
+    };
+    match crate::recorder::command::ffmpeg_proxy(&address) {
+        Ok(proxy) => (proxy, None),
+        Err(_) => {
+            let scheme = address.split_once("://").map_or("", |(scheme, _)| scheme);
+            (
+                None,
+                Some(format!(
+                    "录制不支持 {} 代理，已直连录制（检测仍使用代理）",
+                    scheme.to_ascii_uppercase()
+                )),
+            )
+        }
+    }
 }
 
 /// `base × 2^(n-1)`，不超过 `cap`。
@@ -97,7 +138,7 @@ pub fn recheck_delay(short_runs: u32, interval: Duration) -> Duration {
 pub fn fetch_options(task: &TaskSnapshot, settings: &Map<String, Value>) -> FetchOptions {
     FetchOptions {
         cookies: None,
-        proxy: proxy(settings),
+        proxy: proxy(settings, task.config.platform),
         quality: task.config.quality,
     }
 }
@@ -107,7 +148,7 @@ pub fn flv_preferred(platform: Platform) -> bool {
     matches!(platform, Platform::Douyin)
 }
 
-/// 录制选项。格式目前只有 TS；其余格式要等转码功能。
+/// 录制选项。格式目前只有 TS；其余格式要等转码功能。代理由 [`recording_proxy`] 另行决定。
 pub fn record_options(settings: &Map<String, Value>) -> RecordOptions {
     let threshold_gb = settings
         .get("recording_space_threshold")
@@ -124,7 +165,7 @@ pub fn record_options(settings: &Map<String, Value>) -> RecordOptions {
         ),
         segment_secs: positive_u64(settings, "video_segment_time").unwrap_or(defaults.segment_secs),
         disk_threshold_bytes: (threshold_gb * 1024.0 * 1024.0 * 1024.0) as u64,
-        proxy: proxy(settings),
+        proxy: None,
         folder_by_platform: flag(
             settings,
             "folder_name_platform",
@@ -135,7 +176,14 @@ pub fn record_options(settings: &Map<String, Value>) -> RecordOptions {
     }
 }
 
+/// 组装好的录制请求，以及要提示用户的问题（例如代理协议不支持、已直连）。
+pub struct RecordingPlan {
+    pub request: RecordingRequest,
+    pub warning: Option<String>,
+}
+
 /// 由检测结果和设置组装录制请求。已开播但没有可用的流地址时返回解析错误。
+/// `live_save_path` 为空时用 `default_save_dir`。
 ///
 /// 取流地址按 StreamCap `_get_record_url`：FLV 优先的平台在未选 HLS 且不是 H.265 时录
 /// FLV，否则录 `record_url`；开启 `force_https_recording` 时把 `http://` 换成 `https://`。
@@ -144,7 +192,8 @@ pub fn recording_request(
     info: &LiveInfo,
     settings: &Map<String, Value>,
     ffmpeg_path: PathBuf,
-) -> Result<RecordingRequest, PlatformError> {
+    default_save_dir: &Path,
+) -> Result<RecordingPlan, PlatformError> {
     let selected = info
         .selected
         .as_ref()
@@ -162,15 +211,28 @@ pub fn recording_request(
     } else {
         info.anchor_name.clone()
     };
-    Ok(RecordingRequest {
-        ffmpeg_path,
-        source_url,
-        source_format,
-        headers: info.stream_headers.clone(),
-        output_dir: PathBuf::from(text(settings, "live_save_path")),
-        anchor_name,
-        platform: info.platform.display_name().to_string(),
-        options: record_options(settings),
+    let save_dir = text(settings, "live_save_path").trim();
+    let output_dir = if save_dir.is_empty() {
+        default_save_dir.to_path_buf()
+    } else {
+        PathBuf::from(save_dir)
+    };
+    let (proxy, warning) = recording_proxy(settings, info.platform);
+    Ok(RecordingPlan {
+        request: RecordingRequest {
+            ffmpeg_path,
+            source_url,
+            source_format,
+            headers: info.stream_headers.clone(),
+            output_dir,
+            anchor_name,
+            platform: info.platform.display_name().to_string(),
+            options: RecordOptions {
+                proxy,
+                ..record_options(settings)
+            },
+        },
+        warning,
     })
 }
 
@@ -237,17 +299,74 @@ mod tests {
         let map = settings(json!({}));
         assert_eq!(interval(&map), Duration::from_secs(180));
         assert_eq!(max_concurrent(&map), 3);
-        assert_eq!(proxy(&map), None);
+        assert_eq!(proxy(&map, Platform::Douyin), None);
         let map = settings(json!({
             "loop_time_seconds": 30,
             "platform_max_concurrent_requests": 1,
             "proxy_address": " 127.0.0.1:7890 ",
+            "default_platform_with_proxy": "tiktok，douyin, twitch",
         }));
         assert_eq!(interval(&map), Duration::from_secs(30));
         assert_eq!(max_concurrent(&map), 1);
-        assert_eq!(proxy(&map).as_deref(), Some("127.0.0.1:7890"));
-        let map = settings(json!({ "enable_proxy": false, "proxy_address": "127.0.0.1:7890" }));
-        assert_eq!(proxy(&map), None);
+        assert_eq!(
+            proxy(&map, Platform::Douyin).as_deref(),
+            Some("127.0.0.1:7890")
+        );
+        let map = settings(json!({
+            "enable_proxy": false,
+            "proxy_address": "127.0.0.1:7890",
+            "default_platform_with_proxy": "douyin",
+        }));
+        assert_eq!(proxy(&map, Platform::Douyin), None);
+    }
+
+    #[test]
+    fn uses_the_proxy_only_for_listed_platforms() {
+        // StreamCap 默认列表只有海外平台，抖音直连。
+        let map = settings(json!({ "proxy_address": "127.0.0.1:7890" }));
+        assert_eq!(proxy(&map, Platform::Douyin), None);
+        assert_eq!(recording_proxy(&map, Platform::Douyin), (None, None));
+    }
+
+    #[test]
+    fn records_directly_when_the_proxy_is_not_http() {
+        let listed = |address: &str| {
+            settings(json!({ "proxy_address": address, "default_platform_with_proxy": "douyin" }))
+        };
+        let (proxy, warning) =
+            recording_proxy(&listed("socks5://127.0.0.1:1080"), Platform::Douyin);
+        assert_eq!(proxy, None);
+        assert_eq!(
+            warning.as_deref(),
+            Some("录制不支持 SOCKS5 代理，已直连录制（检测仍使用代理）")
+        );
+        let (proxy, warning) = recording_proxy(&listed("https://proxy:443"), Platform::Douyin);
+        assert_eq!((proxy, warning.is_some()), (None, true));
+        assert_eq!(
+            recording_proxy(&listed("127.0.0.1:7890"), Platform::Douyin),
+            (Some("http://127.0.0.1:7890".to_string()), None)
+        );
+        assert_eq!(
+            recording_proxy(&listed("HTTP://127.0.0.1:7890"), Platform::Douyin),
+            (Some("HTTP://127.0.0.1:7890".to_string()), None)
+        );
+    }
+
+    #[test]
+    fn falls_back_to_the_default_save_dir_when_the_setting_is_empty() {
+        let info = crate::scheduler::tests::live_info("https://live.douyin.com/1", true);
+        let task = crate::scheduler::tests::snapshot_for(&info);
+        let default_dir = Path::new("C:/Videos/录播宝");
+        for value in ["", "   "] {
+            let map = settings(json!({ "live_save_path": value }));
+            let plan = recording_request(&task, &info, &map, PathBuf::from("ffmpeg"), default_dir)
+                .unwrap();
+            assert_eq!(plan.request.output_dir, default_dir);
+        }
+        let map = settings(json!({ "live_save_path": "E:/rec" }));
+        let plan =
+            recording_request(&task, &info, &map, PathBuf::from("ffmpeg"), default_dir).unwrap();
+        assert_eq!(plan.request.output_dir, PathBuf::from("E:/rec"));
     }
 
     #[test]

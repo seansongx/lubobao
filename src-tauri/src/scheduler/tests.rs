@@ -17,13 +17,19 @@ use crate::tasks::model::HELD_REASON;
 use crate::tasks::store::Store;
 use crate::tasks::{AddTaskInput, DisplayStatus, TaskMutation};
 
+use super::SHUTDOWN_TIMEOUT;
+
 // ---- 假平台 ----
 
 #[derive(Clone)]
 enum Reply {
     Live,
+    /// 已开播，但没有流地址。
+    LiveNoStream,
     Offline,
     Fail(PlatformError),
+    /// 适配器内部 panic。
+    Panic,
 }
 
 #[derive(Default)]
@@ -56,7 +62,7 @@ impl FakeSource {
     }
 }
 
-fn live_info(url: &str, is_live: bool) -> LiveInfo {
+pub(super) fn live_info(url: &str, is_live: bool) -> LiveInfo {
     let room_id = url.rsplit('/').next().unwrap_or_default().to_string();
     let variant = StreamVariant {
         name: "ORIGIN".into(),
@@ -89,6 +95,30 @@ fn live_info(url: &str, is_live: bool) -> LiveInfo {
     }
 }
 
+/// 由检测结果构造一个监控中、空闲的任务快照（policy 测试用）。
+pub(super) fn snapshot_for(info: &LiveInfo) -> TaskSnapshot {
+    crate::tasks::Task {
+        id: 1,
+        config: crate::tasks::TaskConfig {
+            url: info.live_url.clone().unwrap_or_default(),
+            platform: info.platform,
+            room_id: info.room_id.clone(),
+            anchor_id: info.anchor_id.clone(),
+            anchor_name: info.anchor_name.clone(),
+            live_url: info.live_url.clone(),
+            quality: Quality::Od,
+            notify_only: false,
+            note: String::new(),
+            created_at: 0,
+        },
+        monitoring: Monitoring::Enabled,
+        live: LiveState::Unknown,
+        record: RecordState::Idle,
+        held: false,
+    }
+    .snapshot()
+}
+
 impl LiveSource for Arc<FakeSource> {
     fn fetch(
         &self,
@@ -118,27 +148,62 @@ impl LiveSource for Arc<FakeSource> {
                 .unwrap_or(Reply::Offline);
             match reply {
                 Reply::Live => Ok(live_info(&url, true)),
+                Reply::LiveNoStream => Ok(LiveInfo {
+                    selected: None,
+                    variants: Vec::new(),
+                    ..live_info(&url, true)
+                }),
                 Reply::Offline => Ok(live_info(&url, false)),
                 Reply::Fail(error) => Err(error),
+                Reply::Panic => panic!("假适配器 panic"),
             }
         })
     }
 }
 
 // ---- 假录制引擎 ----
+//
+// 与真实引擎一致：
+// - `start` 返回前可能要等一会（建目录、查磁盘、启动 ffmpeg），测试用 `start_gate` 控制；
+// - `stop` 只发请求，事件在另一个任务里送回；
+// - `stop_all` 只停 `start` 已经返回的录制（真实引擎此时才登记到全局列表）；
+// - `wait` 在 `finished` 送出之后才返回；引擎内部崩溃时不发 `finished`，`wait` 返回失败。
+
+struct Shared {
+    listener: EventListener,
+    stopped: AtomicBool,
+    finished: AtomicBool,
+    /// `start` 是否已经返回。
+    returned: AtomicBool,
+    outcome: tokio::sync::watch::Sender<Option<RecordingOutcome>>,
+}
+
+impl Shared {
+    fn finish(&self, reason: EndReason) {
+        if !self.finished.swap(true, Ordering::SeqCst) {
+            let outcome = outcome(reason);
+            (self.listener)(&RecorderEvent::Finished {
+                outcome: outcome.clone(),
+            });
+            self.outcome.send_replace(Some(outcome));
+        }
+    }
+
+    /// 引擎内部任务崩溃：不发 `finished`，`wait` 得到失败结果。
+    fn crash(&self) {
+        if !self.finished.swap(true, Ordering::SeqCst) {
+            self.outcome
+                .send_replace(Some(failed_outcome("录制任务意外结束".into())));
+        }
+    }
+}
 
 struct FakeRecording {
     request: RecordingRequest,
-    listener: EventListener,
-    stopped: Arc<AtomicBool>,
-    finished: Arc<AtomicBool>,
+    shared: Arc<Shared>,
 }
 
-struct FakeControl {
-    listener: EventListener,
-    stopped: Arc<AtomicBool>,
-    finished: Arc<AtomicBool>,
-}
+struct FakeControl(Arc<Shared>);
 
 fn outcome(reason: EndReason) -> RecordingOutcome {
     RecordingOutcome {
@@ -154,38 +219,48 @@ fn outcome(reason: EndReason) -> RecordingOutcome {
     }
 }
 
-fn emit_finished(listener: &EventListener, finished: &AtomicBool, reason: EndReason) {
-    if !finished.swap(true, Ordering::SeqCst) {
-        listener(&RecorderEvent::Finished {
-            outcome: outcome(reason),
+impl RecordingControl for FakeControl {
+    fn stop(&self) {
+        if self.0.stopped.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let shared = Arc::clone(&self.0);
+        tokio::spawn(async move {
+            if shared.finished.load(Ordering::SeqCst) {
+                return;
+            }
+            (shared.listener)(&RecorderEvent::Stopping {
+                cause: StopCause::User,
+            });
+            shared.finish(EndReason::UserStopped);
         });
+    }
+
+    fn wait(&self) -> BoxFuture<'static, RecordingOutcome> {
+        let mut rx = self.0.outcome.subscribe();
+        Box::pin(async move {
+            rx.wait_for(Option::is_some)
+                .await
+                .ok()
+                .and_then(|outcome| outcome.clone())
+                .unwrap_or_else(|| failed_outcome("录制任务意外结束".into()))
+        })
     }
 }
 
-impl RecordingControl for FakeControl {
-    // 与真实引擎一样：只发出请求，事件在另一个任务里送回。
-    fn stop(&self) {
-        if self.stopped.swap(true, Ordering::SeqCst) {
-            return;
-        }
-        let listener = Arc::clone(&self.listener);
-        let finished = Arc::clone(&self.finished);
-        tokio::spawn(async move {
-            if finished.load(Ordering::SeqCst) {
-                return;
-            }
-            listener(&RecorderEvent::Stopping {
-                cause: StopCause::User,
-            });
-            emit_finished(&listener, &finished, EndReason::UserStopped);
-        });
-    }
-}
+type Hook = Box<dyn Fn() + Send + Sync>;
 
 struct FakeEngine {
     ffmpeg: Mutex<Option<PathBuf>>,
-    /// 为 false 时启动后不发 `started`，模拟 ffmpeg 还在启动。
+    /// 为 false 时启动后不发 `started`。
     emit_started: AtomicBool,
+    /// 设置后 `start` 要取到许可才返回，模拟 ffmpeg 还在启动。
+    start_gate: Mutex<Option<Arc<Semaphore>>>,
+    panic_on_start: AtomicBool,
+    /// `stop_all` 永不返回，模拟收尾卡住。
+    stop_all_hangs: AtomicBool,
+    /// 查询 ffmpeg 路径时执行，用来在「检测到开播之后、占位之前」插入用户操作。
+    on_ffmpeg_path: Mutex<Option<Hook>>,
     recordings: Mutex<Vec<FakeRecording>>,
     stop_all_calls: AtomicUsize,
 }
@@ -195,6 +270,10 @@ impl Default for FakeEngine {
         FakeEngine {
             ffmpeg: Mutex::new(Some(PathBuf::from("ffmpeg.exe"))),
             emit_started: AtomicBool::new(true),
+            start_gate: Mutex::default(),
+            panic_on_start: AtomicBool::new(false),
+            stop_all_hangs: AtomicBool::new(false),
+            on_ffmpeg_path: Mutex::default(),
             recordings: Mutex::default(),
             stop_all_calls: AtomicUsize::new(0),
         }
@@ -210,33 +289,46 @@ impl FakeEngine {
         self.recordings.lock().unwrap()[index].request.clone()
     }
 
+    fn shared(&self, index: usize) -> Arc<Shared> {
+        Arc::clone(&self.recordings.lock().unwrap()[index].shared)
+    }
+
     fn stopped(&self, index: usize) -> bool {
-        self.recordings.lock().unwrap()[index]
-            .stopped
-            .load(Ordering::SeqCst)
+        self.shared(index).stopped.load(Ordering::SeqCst)
     }
 
     fn emit(&self, index: usize, event: RecorderEvent) {
-        let listener = Arc::clone(&self.recordings.lock().unwrap()[index].listener);
-        listener(&event);
+        (self.shared(index).listener)(&event);
     }
 
     /// 引擎自己结束录制（断流、磁盘满等）。
     fn end(&self, index: usize, reason: EndReason) {
-        let (listener, finished) = {
-            let recordings = self.recordings.lock().unwrap();
-            let recording = &recordings[index];
-            (
-                Arc::clone(&recording.listener),
-                Arc::clone(&recording.finished),
-            )
-        };
-        emit_finished(&listener, &finished, reason);
+        self.shared(index).finish(reason);
+    }
+
+    fn gate_starts(&self) -> Arc<Semaphore> {
+        let gate = Arc::new(Semaphore::new(0));
+        *self.start_gate.lock().unwrap() = Some(Arc::clone(&gate));
+        gate
+    }
+}
+
+fn started_event() -> RecorderEvent {
+    RecorderEvent::Started {
+        output_dir: PathBuf::from("out"),
+        output_path: PathBuf::from("out/rec_%03d.ts"),
+        source_format: crate::platforms::SourceFormat::Flv,
+        segmented: true,
+        pid: Some(1),
+        started_at_ms: now_ms(),
     }
 }
 
 impl RecordEngine for Arc<FakeEngine> {
     fn ffmpeg_path(&self) -> Option<PathBuf> {
+        if let Some(hook) = self.on_ffmpeg_path.lock().unwrap().take() {
+            hook();
+        }
         self.ffmpeg.lock().unwrap().clone()
     }
 
@@ -247,29 +339,29 @@ impl RecordEngine for Arc<FakeEngine> {
     ) -> BoxFuture<'static, Arc<dyn RecordingControl>> {
         let engine = Arc::clone(self);
         Box::pin(async move {
-            let stopped = Arc::new(AtomicBool::new(false));
-            let finished = Arc::new(AtomicBool::new(false));
+            let shared = Arc::new(Shared {
+                listener,
+                stopped: AtomicBool::new(false),
+                finished: AtomicBool::new(false),
+                returned: AtomicBool::new(false),
+                outcome: tokio::sync::watch::channel(None).0,
+            });
             engine.recordings.lock().unwrap().push(FakeRecording {
                 request,
-                listener: Arc::clone(&listener),
-                stopped: Arc::clone(&stopped),
-                finished: Arc::clone(&finished),
+                shared: Arc::clone(&shared),
             });
-            if engine.emit_started.load(Ordering::SeqCst) {
-                listener(&RecorderEvent::Started {
-                    output_dir: PathBuf::from("out"),
-                    output_path: PathBuf::from("out/rec_%03d.ts"),
-                    source_format: crate::platforms::SourceFormat::Flv,
-                    segmented: true,
-                    pid: Some(1),
-                    started_at_ms: now_ms(),
-                });
+            if engine.panic_on_start.load(Ordering::SeqCst) {
+                panic!("假录制引擎 panic");
             }
-            Arc::new(FakeControl {
-                listener,
-                stopped,
-                finished,
-            }) as Arc<dyn RecordingControl>
+            let gate = engine.start_gate.lock().unwrap().clone();
+            if let Some(gate) = gate {
+                gate.acquire().await.unwrap().forget();
+            }
+            if engine.emit_started.load(Ordering::SeqCst) {
+                (shared.listener)(&started_event());
+            }
+            shared.returned.store(true, Ordering::SeqCst);
+            Arc::new(FakeControl(shared)) as Arc<dyn RecordingControl>
         })
     }
 
@@ -277,21 +369,20 @@ impl RecordEngine for Arc<FakeEngine> {
         self.stop_all_calls.fetch_add(1, Ordering::SeqCst);
         let engine = Arc::clone(self);
         Box::pin(async move {
-            let pending: Vec<(EventListener, Arc<AtomicBool>)> = engine
+            if engine.stop_all_hangs.load(Ordering::SeqCst) {
+                std::future::pending::<()>().await;
+            }
+            let active: Vec<Arc<Shared>> = engine
                 .recordings
                 .lock()
                 .unwrap()
                 .iter()
-                .map(|recording| {
-                    recording.stopped.store(true, Ordering::SeqCst);
-                    (
-                        Arc::clone(&recording.listener),
-                        Arc::clone(&recording.finished),
-                    )
-                })
+                .filter(|recording| recording.shared.returned.load(Ordering::SeqCst))
+                .map(|recording| Arc::clone(&recording.shared))
                 .collect();
-            for (listener, finished) in pending {
-                emit_finished(&listener, &finished, EndReason::UserStopped);
+            for shared in active {
+                shared.stopped.store(true, Ordering::SeqCst);
+                shared.finish(EndReason::UserStopped);
             }
         })
     }
@@ -306,6 +397,8 @@ struct Harness {
     engine: Arc<FakeEngine>,
     scheduler: Arc<Scheduler>,
     statuses: Arc<Mutex<Vec<SchedulerStatus>>>,
+    /// 每次推送任务快照时的（任务、录制状态、当时调度占用的录制位置数）。
+    record_writes: Arc<Mutex<Vec<(TaskId, RecordState, usize)>>>,
 }
 
 const INTERVAL: Duration = Duration::from_secs(180);
@@ -313,8 +406,22 @@ const INTERVAL: Duration = Duration::from_secs(180);
 fn harness() -> Harness {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(&dir.path().join("lubobao.db")).unwrap();
-    let tasks =
-        Arc::new(TaskManager::open(store, &dir.path().join("videos"), Box::new(|_| {})).unwrap());
+    let record_writes: Arc<Mutex<Vec<(TaskId, RecordState, usize)>>> = Arc::default();
+    let scheduler_cell: Arc<std::sync::OnceLock<std::sync::Weak<Scheduler>>> = Arc::default();
+    let (writes, cell) = (Arc::clone(&record_writes), Arc::clone(&scheduler_cell));
+    let listener: crate::tasks::Listener = Box::new(move |event| {
+        if let crate::tasks::TaskEvent::Updated(task) = event {
+            let slots = cell
+                .get()
+                .and_then(std::sync::Weak::upgrade)
+                .map_or(0, |scheduler| scheduler.status().recording);
+            writes
+                .lock()
+                .unwrap()
+                .push((task.id, task.record.clone(), slots));
+        }
+    });
+    let tasks = Arc::new(TaskManager::open(store, &dir.path().join("videos"), listener).unwrap());
     let source = Arc::new(FakeSource::default());
     let engine = Arc::new(FakeEngine::default());
     let statuses: Arc<Mutex<Vec<SchedulerStatus>>> = Arc::default();
@@ -325,6 +432,7 @@ fn harness() -> Harness {
         Arc::new(Arc::clone(&engine)),
         Box::new(move |status: &SchedulerStatus| sink.lock().unwrap().push(status.clone())),
     );
+    let _ = scheduler_cell.set(Arc::downgrade(&scheduler));
     Harness {
         _dir: dir,
         tasks,
@@ -332,13 +440,14 @@ fn harness() -> Harness {
         engine,
         scheduler,
         statuses,
+        record_writes,
     }
 }
 
 impl Harness {
     fn add(&self, room: &str, reply: Reply, notify_only: bool) -> (TaskId, String) {
         let url = format!("https://live.douyin.com/{room}");
-        let is_live = matches!(reply, Reply::Live);
+        let is_live = matches!(reply, Reply::Live | Reply::LiveNoStream);
         self.source.set(&url, reply);
         let input = AddTaskInput {
             url: url.clone(),
@@ -416,6 +525,7 @@ async fn starts_recording_when_live_with_settings_and_tracks_progress() {
         "live_save_path": "D:/录像",
         "video_segment_time": 600,
         "proxy_address": "127.0.0.1:7890",
+        "default_platform_with_proxy": "douyin",
     }));
     let (id, url) = h.add("1002", Reply::Live, false);
     h.start();
@@ -428,7 +538,10 @@ async fn starts_recording_when_live_with_settings_and_tracks_progress() {
     assert_eq!(request.platform, "抖音");
     assert_eq!(request.anchor_name, "主播1002");
     assert_eq!(request.options.segment_secs, 600);
-    assert_eq!(request.options.proxy.as_deref(), Some("127.0.0.1:7890"));
+    assert_eq!(
+        request.options.proxy.as_deref(),
+        Some("http://127.0.0.1:7890")
+    );
     assert_eq!(request.headers["Referer"], "https://live.douyin.com/");
 
     let task = h.task(id);
@@ -809,19 +922,6 @@ async fn shutdown_finishes_recordings_and_stops_polling() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn shutdown_stops_a_recording_that_is_still_starting() {
-    let h = harness();
-    h.engine.emit_started.store(false, Ordering::SeqCst);
-    let (id, _) = h.add("1017", Reply::Live, false);
-    h.start();
-    until(SHORT, "启动中", || h.engine.starts() == 1).await;
-    h.scheduler.shutdown().await;
-    assert!(h.engine.stopped(0));
-    assert_eq!(h.scheduler.status().recording, 0);
-    assert_eq!(h.task(id).record, RecordState::Idle);
-}
-
-#[tokio::test(start_paused = true)]
 async fn reports_the_next_check_time() {
     let h = harness();
     assert_eq!(h.scheduler.status().next_check_at, None);
@@ -840,14 +940,240 @@ async fn reports_the_next_check_time() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn shutdown_stops_a_recording_that_is_still_starting() {
+    let h = harness();
+    let gate = h.engine.gate_starts();
+    let (id, _) = h.add("1017", Reply::Live, false);
+    h.start();
+    until(SHORT, "启动中", || h.engine.starts() == 1).await;
+    // 退出时 ffmpeg 还在启动：stop_all 看不到它，要靠调度在启动返回后停止。
+    let scheduler = Arc::clone(&h.scheduler);
+    let shutdown = tokio::spawn(async move { scheduler.shutdown().await });
+    sleep(Duration::from_secs(1)).await;
+    assert!(!shutdown.is_finished(), "录制还没结束，shutdown 不应返回");
+    gate.add_permits(1);
+    shutdown.await.unwrap();
+    assert!(h.engine.stopped(0));
+    assert_eq!(h.scheduler.status().recording, 0);
+    assert_eq!(h.task(id).record, RecordState::Idle);
+}
+
+#[tokio::test(start_paused = true)]
+async fn writes_the_final_state_before_shutdown_can_return() {
+    let h = harness();
+    let gate = h.engine.gate_starts();
+    let (id, _) = h.add("1020", Reply::Live, false);
+    h.start();
+    until(SHORT, "启动中", || h.engine.starts() == 1).await;
+    let scheduler = Arc::clone(&h.scheduler);
+    let shutdown = tokio::spawn(async move { scheduler.shutdown().await });
+    sleep(Duration::from_secs(1)).await;
+    gate.add_permits(1);
+    shutdown.await.unwrap();
+    // 写入空闲状态的那一刻，占位必须还在：shutdown 等的是占位清空，清空时状态已经落盘。
+    let writes = h.record_writes.lock().unwrap().clone();
+    let idle = writes
+        .iter()
+        .rev()
+        .find(|(task, record, _)| *task == id && *record == RecordState::Idle)
+        .expect("应写入空闲状态");
+    assert!(
+        writes
+            .iter()
+            .any(|(task, record, _)| *task == id && matches!(record, RecordState::Recording { .. })),
+        "应先进入录制中"
+    );
+    assert_eq!(idle.2, 1, "写入结束状态时占位已被释放");
+}
+
+#[tokio::test(start_paused = true)]
 async fn deleting_a_task_stops_its_starting_recording() {
     let h = harness();
-    h.engine.emit_started.store(false, Ordering::SeqCst);
+    let gate = h.engine.gate_starts();
     let (id, _) = h.add("1019", Reply::Live, false);
     h.start();
     until(SHORT, "启动中", || h.engine.starts() == 1).await;
-    // 录制状态还是空闲，删除不会被拒绝，但调度要停掉这个录制。
+    // 录制状态还是空闲，删除不会被拒绝，但调度要在启动返回后停掉这个录制。
     assert_eq!(h.tasks.delete_tasks(&[id]).unwrap(), vec![id]);
-    assert!(h.engine.stopped(0));
+    gate.add_permits(1);
+    until(SHORT, "停止", || h.engine.stopped(0)).await;
     until(SHORT, "释放", || h.scheduler.status().recording == 0).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn pausing_between_live_detection_and_start_does_not_record() {
+    let h = harness();
+    let (id, url) = h.add("1021", Reply::Live, false);
+    let tasks = Arc::clone(&h.tasks);
+    // 检测已写入「已开播」、还没占位时，用户点了暂停。
+    *h.engine.on_ffmpeg_path.lock().unwrap() = Some(Box::new(move || {
+        tasks.set_monitoring(&[id], false).unwrap();
+    }));
+    h.start();
+    until(SHORT, "检测", || h.source.calls(&url).len() == 1).await;
+    sleep(SHORT).await;
+    assert_eq!(h.engine.starts(), 0, "已暂停的任务不应开始录制");
+    assert_eq!(h.scheduler.status().recording, 0);
+    assert_eq!(h.task(id).display, DisplayStatus::Paused);
+}
+
+#[tokio::test(start_paused = true)]
+async fn switching_to_notify_only_before_start_does_not_record() {
+    let h = harness();
+    let (id, url) = h.add("1022", Reply::Live, false);
+    let tasks = Arc::clone(&h.tasks);
+    *h.engine.on_ffmpeg_path.lock().unwrap() = Some(Box::new(move || {
+        let input = crate::tasks::UpdateTaskInput {
+            id,
+            notify_only: Some(true),
+            ..Default::default()
+        };
+        tasks.update_resolved(input, None).unwrap();
+    }));
+    h.start();
+    until(SHORT, "检测", || h.source.calls(&url).len() == 1).await;
+    sleep(SHORT).await;
+    assert_eq!(h.engine.starts(), 0);
+    assert_eq!(h.scheduler.status().recording, 0);
+    assert_eq!(h.task(id).display, DisplayStatus::Notify);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_panicking_adapter_does_not_block_its_platform() {
+    let h = harness();
+    h.update_settings(json!({ "platform_max_concurrent_requests": 1 }));
+    let (bad, bad_url) = h.add("1023", Reply::Panic, false);
+    let (_, good_url) = h.add("1024", Reply::Offline, false);
+    h.start();
+    // 并发上限为 1：如果 panic 不归还名额，另一个任务永远轮不到。
+    until(SHORT, "另一个任务被检测", || {
+        h.source.calls(&good_url).len() == 1
+    })
+    .await;
+    until(
+        Duration::from_secs(60),
+        "panic 的任务退避重试",
+        || h.source.calls(&bad_url).len() >= 3,
+    )
+    .await;
+    let task = h.task(bad);
+    let LiveState::CheckFailed { kind, message, .. } = &task.live else {
+        panic!("应为检测失败：{:?}", task.live);
+    };
+    assert_eq!(*kind, PlatformErrorKind::Parse);
+    assert!(message.contains("内部错误"), "{message}");
+    assert_eq!(task.display, DisplayStatus::Retrying);
+    until(INTERVAL + SHORT, "另一个任务照常检测", || {
+        h.source.calls(&good_url).len() == 2
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_panicking_engine_start_releases_the_slot() {
+    let h = harness();
+    h.engine.panic_on_start.store(true, Ordering::SeqCst);
+    let (id, _) = h.add("1025", Reply::Live, false);
+    h.start();
+    until(SHORT, "启动", || h.engine.starts() == 1).await;
+    until(SHORT, "失败", || {
+        matches!(h.task(id).record, RecordState::Failed { .. })
+    })
+    .await;
+    assert_eq!(h.scheduler.status().recording, 0);
+    assert_eq!(h.task(id).display, DisplayStatus::NeedsAction);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_crashed_recorder_without_finished_releases_the_slot() {
+    let h = harness();
+    let (id, _) = h.add("1026", Reply::Live, false);
+    h.start();
+    until(SHORT, "开始录制", || h.engine.starts() == 1).await;
+    until(SHORT, "录制中", || {
+        matches!(h.task(id).record, RecordState::Recording { .. })
+    })
+    .await;
+    // 引擎内部任务崩溃，没有发出 finished。
+    h.engine.shared(0).crash();
+    until(SHORT, "失败", || {
+        matches!(h.task(id).record, RecordState::Failed { .. })
+    })
+    .await;
+    assert_eq!(h.scheduler.status().recording, 0);
+}
+
+#[tokio::test(start_paused = true)]
+async fn reenabling_while_the_stopped_recording_finishes_rechecks_at_once() {
+    let h = harness();
+    let (id, _) = h.add("1027", Reply::Live, false);
+    h.start();
+    until(SHORT, "开始录制", || h.engine.starts() == 1).await;
+    // 暂停（录制随之停止）后马上恢复，录制还在收尾。
+    h.tasks.set_monitoring(&[id], false).unwrap();
+    h.tasks.set_monitoring(&[id], true).unwrap();
+    until(SHORT, "立即续录", || h.engine.starts() == 2).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn shutdown_time_limit_includes_stop_all() {
+    let h = harness();
+    h.engine.stop_all_hangs.store(true, Ordering::SeqCst);
+    let (_, _) = h.add("1028", Reply::Live, false);
+    h.start();
+    until(SHORT, "开始录制", || h.engine.starts() == 1).await;
+    let started = Instant::now();
+    tokio::time::timeout(Duration::from_secs(120), h.scheduler.shutdown())
+        .await
+        .expect("shutdown 应在时限内返回");
+    assert!(
+        started.elapsed() <= SHUTDOWN_TIMEOUT,
+        "{:?}",
+        started.elapsed()
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn live_without_a_stream_backs_off() {
+    let h = harness();
+    let (id, url) = h.add("1029", Reply::LiveNoStream, false);
+    h.start();
+    until(Duration::from_secs(120), "四次检测", || {
+        h.source.calls(&url).len() == 4
+    })
+    .await;
+    let calls = h.source.calls(&url);
+    let gaps: Vec<u64> = calls.windows(2).map(|w| (w[1] - w[0]).as_secs()).collect();
+    assert_eq!(gaps, vec![10, 20, 40]);
+    until(SHORT, "第四次失败", || {
+        matches!(h.task(id).live, LiveState::CheckFailed { attempt: 4, .. })
+    })
+    .await;
+    assert_eq!(h.engine.starts(), 0);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_socks_proxy_is_used_for_checks_but_recording_goes_direct() {
+    let h = harness();
+    h.update_settings(json!({
+        "proxy_address": "socks5://127.0.0.1:1080",
+        "default_platform_with_proxy": "douyin",
+    }));
+    let (id, _) = h.add("1030", Reply::Live, false);
+    h.start();
+    until(SHORT, "开始录制", || h.engine.starts() == 1).await;
+    assert_eq!(h.engine.request(0).options.proxy, None);
+    assert!(matches!(h.task(id).record, RecordState::Recording { .. }));
+    let warnings = h
+        .tasks
+        .list_activity(&crate::tasks::ActivityQuery {
+            kinds: vec![ActivityKind::Warning],
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(warnings.items.len(), 1);
+    assert_eq!(
+        warnings.items[0].message,
+        "录制不支持 SOCKS5 代理，已直连录制（检测仍使用代理）"
+    );
 }

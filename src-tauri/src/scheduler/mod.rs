@@ -35,10 +35,12 @@ use tokio::time::Instant;
 
 use crate::ffmpeg::FfmpegManager;
 use crate::platforms::{BoxFuture, FetchOptions, LiveInfo, Platform, PlatformError};
-use crate::recorder::{EventListener, RecorderEvent, RecordingOutcome, RecordingRequest};
+use crate::recorder::{
+    EndReason, EventListener, RecorderEvent, RecordingOutcome, RecordingRequest,
+};
 use crate::tasks::{
-    LiveState, Monitoring, PlatformErrorKind, RecordState, SchedulerHook, TaskId, TaskManager,
-    TaskSnapshot, now_ms,
+    ActivityKind, LiveState, Monitoring, NewActivity, PlatformErrorKind, RecordState,
+    SchedulerHook, TaskId, TaskManager, TaskSnapshot, now_ms,
 };
 
 mod engine;
@@ -70,6 +72,8 @@ pub trait LiveSource: Send + Sync {
 pub trait RecordingControl: Send + Sync {
     /// 请求正常停止，立即返回。
     fn stop(&self);
+    /// 等录制结束，返回结果。引擎内部异常退出时也会返回（原因为 FFmpeg 异常退出）。
+    fn wait(&self) -> BoxFuture<'static, RecordingOutcome>;
 }
 
 /// 录制引擎。
@@ -117,6 +121,8 @@ struct Slot {
     id: u64,
     control: Option<Arc<dyn RecordingControl>>,
     stop_requested: bool,
+    /// 已开始收尾，防止重复处理。
+    finishing: bool,
     reserved_at: Instant,
     file_path: Option<PathBuf>,
 }
@@ -347,30 +353,47 @@ impl Core {
         (self.status_listener)(&status);
     }
 
-    /// 检测一次。调用前 `plan` 已标记为检测中并占用平台并发名额。
+    /// 检测一次。调用前 `plan` 已标记为检测中并占用平台并发名额；`guard` 保证即使中途
+    /// panic 也会归还名额、清除检测中标记。
     async fn check(self: Arc<Self>, task: TaskSnapshot) {
         let id = task.id;
+        let mut guard = CheckGuard {
+            core: Arc::clone(&self),
+            id,
+            platform: task.config.platform,
+            armed: true,
+        };
         self.tasks
             .set_live_state(id, LiveState::Checking { since: now_ms() });
         let settings = self.tasks.settings();
-        let result = self
-            .source
-            .fetch(
-                task.config.url.clone(),
-                policy::fetch_options(&task, &settings),
-            )
-            .await;
+        // 在子任务里请求：适配器 panic 时当作解析失败，不影响调度。
+        let fetch = self.source.fetch(
+            task.config.url.clone(),
+            policy::fetch_options(&task, &settings),
+        );
+        let result = tokio::spawn(fetch).await.unwrap_or_else(|error| {
+            Err(PlatformError::Parse(format!("检测时发生内部错误：{error}")))
+        });
         let interval = policy::interval(&settings);
 
         // 检测期间被暂停或删除的任务丢弃这次结果。
-        let still_monitored = self
+        let current = self
             .tasks
             .get(id)
-            .is_some_and(|current| current.monitoring == Monitoring::Enabled);
+            .filter(|current| current.monitoring == Monitoring::Enabled);
         let mut start = None;
         let mut delay = interval;
         let mut succeeded = true;
-        if still_monitored {
+        if let Some(current) = current {
+            // 要录制却没有流地址：在写入已开播之前按解析失败处理，让退避生效。
+            let result = match result {
+                Ok(info)
+                    if info.is_live && info.selected.is_none() && wants_recording(&current) =>
+                {
+                    Err(PlatformError::Parse("已开播，但没有取到直播流地址".into()))
+                }
+                other => other,
+            };
             match result {
                 Ok(info) if info.is_live => {
                     let snapshot = self.tasks.set_live_state(
@@ -380,8 +403,8 @@ impl Core {
                             title: info.title.clone(),
                         },
                     );
-                    if let Some(snapshot) = snapshot.filter(wants_recording) {
-                        start = Some((snapshot, info));
+                    if snapshot.as_ref().is_some_and(wants_recording) {
+                        start = Some(info);
                     }
                 }
                 Ok(_) => {
@@ -399,25 +422,31 @@ impl Core {
             }
         }
 
+        guard.armed = false;
+        self.end_check(id, task.config.platform, succeeded.then_some(()), delay);
+
+        if let Some(info) = start {
+            self.start_recording(id, info, interval).await;
+        }
+    }
+
+    /// 检测结束：归还平台并发名额，排定下一次检测。`succeeded` 为 `Some` 时清零失败计数。
+    fn end_check(&self, id: TaskId, platform: Platform, succeeded: Option<()>, delay: Duration) {
         {
             let mut guard = self.lock();
             let state = &mut *guard;
-            if let Some(inflight) = state.inflight.get_mut(&task.config.platform) {
+            if let Some(inflight) = state.inflight.get_mut(&platform) {
                 *inflight = inflight.saturating_sub(1);
             }
             if let Some(entry) = state.entries.get_mut(&id) {
                 entry.checking = false;
-                if succeeded {
+                if succeeded.is_some() {
                     entry.failures = 0;
                 }
                 entry.next_at = Instant::now() + delay;
             }
         }
         self.wake.notify_one();
-
-        if let Some((snapshot, info)) = start {
-            self.start_recording(snapshot, info, interval).await;
-        }
     }
 
     /// 写入检测失败，返回到下一次检测的等待时长。
@@ -459,21 +488,34 @@ impl Core {
         self.wake.notify_one();
     }
 
-    async fn start_recording(
-        self: &Arc<Self>,
-        task: TaskSnapshot,
-        info: LiveInfo,
-        interval: Duration,
-    ) {
-        let id = task.id;
+    fn default_save_dir(&self) -> PathBuf {
+        PathBuf::from(
+            self.tasks
+                .defaults()
+                .get("live_save_path")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default(),
+        )
+    }
+
+    async fn start_recording(self: &Arc<Self>, id: TaskId, info: LiveInfo, interval: Duration) {
         let Some(ffmpeg) = self.engine.ffmpeg_path() else {
             // FFmpeg 还在下载或校验：保持已开播，稍后再检测。
             self.reschedule(id, policy::FFMPEG_WAIT.min(interval));
             return;
         };
+        let Some(task) = self.tasks.get(id) else {
+            return;
+        };
         let settings = self.tasks.settings();
-        let request = match policy::recording_request(&task, &info, &settings, ffmpeg) {
-            Ok(request) => request,
+        let plan = match policy::recording_request(
+            &task,
+            &info,
+            &settings,
+            ffmpeg,
+            &self.default_save_dir(),
+        ) {
+            Ok(plan) => plan,
             Err(error) => {
                 let delay = self.record_check_failure(id, &error, interval);
                 self.reschedule(id, delay);
@@ -483,22 +525,75 @@ impl Core {
         let Some(slot_id) = self.reserve(id) else {
             return;
         };
+        // 占位之后再核对一次：检测到开播之后、占位之前，用户可能已经暂停监控、改成仅通知
+        // 或手动停止。那时 `stop_recording` 找不到占位，只能在这里拦下。
+        let Some(task) = self.tasks.get(id).filter(wants_recording) else {
+            self.release_slot(id, slot_id);
+            return;
+        };
+        let mut slot_guard = SlotGuard {
+            core: Arc::clone(self),
+            id,
+            slot_id,
+            armed: true,
+        };
+        if let Some(message) = plan.warning {
+            self.warn(&task, message);
+        }
+
         let weak = Arc::downgrade(self);
         let listener: EventListener = Arc::new(move |event: &RecorderEvent| {
             if let Some(core) = weak.upgrade() {
                 core.handle_event(id, slot_id, event);
             }
         });
-        let control = self.engine.start(request, listener).await;
-        let mut guard = self.lock();
-        let shutting_down = guard.shutting_down;
-        // 启动期间就失败的录制已经收到 `finished`，占位已释放。
-        if let Some(slot) = guard.slots.get_mut(&id).filter(|slot| slot.id == slot_id) {
-            if slot.stop_requested || shutting_down {
-                control.stop();
+        // 在子任务里启动：引擎 panic 时按启动失败收尾，释放占位。
+        let start = self.engine.start(plan.request, listener);
+        let control = match tokio::spawn(start).await {
+            Ok(control) => control,
+            Err(error) => {
+                slot_guard.armed = false;
+                self.finish(
+                    id,
+                    slot_id,
+                    &failed_outcome(format!("启动录制时发生内部错误：{error}")),
+                );
+                return;
             }
-            slot.control = Some(control);
+        };
+        slot_guard.armed = false;
+        {
+            let mut guard = self.lock();
+            let shutting_down = guard.shutting_down;
+            // 启动期间就失败的录制已经收到 `finished`，占位已释放。
+            if let Some(slot) = guard.slots.get_mut(&id).filter(|slot| slot.id == slot_id) {
+                if slot.stop_requested || shutting_down {
+                    control.stop();
+                }
+                slot.control = Some(Arc::clone(&control));
+            }
         }
+        // 兜底：引擎内部任务异常退出、没有发出 `finished` 时，靠等待结果收尾。
+        // 正常结束时 `finished` 已经处理过，这里不会重复。
+        let weak = Arc::downgrade(self);
+        let outcome = control.wait();
+        tokio::spawn(async move {
+            let outcome = outcome.await;
+            if let Some(core) = weak.upgrade() {
+                core.finish(id, slot_id, &outcome);
+            }
+        });
+    }
+
+    fn warn(&self, task: &TaskSnapshot, message: String) {
+        eprintln!("录制提示（任务 {}）：{message}", task.id);
+        let _ = self.tasks.record_activity(NewActivity {
+            task_id: Some(task.id),
+            anchor_name: task.config.anchor_name.clone(),
+            kind: ActivityKind::Warning,
+            message,
+            detail: None,
+        });
     }
 
     /// 为任务占一个录制位置。已有录制或正在退出时返回 `None`。
@@ -515,6 +610,7 @@ impl Core {
                 id: slot_id,
                 control: None,
                 stop_requested: false,
+                finishing: false,
                 reserved_at: Instant::now(),
                 file_path: None,
             },
@@ -522,6 +618,18 @@ impl Core {
         drop(state);
         self.wake.notify_one();
         Some(slot_id)
+    }
+
+    /// 释放还没启动录制的占位。
+    fn release_slot(&self, id: TaskId, slot_id: u64) {
+        {
+            let mut state = self.lock();
+            if state.slots.get(&id).is_some_and(|slot| slot.id == slot_id) {
+                state.slots.remove(&id);
+            }
+        }
+        self.slots_changed.notify_waiters();
+        self.wake.notify_one();
     }
 
     fn handle_event(&self, id: TaskId, slot_id: u64, event: &RecorderEvent) {
@@ -578,7 +686,9 @@ impl Core {
                 }
             }
             RecorderEvent::Warning { message } => {
-                eprintln!("录制警告（任务 {id}）：{message}");
+                if let Some(task) = self.tasks.get(id) {
+                    self.warn(&task, message.clone());
+                }
             }
             RecorderEvent::Finished { outcome } => self.finish(id, slot_id, outcome),
         }
@@ -596,25 +706,25 @@ impl Core {
         true
     }
 
-    /// 录制结束：回写录制状态，再按结束原因安排下一次检测。
+    /// 录制结束：先回写录制状态，再释放占位（退出时等的就是占位清空，状态必须已落盘），
+    /// 最后按结束原因安排下一次检测。同一个录制只处理一次。
     fn finish(&self, id: TaskId, slot_id: u64, outcome: &RecordingOutcome) {
-        let slot = {
+        let (file_path, reserved_at) = {
             let mut state = self.lock();
-            match state.slots.get(&id) {
-                Some(slot) if slot.id == slot_id => state.slots.remove(&id),
-                _ => None,
+            match state.slots.get_mut(&id) {
+                Some(slot) if slot.id == slot_id && !slot.finishing => {
+                    slot.finishing = true;
+                    (slot.file_path.clone(), slot.reserved_at)
+                }
+                _ => return,
             }
         };
-        let Some(slot) = slot else {
-            return;
-        };
-        self.slots_changed.notify_waiters();
 
         if self.tasks.get(id).is_some() {
             let record = if outcome.reason.needs_attention() {
                 RecordState::Failed {
                     reason: describe(outcome),
-                    file_path: outcome.files.first().cloned().or(slot.file_path),
+                    file_path: outcome.files.first().cloned().or(file_path),
                     failed_at: outcome.ended_at_ms,
                 }
             } else {
@@ -626,29 +736,34 @@ impl Core {
         }
 
         let interval = policy::interval(&self.tasks.settings());
-        let mut state = self.lock();
-        if state.shutting_down {
-            return;
-        }
-        if let Some(entry) = state.entries.get_mut(&id) {
-            let delay = if outcome.reason.should_recheck() {
-                entry.short_runs = if slot.reserved_at.elapsed() < policy::MIN_VALID_RECORDING {
-                    entry.short_runs + 1
+        {
+            let mut state = self.lock();
+            state.slots.remove(&id);
+            if !state.shutting_down
+                && let Some(entry) = state.entries.get_mut(&id)
+            {
+                let delay = if outcome.reason.should_recheck() {
+                    entry.short_runs = if reserved_at.elapsed() < policy::MIN_VALID_RECORDING {
+                        entry.short_runs + 1
+                    } else {
+                        0
+                    };
+                    policy::recheck_delay(entry.short_runs, interval)
                 } else {
-                    0
+                    // 手动停止、需处理：照常按间隔检测，开播时由保持状态或失败状态决定不录。
+                    // 暂停后又重新启用的，直播状态已重置为未知，`plan` 会立即检测。
+                    interval
                 };
-                policy::recheck_delay(entry.short_runs, interval)
-            } else {
-                // 手动停止、需处理：照常按间隔检测，开播时由保持状态或失败状态决定不录。
-                interval
-            };
-            entry.next_at = Instant::now() + delay;
+                entry.next_at = Instant::now() + delay;
+            }
         }
-        drop(state);
+        self.slots_changed.notify_waiters();
         self.wake.notify_one();
     }
 
     async fn shutdown(&self) {
+        // 总时限从这里算起，包括 stop_all 本身。
+        let deadline = Instant::now() + SHUTDOWN_TIMEOUT;
         let controls: Vec<Arc<dyn RecordingControl>> = {
             let mut state = self.lock();
             state.shutting_down = true;
@@ -665,9 +780,13 @@ impl Core {
             control.stop();
         }
         self.wake.notify_one();
-        self.engine.stop_all().await;
+        if tokio::time::timeout_at(deadline, self.engine.stop_all())
+            .await
+            .is_err()
+        {
+            eprintln!("退出时停止录制超时");
+        }
         // 等每个录制都回写结束状态，包括 stop_all 时还没启动完的。
-        let deadline = Instant::now() + SHUTDOWN_TIMEOUT;
         loop {
             let changed = self.slots_changed.notified();
             let remaining = self.lock().slots.len();
@@ -679,6 +798,59 @@ impl Core {
                 break;
             }
         }
+    }
+}
+
+/// 检测任务意外退出（panic）时归还平台并发名额，清除检测中标记，稍后重试。
+struct CheckGuard {
+    core: Arc<Core>,
+    id: TaskId,
+    platform: Platform,
+    armed: bool,
+}
+
+impl Drop for CheckGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            self.core
+                .end_check(self.id, self.platform, None, policy::RETRY_BASE);
+        }
+    }
+}
+
+/// 启动录制的过程意外退出（panic）时按启动失败收尾，释放占位。
+struct SlotGuard {
+    core: Arc<Core>,
+    id: TaskId,
+    slot_id: u64,
+    armed: bool,
+}
+
+impl Drop for SlotGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            self.core.finish(
+                self.id,
+                self.slot_id,
+                &failed_outcome("启动录制时发生内部错误".to_string()),
+            );
+        }
+    }
+}
+
+/// 引擎没有给出结果时（内部错误）使用的结束结果。
+fn failed_outcome(message: String) -> RecordingOutcome {
+    let now = now_ms();
+    RecordingOutcome {
+        reason: EndReason::FfmpegFailed,
+        message: Some(message),
+        exit_code: None,
+        files: Vec::new(),
+        bytes_written: 0,
+        duration_secs: None,
+        output_dir: None,
+        started_at_ms: now,
+        ended_at_ms: now,
     }
 }
 

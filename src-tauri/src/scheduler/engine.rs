@@ -6,7 +6,7 @@ use std::sync::Arc;
 use super::{LiveSource, RecordEngine, RecordingControl};
 use crate::ffmpeg::FfmpegManager;
 use crate::platforms::{BoxFuture, FetchOptions, LiveInfo, PlatformError, adapter_for};
-use crate::recorder::{self, EventListener, RecordingHandle, RecordingRequest};
+use crate::recorder::{self, EventListener, RecordingHandle, RecordingOutcome, RecordingRequest};
 
 /// 用 [`adapter_for`] 选出的平台适配器检测。
 pub struct PlatformSource;
@@ -29,6 +29,11 @@ impl LiveSource for PlatformSource {
 impl RecordingControl for RecordingHandle {
     fn stop(&self) {
         RecordingHandle::stop(self);
+    }
+
+    fn wait(&self) -> BoxFuture<'static, RecordingOutcome> {
+        let handle = self.clone();
+        Box::pin(async move { handle.wait().await })
     }
 }
 

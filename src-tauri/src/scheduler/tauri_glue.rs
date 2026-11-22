@@ -34,8 +34,9 @@ static EXIT_STARTED: AtomicBool = AtomicBool::new(false);
 static EXIT_READY: AtomicBool = AtomicBool::new(false);
 
 /// 处理 `RunEvent::ExitRequested`：第一次先阻止退出，调用 [`Scheduler::shutdown`] 等录制
-/// 收尾后再退出；收尾完成后的退出请求直接放行。
-pub fn on_exit_requested(app: &tauri::AppHandle, api: &tauri::ExitRequestApi) {
+/// 收尾后再退出，退出码沿用这次请求的 `code`（例如数据库打不开时的 1）；收尾完成后的
+/// 退出请求直接放行。
+pub fn on_exit_requested(app: &tauri::AppHandle, code: Option<i32>, api: &tauri::ExitRequestApi) {
     if EXIT_READY.load(Ordering::SeqCst) {
         return;
     }
@@ -52,7 +53,7 @@ pub fn on_exit_requested(app: &tauri::AppHandle, api: &tauri::ExitRequestApi) {
             }
         }
         EXIT_READY.store(true, Ordering::SeqCst);
-        app.exit(0);
+        app.exit(code.unwrap_or(0));
     });
 }
 
