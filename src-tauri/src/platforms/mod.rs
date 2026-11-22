@@ -311,6 +311,13 @@ pub trait PlatformAdapter: Send + Sync {
     /// Whether this adapter handles the link (offline check, no requests).
     fn matches(&self, url: &str) -> bool;
 
+    /// Canonical form of a link this adapter matches, used to detect duplicate
+    /// tasks (offline, no requests). `None` lets the caller fall back to a
+    /// generic URL normalization.
+    fn normalize_url(&self, _url: &str) -> Option<String> {
+        None
+    }
+
     /// Resolve the link and fetch the room's current state.
     fn fetch<'a>(
         &'a self,
