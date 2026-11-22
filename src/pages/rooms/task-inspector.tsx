@@ -85,6 +85,7 @@ const activityDot: Record<ActivityKind, string> = {
   failure: "bg-status-recording",
   warning: "bg-status-retrying",
   user_action: "bg-muted-foreground/50",
+  convert: "bg-primary",
 };
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
