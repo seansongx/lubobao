@@ -80,7 +80,10 @@ impl FfmpegManager {
     }
 
     pub fn status(&self) -> FfmpegStatus {
-        self.status.lock().unwrap_or_else(|e| e.into_inner()).clone()
+        self.status
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     /// 可用时返回 FFmpeg 的绝对路径。

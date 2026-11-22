@@ -15,7 +15,10 @@ use lubobao_lib::ffmpeg::{FfmpegManager, FfmpegStatus, ManagerConfig, run_versio
 #[tokio::main]
 async fn main() {
     let mut args = std::env::args().skip(1);
-    let data_dir = PathBuf::from(args.next().expect("usage: ffmpeg_install <data_dir> [--offline]"));
+    let data_dir = PathBuf::from(
+        args.next()
+            .expect("usage: ffmpeg_install <data_dir> [--offline]"),
+    );
     let offline = args.any(|arg| arg == "--offline");
 
     let root = data_dir.join("components").join("ffmpeg");

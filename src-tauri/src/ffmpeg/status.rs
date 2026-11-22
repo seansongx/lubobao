@@ -5,7 +5,11 @@ use std::path::PathBuf;
 use serde::Serialize;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(tag = "state", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "state",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum FfmpegStatus {
     /// 正在检查本地已安装的版本。
     Checking,

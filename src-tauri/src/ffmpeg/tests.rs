@@ -310,10 +310,14 @@ async fn installs_from_first_source_and_reports_progress() {
     assert_eq!(std::fs::read(harness.installed()).unwrap(), BINARY);
     assert_eq!(manager.ffmpeg_path(), Some(harness.installed()));
     assert_eq!(harness.probe.calls(), 1);
-    assert!(harness.temp_files().is_empty(), "{:?}", harness.temp_files());
+    assert!(
+        harness.temp_files().is_empty(),
+        "{:?}",
+        harness.temp_files()
+    );
     let events = harness.events.lock().unwrap().clone();
-    assert_eq!(events.first(), Some(&FfmpegStatus::Checking));
-    assert!(events.contains(&FfmpegStatus::NotInstalled));
+    // 初始状态就是“检查中”，不会重复发事件。
+    assert_eq!(events.first(), Some(&FfmpegStatus::NotInstalled));
     assert!(events.contains(&FfmpegStatus::Downloading {
         downloaded: tgz.len() as u64,
         total: tgz.len() as u64,
@@ -343,7 +347,11 @@ async fn tarball_hash_mismatch_does_not_extract_or_execute() {
     }
     assert_eq!(harness.probe.calls(), 0);
     assert!(!harness.installed().exists());
-    assert!(harness.temp_files().is_empty(), "{:?}", harness.temp_files());
+    assert!(
+        harness.temp_files().is_empty(),
+        "{:?}",
+        harness.temp_files()
+    );
 }
 
 #[tokio::test]
@@ -365,7 +373,11 @@ async fn binary_hash_mismatch_does_not_install() {
     }
     assert_eq!(harness.probe.calls(), 0);
     assert!(!harness.installed().exists());
-    assert!(harness.temp_files().is_empty(), "{:?}", harness.temp_files());
+    assert!(
+        harness.temp_files().is_empty(),
+        "{:?}",
+        harness.temp_files()
+    );
 }
 
 #[tokio::test]
@@ -390,7 +402,8 @@ async fn failed_probe_does_not_install() {
     let tgz = sample_tgz();
     let server = TestServer::start(vec![("/pkg.tgz", Route::File(tgz.clone()))]).await;
     let harness = Harness::new();
-    let probe: Probe = Arc::new(|_: &Path| -> Result<String, String> { Err("退出状态 1".to_string()) });
+    let probe: Probe =
+        Arc::new(|_: &Path| -> Result<String, String> { Err("退出状态 1".to_string()) });
     let manager =
         harness.manager_with_probe(component_for(&tgz, vec![server.url("/pkg.tgz")]), probe);
 
@@ -401,7 +414,11 @@ async fn failed_probe_does_not_install() {
         "{status:?}"
     );
     assert!(!harness.installed().exists());
-    assert!(harness.temp_files().is_empty(), "{:?}", harness.temp_files());
+    assert!(
+        harness.temp_files().is_empty(),
+        "{:?}",
+        harness.temp_files()
+    );
 }
 
 #[tokio::test]
@@ -433,7 +450,10 @@ async fn falls_back_when_first_source_cannot_connect() {
     drop(closed);
     let server = TestServer::start(vec![("/pkg.tgz", Route::File(tgz.clone()))]).await;
     let harness = Harness::new();
-    let manager = harness.manager(component_for(&tgz, vec![closed_url, server.url("/pkg.tgz")]));
+    let manager = harness.manager(component_for(
+        &tgz,
+        vec![closed_url, server.url("/pkg.tgz")],
+    ));
 
     let status = manager.ensure().await;
 
@@ -487,7 +507,10 @@ async fn resumes_interrupted_download_with_range() {
     let requests = server.requests();
     assert_eq!(requests.len(), 2, "{requests:?}");
     assert_eq!(requests[0].range, None);
-    assert_eq!(requests[1].range.as_deref(), Some(format!("bytes={cut}-").as_str()));
+    assert_eq!(
+        requests[1].range.as_deref(),
+        Some(format!("bytes={cut}-").as_str())
+    );
     assert_eq!(std::fs::read(harness.installed()).unwrap(), BINARY);
 }
 
@@ -531,7 +554,10 @@ async fn retry_after_failure_resumes_from_partial_file() {
         .filter(|r| r.path == "/good.tgz")
         .collect();
     assert_eq!(good.len(), 1);
-    assert_eq!(good[0].range.as_deref(), Some(format!("bytes={cut}-").as_str()));
+    assert_eq!(
+        good[0].range.as_deref(),
+        Some(format!("bytes={cut}-").as_str())
+    );
 }
 
 #[tokio::test]
@@ -591,7 +617,13 @@ async fn verified_record_is_invalidated_when_file_changes() {
     let harness = Harness::new();
     let manager = harness.manager(component_for(&tgz, vec![server.url("/pkg.tgz")]));
     assert!(manager.ensure().await.is_ready());
-    assert!(harness.root.join("9.0.2-9.0.1").join("verified.json").exists());
+    assert!(
+        harness
+            .root
+            .join("9.0.2-9.0.1")
+            .join("verified.json")
+            .exists()
+    );
 
     // 同样大小、不同内容，并让修改时间变化。
     let mut tampered = BINARY.to_vec();
@@ -601,7 +633,11 @@ async fn verified_record_is_invalidated_when_file_changes() {
     let component = component_for(&tgz, vec![server.url("/pkg.tgz")]);
     let binary = harness.installed();
     let record = harness.root.join("9.0.2-9.0.1").join("verified.json");
-    assert!(!install::check_installed(&binary, &record, &component.package));
+    assert!(!install::check_installed(
+        &binary,
+        &record,
+        &component.package
+    ));
 
     // 再次检查会重新下载并替换被改动的文件。
     let status = manager.ensure().await;
@@ -627,8 +663,14 @@ async fn failed_install_keeps_existing_files() {
     let status = manager.ensure().await;
 
     assert!(matches!(status, FfmpegStatus::Failed { .. }), "{status:?}");
-    assert_eq!(std::fs::read(old_dir.join("ffmpeg")).unwrap(), b"old ffmpeg");
-    assert_eq!(std::fs::read(harness.installed()).unwrap(), b"previous file");
+    assert_eq!(
+        std::fs::read(old_dir.join("ffmpeg")).unwrap(),
+        b"old ffmpeg"
+    );
+    assert_eq!(
+        std::fs::read(harness.installed()).unwrap(),
+        b"previous file"
+    );
     assert_eq!(harness.probe.calls(), 0);
 }
 
