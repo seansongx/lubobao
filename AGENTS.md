@@ -47,6 +47,13 @@ The project has no automated test cases, frontend test runner, or coverage thres
 
 To check the shell manually, run `npm run dev` and open `http://127.0.0.1:1420`. Switch between the four pages, check the sidebar, content area, and status bar in both light and dark system themes, and confirm that a 1024px-wide window has no horizontal scrollbar.
 
+## CI and Releases
+
+- `.github/workflows/test.yml` runs on every push and pull request on Windows, macOS (arm64), and Ubuntu: `npm run build`, `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `cargo test`. It installs FFmpeg from `@seankit/ffmpeg@9.0.1` and sets `LUBOBAO_TEST_FFMPEG`, so the recorder tests run too; `#[ignore]` network tests are skipped. Run the same three cargo commands locally before pushing.
+- `.github/workflows/release.yml` builds unsigned installers: Windows NSIS (x64), separate macOS dmg for arm64 and x64 (ad-hoc signed), and Linux AppImage and deb built on Ubuntu 22.04. Files are renamed to ASCII (`lubobao_<version>_<os>_<arch>…`), uploaded as Actions artifacts, and the run summary lists each file's size and SHA-256. Manual runs (`workflow_dispatch`) only build; a `v*` tag also creates a draft GitHub Release with `SHA256SUMS.txt` and first-launch notes.
+- Release steps: `node scripts/set-version.mjs <x.y.z>` (updates `package.json`, `package-lock.json`, `tauri.conf.json`, `Cargo.toml`, and `Cargo.lock`), commit, then `git tag v<x.y.z>` and push the tag. The workflow fails if the tag differs from the app version. Review and publish the draft release by hand.
+- The icon source is `docs/brand/app-icon.svg` (full-bleed, for Windows and Linux) and `docs/brand/app-icon-macos.svg` (on the macOS icon grid). Regenerate with `npx tauri icon docs/brand/app-icon.png`, then replace `src-tauri/icons/icon.icns` with the one generated from `app-icon-macos.png`, and delete the `android/` and `ios/` folders.
+
 ## Commits and Pull Requests
 
 Git history is unavailable in this workspace. Use a short imperative commit subject such as `Fix greeting form submission`. In a pull request, describe the behavior change, link any relevant issue, and list the checks performed. Include a screenshot for visible changes.
