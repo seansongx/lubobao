@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 
 import { AppSidebar } from "@/components/app-sidebar";
 import type { Navigate, TaskFocusRequest } from "@/components/navigation";
+import { QuitDialog } from "@/components/quit-dialog";
 import { StatusBar } from "@/components/status-bar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ActivityPage } from "@/pages/activity/activity-page";
@@ -46,6 +47,7 @@ export default function App() {
         <main className="flex min-h-0 min-w-0">{content}</main>
         <StatusBar />
       </div>
+      <QuitDialog />
     </TooltipProvider>
   );
 }

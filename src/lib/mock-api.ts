@@ -4,6 +4,7 @@
 // 录像库用 ?library=missing 模拟根目录不存在；把设置 live_save_path 改成其他路径也视为不存在。
 // 动态有三天的历史记录，控制台可调用 window.__lubobaoMock.pushActivity("failure") 模拟新动态。
 // 缺省时模拟一次下载：下载中 → 校验 → 可用。控制台可调用 window.__lubobaoMock.setFfmpeg("failed")。
+// 退出确认：控制台调用 window.__lubobaoMock.requestQuit() 模拟托盘「退出」。
 // 显示状态的推导复刻 src-tauri/src/tasks/model.rs 的 derive_display，只用于假数据。
 
 import type { UnlistenFn } from "@tauri-apps/api/event";
@@ -25,6 +26,7 @@ import type {
   LiveState,
   Monitoring,
   Platform,
+  QuitState,
   RecordState,
   SchedulerStatus,
   Settings,
@@ -519,6 +521,7 @@ export function createMockBackend(): Backend {
   const removedChannel = new Channel<{ ids: TaskId[] }>();
   const activityChannel = new Channel<ActivityEntry>();
   const schedulerChannel = new Channel<SchedulerStatus>();
+  const quitChannel = new Channel<QuitState>();
 
   // 假调度：每 180 秒一轮检测。
   const MOCK_INTERVAL_MS = 180_000;
@@ -535,6 +538,21 @@ export function createMockBackend(): Backend {
     nextCheckAt += MOCK_INTERVAL_MS;
     schedulerChannel.emit(schedulerStatus());
   }, 1000);
+
+  // 假退出：有录制时先确认；确认后收尾 3 秒，浏览器里无法退出，回到 idle。
+  let quit: QuitState = { phase: "idle", recording: 0 };
+  function setQuit(phase: QuitState["phase"]) {
+    quit = { phase, recording: schedulerStatus().recording };
+    quitChannel.emit(quit);
+  }
+  function requestQuit() {
+    if (quit.phase === "finishing") return;
+    if (schedulerStatus().recording > 0) {
+      setQuit("confirming");
+    } else {
+      console.info("[mock] 没有录制，直接退出");
+    }
+  }
 
   let ffmpeg: FfmpegStatus = { state: "checking" };
   let simulation: ReturnType<typeof setInterval> | undefined;
@@ -908,6 +926,18 @@ export function createMockBackend(): Backend {
     onActivity: (handler) => activityChannel.subscribe(handler),
     getSchedulerStatus: () => Promise.resolve(schedulerStatus()),
     onSchedulerStatus: (handler) => schedulerChannel.subscribe(handler),
+    getQuitState: () => Promise.resolve({ ...quit, recording: schedulerStatus().recording }),
+    async confirmQuit() {
+      setQuit("finishing");
+      await delay(3000);
+      console.info("[mock] 收尾完成，应用退出（浏览器里回到 idle）");
+      setQuit("idle");
+    },
+    async cancelQuit() {
+      if (quit.phase !== "finishing") setQuit("idle");
+      return quit;
+    },
+    onQuitState: (handler) => quitChannel.subscribe(handler),
   };
 
   (window as unknown as { __lubobaoMock: unknown }).__lubobaoMock = {
@@ -917,6 +947,7 @@ export function createMockBackend(): Backend {
       if (status) setFfmpeg(status);
     },
     simulateDownload,
+    requestQuit,
     /** 切换录像根目录是否存在。 */
     setLibraryMissing: (missing: boolean) => {
       libraryForcedMissing = missing;

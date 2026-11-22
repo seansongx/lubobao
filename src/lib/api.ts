@@ -270,6 +270,21 @@ export interface SchedulerStatus {
   recording: number;
 }
 
+// ---- 退出（src-tauri/src/desktop/quit.rs） ----
+
+/**
+ * idle：没有退出请求；confirming：有录制时托盘「退出」或 Cmd+Q 发起，等用户确认；
+ * finishing：已确认，正在停止录制、等文件收尾，随后应用退出。
+ */
+export type QuitPhase = "idle" | "confirming" | "finishing";
+
+/** 退出状态，变化时通过 quit-state 事件推送。 */
+export interface QuitState {
+  phase: QuitPhase;
+  /** 正在录制（含启动中、收尾中）的任务数。 */
+  recording: number;
+}
+
 // ---- 录像库（src-tauri/src/library） ----
 
 export type LibraryErrorKind =
@@ -363,6 +378,11 @@ export interface Backend {
   updateSettings(values: Partial<Settings>): Promise<Settings>;
   listActivity(query?: ActivityQuery): Promise<ActivityPage>;
   getSchedulerStatus(): Promise<SchedulerStatus>;
+  getQuitState(): Promise<QuitState>;
+  /** 确认退出：进入 finishing，停止全部录制、等文件收尾后退出。 */
+  confirmQuit(): Promise<void>;
+  /** 取消退出；已在收尾时不能取消，原样返回。 */
+  cancelQuit(): Promise<QuitState>;
   /** 列出录像根目录下的子目录；path 缺省为根目录。 */
   listLibrary(path?: string): Promise<LibraryListing>;
   getDiskSpace(): Promise<DiskSpace>;
@@ -380,6 +400,7 @@ export interface Backend {
   onTaskRemoved(handler: (payload: { ids: TaskId[] }) => void): Promise<UnlistenFn>;
   onActivity(handler: (entry: ActivityEntry) => void): Promise<UnlistenFn>;
   onSchedulerStatus(handler: (status: SchedulerStatus) => void): Promise<UnlistenFn>;
+  onQuitState(handler: (state: QuitState) => void): Promise<UnlistenFn>;
 }
 
 function on<T>(event: string, handler: (payload: T) => void): Promise<UnlistenFn> {
@@ -399,6 +420,9 @@ const tauriBackend: Backend = {
   updateSettings: (values) => invoke("update_settings", { values }),
   listActivity: (query) => invoke("list_activity", { query: query ?? null }),
   getSchedulerStatus: () => invoke("get_scheduler_status"),
+  getQuitState: () => invoke("get_quit_state"),
+  confirmQuit: () => invoke("confirm_quit"),
+  cancelQuit: () => invoke("cancel_quit"),
   listLibrary: (path) => invoke("list_library", { path: path ?? null }),
   getDiskSpace: () => invoke("get_disk_space"),
   getLibraryUsage: (refresh) => invoke("get_library_usage", { refresh: refresh ?? false }),
@@ -411,6 +435,7 @@ const tauriBackend: Backend = {
   onTaskRemoved: (handler) => on("task-removed", handler),
   onActivity: (handler) => on("activity", handler),
   onSchedulerStatus: (handler) => on("scheduler-status", handler),
+  onQuitState: (handler) => on("quit-state", handler),
 };
 
 /** 是否运行在浏览器假数据模式。 */
