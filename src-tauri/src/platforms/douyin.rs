@@ -12,6 +12,7 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
+use std::sync::Mutex;
 
 use reqwest::Url;
 use reqwest::header::{ACCEPT_LANGUAGE, COOKIE, HeaderMap, HeaderValue, REFERER, USER_AGENT};
@@ -131,7 +132,10 @@ pub fn parse_link(input: &str) -> Result<DouyinLink, PlatformError> {
 /// Room state parsed from one API response, before quality selection.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RoomSnapshot {
+    /// See `LiveInfo::room_id`.
     pub room_id: String,
+    /// Anchor `sec_uid`, stable across link forms.
+    pub anchor_id: Option<String>,
     pub live_url: Option<String>,
     pub anchor_name: String,
     pub title: Option<String>,
@@ -199,8 +203,6 @@ struct PullData {
 #[derive(Debug, Deserialize)]
 struct RoomRaw {
     #[serde(default)]
-    id_str: Option<String>,
-    #[serde(default)]
     status: Option<i64>,
     #[serde(default)]
     title: Option<String>,
@@ -216,6 +218,8 @@ struct UserRaw {
     nickname: Option<String>,
     #[serde(default)]
     web_rid: Option<String>,
+    #[serde(default)]
+    sec_uid: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -280,13 +284,15 @@ fn classify_api_status(
     if prompts.contains("登录") || message.to_ascii_lowercase().contains("login") {
         return PlatformError::AuthRequired(detail);
     }
-    if message.to_ascii_lowercase().contains("params error") {
-        // e.g. a 抖音号 that does not exist: status 10011 "Request params error".
-        return PlatformError::InvalidUrl(detail);
-    }
     match status_code {
         // "该内容暂时无法无法查看": unknown or removed room.
         4001038 => PlatformError::InvalidUrl(detail),
+        // "Request params error" + "当前服务繁忙，请稍后重试". Observed for 抖音号
+        // that do not exist, but the response is identical to a busy service,
+        // so it stays retryable instead of marking the link as dead.
+        10011 => PlatformError::RateLimited(format!(
+            "抖音返回参数错误或服务繁忙（抖音号可能不存在）: {detail}"
+        )),
         _ if prompts.contains("繁忙") || prompts.contains("频繁") => {
             PlatformError::RateLimited(detail)
         }
@@ -328,8 +334,17 @@ fn build_variants(stream_url: &StreamUrlRaw) -> Result<Vec<StreamVariant>, Platf
             let codec = sdk_codec(main.get("sdk_params"));
             let origin_flv = main.get("flv").and_then(Value::as_str).unwrap_or_default();
             let origin_hls = main.get("hls").and_then(Value::as_str).unwrap_or_default();
-            merge_origin(&mut flv, format!("{origin_flv}&codec={codec}"));
-            merge_origin(&mut hls, format!("{origin_hls}&codec={codec}"));
+            // An empty origin URL stays empty (filtered out below) so FLV and
+            // HLS positions stay aligned without inventing a bare "&codec=" URL.
+            let with_codec = |url: &str| {
+                if url.is_empty() {
+                    String::new()
+                } else {
+                    format!("{url}&codec={codec}")
+                }
+            };
+            merge_origin(&mut flv, with_codec(origin_flv));
+            merge_origin(&mut hls, with_codec(origin_hls));
         }
     }
 
@@ -396,6 +411,7 @@ fn sdk_codec(sdk_params: Option<&Value>) -> String {
 fn room_snapshot(
     room: &RoomRaw,
     room_id: String,
+    anchor_id: Option<String>,
     live_url: Option<String>,
     anchor_name: String,
 ) -> Result<RoomSnapshot, PlatformError> {
@@ -411,6 +427,7 @@ fn room_snapshot(
     };
     Ok(RoomSnapshot {
         room_id,
+        anchor_id,
         live_url,
         anchor_name,
         title: room.title.clone().filter(|title| !title.is_empty()),
@@ -433,14 +450,17 @@ pub fn parse_web_enter(body: &str, web_rid: &str) -> Result<RoomSnapshot, Platfo
             });
         }
     };
-    let anchor_name = data
-        .user
-        .as_ref()
+    let user = data.user.as_ref();
+    let anchor_name = user
         .and_then(|user| user.nickname.clone())
         .ok_or_else(|| PlatformError::Parse("接口数据缺少主播昵称".to_string()))?;
+    let anchor_id = user
+        .and_then(|user| user.sec_uid.clone())
+        .filter(|id| !id.is_empty());
     room_snapshot(
         room,
         web_rid.to_string(),
+        anchor_id,
         Some(format!("https://live.douyin.com/{web_rid}")),
         anchor_name,
     )
@@ -461,12 +481,14 @@ pub fn parse_app_reflow(body: &str) -> Result<RoomSnapshot, PlatformError> {
         .clone()
         .ok_or_else(|| PlatformError::Parse("接口数据缺少主播昵称".to_string()))?;
     let web_rid = owner.web_rid.clone().filter(|rid| !rid.is_empty());
+    let anchor_id = owner.sec_uid.clone().filter(|id| !id.is_empty());
+    // Never fall back to `id_str`: it changes with every broadcast.
     let room_id = web_rid
         .clone()
-        .or_else(|| room.id_str.clone())
-        .unwrap_or_default();
+        .or_else(|| anchor_id.clone())
+        .ok_or_else(|| PlatformError::Parse("接口数据缺少 web_rid 和 sec_uid".to_string()))?;
     let live_url = web_rid.map(|rid| format!("https://live.douyin.com/{rid}"));
-    room_snapshot(room, room_id, live_url, anchor_name)
+    room_snapshot(room, room_id, anchor_id, live_url, anchor_name)
 }
 
 /// After following a share link: `Some((room_id, sec_user_id))` when it
@@ -542,6 +564,7 @@ pub fn build_live_info(
     LiveInfo {
         platform: Platform::Douyin,
         room_id: snapshot.room_id,
+        anchor_id: snapshot.anchor_id,
         live_url: snapshot.live_url,
         anchor_name: snapshot.anchor_name,
         title: snapshot.title,
@@ -563,9 +586,29 @@ pub fn stream_headers() -> BTreeMap<String, String> {
     ])
 }
 
-fn header_value(value: &str) -> Result<HeaderValue, PlatformError> {
-    HeaderValue::from_str(value)
-        .map_err(|_| PlatformError::InvalidUrl("Cookie 含有无法发送的字符".to_string()))
+fn cookie_header(value: &str) -> Result<HeaderValue, PlatformError> {
+    HeaderValue::from_str(value).map_err(|_| {
+        PlatformError::Config("Cookie 含有换行等无法发送的字符，请检查平台 Cookie 设置".to_string())
+    })
+}
+
+/// Append the signature verbatim, as StreamGet does (`api += "&a_bogus=" + a_bogus`).
+fn append_signature(api: &Url, signature: &str) -> String {
+    format!("{}&a_bogus={signature}", api.as_str())
+}
+
+/// Headers for StreamGet's HEAD probe on the chosen stream. The probe goes to
+/// CDN hosts, so it always uses the built-in cookie, never the user's.
+fn probe_headers() -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    headers.insert(USER_AGENT, HeaderValue::from_static(PC_USER_AGENT));
+    headers.insert(
+        ACCEPT_LANGUAGE,
+        HeaderValue::from_static(ACCEPT_LANGUAGE_VALUE),
+    );
+    headers.insert(REFERER, HeaderValue::from_static(LIVE_REFERER));
+    headers.insert(COOKIE, HeaderValue::from_static(PC_DEFAULT_COOKIE));
+    headers
 }
 
 fn user_cookie(options: &FetchOptions) -> Option<&str> {
@@ -576,12 +619,52 @@ fn user_cookie(options: &FetchOptions) -> Option<&str> {
         .filter(|cookie| !cookie.is_empty())
 }
 
-#[derive(Debug, Default, Clone, Copy)]
-pub struct DouyinAdapter;
+/// Douyin adapter. Holds one HTTP client per proxy setting so repeated polls
+/// reuse connections; the client is rebuilt when the proxy changes.
+#[derive(Debug, Default)]
+pub struct DouyinAdapter {
+    client: Mutex<Option<(Option<String>, reqwest::Client)>>,
+}
 
 impl DouyinAdapter {
     pub fn new() -> Self {
-        DouyinAdapter
+        DouyinAdapter::default()
+    }
+
+    fn client(&self, proxy: Option<&str>) -> Result<reqwest::Client, PlatformError> {
+        let key = proxy
+            .map(str::trim)
+            .filter(|proxy| !proxy.is_empty())
+            .map(str::to_string);
+        let mut cached = self
+            .client
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some((cached_key, client)) = cached.as_ref()
+            && *cached_key == key
+        {
+            return Ok(client.clone());
+        }
+        let client = build_client(key.as_deref())?;
+        *cached = Some((key, client.clone()));
+        Ok(client)
+    }
+
+    /// Follow a share link and return where it lands. Like StreamGet, only the
+    /// final URL matters: the status code is ignored and the body is not read.
+    async fn resolve_final_url(
+        client: &reqwest::Client,
+        url: &str,
+    ) -> Result<String, PlatformError> {
+        let mut headers = HeaderMap::new();
+        headers.insert(USER_AGENT, HeaderValue::from_static(MOBILE_USER_AGENT));
+        headers.insert(
+            ACCEPT_LANGUAGE,
+            HeaderValue::from_static(ACCEPT_LANGUAGE_VALUE),
+        );
+        headers.insert(COOKIE, HeaderValue::from_static(RESOLVE_COOKIE));
+        let response = client.get(url).headers(headers).send().await?;
+        Ok(response.url().to_string())
     }
 
     async fn get_text(
@@ -620,7 +703,7 @@ impl DouyinAdapter {
             .append_pair("is_need_double_stream", "false")
             .append_pair("msToken", "");
         let signature = ab_sign(api.query().unwrap_or_default(), WEB_API_USER_AGENT);
-        api.query_pairs_mut().append_pair("a_bogus", &signature);
+        let api = append_signature(&api, &signature);
 
         let cookie = match user_cookie(options) {
             Some(cookie) if cookie.contains("ttwid=") => cookie,
@@ -629,9 +712,9 @@ impl DouyinAdapter {
         let mut headers = HeaderMap::new();
         headers.insert(REFERER, HeaderValue::from_static(WEB_API_REFERER));
         headers.insert(USER_AGENT, HeaderValue::from_static(WEB_API_USER_AGENT));
-        headers.insert(COOKIE, header_value(cookie)?);
+        headers.insert(COOKIE, cookie_header(cookie)?);
 
-        let (_, body) = Self::get_text(client, api.as_str(), headers).await?;
+        let (_, body) = Self::get_text(client, &api, headers).await?;
         parse_web_enter(&body, web_rid)
     }
 
@@ -655,13 +738,7 @@ impl DouyinAdapter {
             // The profile URL already holds the sec_uid StreamGet would read
             // from the (non-redirecting) response URL.
             DouyinLink::WebProfile { .. } => link.normalized_url(),
-            _ => {
-                let mut headers = resolve_headers();
-                headers.insert(COOKIE, HeaderValue::from_static(RESOLVE_COOKIE));
-                let (final_url, _) =
-                    Self::get_text(client, &link.normalized_url(), headers).await?;
-                final_url
-            }
+            _ => Self::resolve_final_url(client, &link.normalized_url()).await?,
         };
 
         if let Some((room_id, sec_user_id)) = parse_reflow_redirect(&final_url)? {
@@ -679,14 +756,14 @@ impl DouyinAdapter {
                 .append_pair("app_id", "1128")
                 .append_pair("is_need_double_stream", "True");
             let signature = ab_sign(api.query().unwrap_or_default(), MOBILE_USER_AGENT);
-            api.query_pairs_mut().append_pair("a_bogus", &signature);
+            let api = append_signature(&api, &signature);
 
             let mut headers = resolve_headers();
             headers.insert(
                 COOKIE,
-                header_value(user_cookie(options).unwrap_or_default())?,
+                cookie_header(user_cookie(options).unwrap_or_default())?,
             );
-            let (_, body) = Self::get_text(client, api.as_str(), headers).await?;
+            let (_, body) = Self::get_text(client, &api, headers).await?;
             return parse_app_reflow(&body);
         }
 
@@ -710,21 +787,10 @@ impl DouyinAdapter {
 
     /// StreamGet's `get_response_status` probe: a HEAD request that only
     /// counts transport failures (any HTTP status is "reachable").
-    async fn probe(client: &reqwest::Client, url: &str, options: &FetchOptions) -> bool {
-        let mut headers = HeaderMap::new();
-        headers.insert(USER_AGENT, HeaderValue::from_static(PC_USER_AGENT));
-        headers.insert(
-            ACCEPT_LANGUAGE,
-            HeaderValue::from_static(ACCEPT_LANGUAGE_VALUE),
-        );
-        headers.insert(REFERER, HeaderValue::from_static(LIVE_REFERER));
-        let cookie = user_cookie(options).unwrap_or(PC_DEFAULT_COOKIE);
-        if let Ok(value) = HeaderValue::from_str(cookie) {
-            headers.insert(COOKIE, value);
-        }
+    async fn probe(client: &reqwest::Client, url: &str) -> bool {
         client
             .head(url)
-            .headers(headers)
+            .headers(probe_headers())
             .timeout(std::time::Duration::from_secs(10))
             .send()
             .await
@@ -737,7 +803,7 @@ impl DouyinAdapter {
         options: &FetchOptions,
     ) -> Result<LiveInfo, PlatformError> {
         let link = parse_link(url)?;
-        let client = build_client(options.proxy.as_deref(), true)?;
+        let client = self.client(options.proxy.as_deref())?;
         let snapshot = match &link {
             DouyinLink::WebRoom { web_rid } => self.fetch_web(&client, web_rid, options).await?,
             DouyinLink::DouyinId { id } => self.fetch_web(&client, id, options).await?,
@@ -751,7 +817,7 @@ impl DouyinAdapter {
                 .and_then(|index| snapshot.variants.get(index))
                 .and_then(|variant| variant.hls_url.clone());
             if let Some(hls_url) = primary_hls {
-                reachable = Self::probe(&client, &hls_url, options).await;
+                reachable = Self::probe(&client, &hls_url).await;
             }
         }
         Ok(build_live_info(snapshot, options.quality, reachable))
@@ -784,7 +850,8 @@ mod tests {
     const WEB_OFFLINE: &str = include_str!("../../tests/fixtures/douyin/web_enter_offline.json");
     const WEB_NOT_FOUND: &str =
         include_str!("../../tests/fixtures/douyin/web_enter_not_found.json");
-    const WEB_BAD_ID: &str = include_str!("../../tests/fixtures/douyin/web_enter_busy.json");
+    const WEB_10011: &str =
+        include_str!("../../tests/fixtures/douyin/web_enter_10011_params_error.json");
     const APP_LIVE: &str = include_str!("../../tests/fixtures/douyin/app_reflow_live.json");
     const APP_OFFLINE: &str = include_str!("../../tests/fixtures/douyin/app_reflow_offline.json");
     const PROFILE_HTML: &str = include_str!("../../tests/fixtures/douyin/share_user_snippet.html");
@@ -1034,11 +1101,130 @@ mod tests {
     }
 
     #[test]
+    fn room_id_never_uses_the_per_broadcast_id() {
+        let web = parse_web_enter(WEB_LIVE, "100000000001").unwrap();
+        assert_eq!(web.anchor_id.as_deref(), Some("MS4wLjABAAAAtest_sec_uid"));
+
+        let app = parse_app_reflow(APP_LIVE).unwrap();
+        assert_eq!(app.anchor_id.as_deref(), Some("MS4wLjABAAAAtest_sec_uid"));
+
+        // Without web_rid the room falls back to the anchor sec_uid, not id_str.
+        let no_web_rid = APP_OFFLINE.replace("\"web_rid\": \"100000000001\",", "");
+        assert_ne!(no_web_rid, APP_OFFLINE);
+        let snapshot = parse_app_reflow(&no_web_rid).unwrap();
+        assert_eq!(snapshot.room_id, "MS4wLjABAAAAtest_sec_uid");
+        assert_eq!(snapshot.live_url, None);
+
+        let neither = r#"{"status_code":0,"data":{"room":{"id_str":"7000000000000000009","status":4,"owner":{"nickname":"a"}}}}"#;
+        assert_eq!(parse_app_reflow(neither).unwrap_err().kind(), "parse");
+    }
+
+    #[test]
+    fn probe_and_stream_headers_never_carry_user_cookies() {
+        let headers = probe_headers();
+        assert_eq!(headers.get(COOKIE).unwrap(), PC_DEFAULT_COOKIE);
+        assert_eq!(headers.get(REFERER).unwrap(), LIVE_REFERER);
+        let stream = stream_headers();
+        assert!(stream.keys().all(|key| !key.eq_ignore_ascii_case("cookie")));
+    }
+
+    #[test]
+    fn code_10011_is_retryable_and_4001038_is_invalid() {
+        let error = parse_web_enter(WEB_10011, "zz_no_such_user").unwrap_err();
+        assert_eq!(error.kind(), "rate_limited");
+        assert!(error.message().contains("参数错误或服务繁忙"));
+        assert!(error.message().contains("Request params error"));
+        assert_eq!(
+            parse_web_enter(WEB_NOT_FOUND, "1").unwrap_err().kind(),
+            "invalid_url"
+        );
+    }
+
+    #[test]
+    fn empty_origin_url_is_skipped_instead_of_becoming_a_codec_only_url() {
+        let snapshot = parse_web_enter(WEB_LIVE, "1").unwrap();
+        let origin_hls = snapshot.variants[0].hls_url.clone().unwrap();
+        let raw_origin_hls = origin_hls.trim_end_matches("&codec=h264");
+        let body = WEB_LIVE.replace(raw_origin_hls, "");
+        assert_ne!(body, WEB_LIVE);
+
+        let snapshot = parse_web_enter(&body, "1").unwrap();
+        let origin = &snapshot.variants[0];
+        assert_eq!(origin.name, "ORIGIN");
+        assert_eq!(origin.hls_url, None);
+        assert!(origin.flv_url.as_deref().unwrap().starts_with("http://"));
+        assert_eq!(snapshot.variants[1].name, "FULL_HD1");
+        assert!(snapshot.variants[1].hls_url.is_some());
+        for variant in &snapshot.variants {
+            for url in [&variant.flv_url, &variant.hls_url].into_iter().flatten() {
+                assert!(!url.starts_with('&'), "{url}");
+            }
+        }
+        let selected = build_live_info(snapshot, Quality::Od, true)
+            .selected
+            .unwrap();
+        assert_eq!(
+            selected.record_url,
+            selected.variant.flv_url.clone().unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn cookie_with_line_break_is_a_config_error() {
+        let adapter = DouyinAdapter::new();
+        let options = FetchOptions {
+            cookies: Some("ttwid=abc\nsessionid=def".to_string()),
+            ..FetchOptions::default()
+        };
+        let error = adapter
+            .fetch("https://live.douyin.com/100000000001", &options)
+            .await
+            .unwrap_err();
+        assert_eq!(error.kind(), "config");
+    }
+
+    #[test]
+    fn signature_is_appended_without_percent_encoding() {
+        let api = Url::parse("https://live.douyin.com/webcast/room/web/enter/?aid=6383").unwrap();
+        assert_eq!(
+            append_signature(&api, "Ab/c-d=="),
+            "https://live.douyin.com/webcast/room/web/enter/?aid=6383&a_bogus=Ab/c-d=="
+        );
+    }
+
+    #[test]
+    fn client_is_reused_until_the_proxy_changes() {
+        let adapter = DouyinAdapter::new();
+        adapter.client(None).unwrap();
+        adapter.client(Some("  ")).unwrap();
+        assert_eq!(adapter.client.lock().unwrap().as_ref().unwrap().0, None);
+        adapter.client(Some("127.0.0.1:7890")).unwrap();
+        assert_eq!(
+            adapter
+                .client
+                .lock()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .0
+                .as_deref(),
+            Some("127.0.0.1:7890")
+        );
+        assert_eq!(
+            adapter
+                .client(Some("ftp://127.0.0.1:21"))
+                .unwrap_err()
+                .kind(),
+            "config"
+        );
+    }
+
+    #[test]
     fn share_link_redirects_split_rooms_from_profiles() {
-        let room = "https://webcast.amemv.com/douyin/webcast/reflow/7256729322256419636?u_code=x&sec_user_id=MS4wLjABAAAA7C6m-x_y&utm_source=copy";
+        let room = "https://webcast.amemv.com/douyin/webcast/reflow/7000000000000000003?u_code=x&sec_user_id=MS4wLjABAAAA7C6m-x_y&utm_source=copy";
         assert_eq!(
             parse_reflow_redirect(room).unwrap(),
-            Some(("7256729322256419636".into(), "MS4wLjABAAAA7C6m-x_y".into()))
+            Some(("7000000000000000003".into(), "MS4wLjABAAAA7C6m-x_y".into()))
         );
         let profile = "https://www.iesdouyin.com/share/user/MS4wLjABAAAAfJdQ?sec_uid=MS4wLjABAAAAfJdQ&from_ssr=1";
         assert_eq!(parse_reflow_redirect(profile).unwrap(), None);
@@ -1063,10 +1249,6 @@ mod tests {
     fn errors_are_classified_for_the_ui() {
         assert_eq!(
             parse_web_enter(WEB_NOT_FOUND, "1").unwrap_err().kind(),
-            "invalid_url"
-        );
-        assert_eq!(
-            parse_web_enter(WEB_BAD_ID, "x").unwrap_err().kind(),
             "invalid_url"
         );
         assert_eq!(parse_web_enter("", "1").unwrap_err().kind(), "rate_limited");

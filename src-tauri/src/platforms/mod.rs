@@ -195,8 +195,16 @@ impl SelectedStream {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LiveInfo {
     pub platform: Platform,
-    /// Stable room identifier on the platform (Douyin `web_rid`).
+    /// Room identifier as the platform addresses it. For Douyin this is the
+    /// `web_rid` when known; for `live.douyin.com/{抖音号}` links and profile
+    /// links it is the 抖音号 (the web API does not return the `web_rid`); for
+    /// app rooms without a `web_rid` it falls back to the anchor's `sec_uid`.
+    /// It never uses the per-broadcast room id, but the same anchor can appear
+    /// under different values here — deduplicate with `anchor_id`.
     pub room_id: String,
+    /// Stable anchor identifier shared by every link form (Douyin `sec_uid`),
+    /// when the response includes it.
+    pub anchor_id: Option<String>,
     /// Canonical room page, when the platform exposes one.
     pub live_url: Option<String>,
     pub anchor_name: String,
@@ -206,7 +214,8 @@ pub struct LiveInfo {
     pub variants: Vec<StreamVariant>,
     /// Stream for the requested quality. `None` when offline.
     pub selected: Option<SelectedStream>,
-    /// Headers to send when pulling the stream (User-Agent, Referer, Cookie).
+    /// Headers to send when pulling the stream. Douyin needs only User-Agent
+    /// and Referer; user cookies are never included.
     pub stream_headers: BTreeMap<String, String>,
 }
 
@@ -215,7 +224,8 @@ pub struct LiveInfo {
 pub struct FetchOptions {
     /// Raw `Cookie` header value supplied by the user.
     pub cookies: Option<String>,
-    /// Proxy address, e.g. `127.0.0.1:7890` or `http://127.0.0.1:7890`.
+    /// Proxy address, e.g. `127.0.0.1:7890`, `http://127.0.0.1:7890` or
+    /// `socks5://127.0.0.1:7891`.
     pub proxy: Option<String>,
     pub quality: Quality,
 }
@@ -234,6 +244,9 @@ pub enum PlatformError {
     RateLimited(String),
     /// Response shape changed and could not be parsed.
     Parse(String),
+    /// User settings cannot be used, e.g. a cookie with line breaks or an
+    /// unsupported proxy scheme.
+    Config(String),
 }
 
 impl PlatformError {
@@ -244,6 +257,7 @@ impl PlatformError {
             PlatformError::AuthRequired(_) => "auth_required",
             PlatformError::RateLimited(_) => "rate_limited",
             PlatformError::Parse(_) => "parse",
+            PlatformError::Config(_) => "config",
         }
     }
 
@@ -253,7 +267,8 @@ impl PlatformError {
             | PlatformError::InvalidUrl(message)
             | PlatformError::AuthRequired(message)
             | PlatformError::RateLimited(message)
-            | PlatformError::Parse(message) => message,
+            | PlatformError::Parse(message)
+            | PlatformError::Config(message) => message,
         }
     }
 }
@@ -355,34 +370,37 @@ pub fn selected_stream(requested: Quality, variant: &StreamVariant) -> Option<Se
     })
 }
 
-/// Normalize a proxy address the way StreamGet's `handle_proxy_addr` does:
-/// add `http://` when no scheme is given.
-pub fn normalize_proxy(proxy: &str) -> Option<String> {
+/// Proxy schemes reqwest can use with the `socks` feature enabled.
+const PROXY_SCHEMES: [&str; 6] = ["http", "https", "socks4", "socks4a", "socks5", "socks5h"];
+
+/// Normalize a proxy address the way StreamGet's `handle_proxy_addr` does
+/// (add `http://` when no scheme is given) and reject schemes the HTTP
+/// client cannot use.
+pub fn normalize_proxy(proxy: &str) -> Result<Option<String>, PlatformError> {
     let proxy = proxy.trim();
     if proxy.is_empty() {
-        return None;
+        return Ok(None);
     }
-    if proxy.contains("://") {
-        Some(proxy.to_string())
+    let Some((scheme, _)) = proxy.split_once("://") else {
+        return Ok(Some(format!("http://{proxy}")));
+    };
+    if PROXY_SCHEMES.contains(&scheme.to_ascii_lowercase().as_str()) {
+        Ok(Some(proxy.to_string()))
     } else {
-        Some(format!("http://{proxy}"))
+        Err(PlatformError::Config(format!(
+            "不支持的代理协议 {scheme}，请使用 http、https 或 socks5"
+        )))
     }
 }
 
-/// Build an HTTP client for one fetch.
-pub(crate) fn build_client(
-    proxy: Option<&str>,
-    follow_redirects: bool,
-) -> Result<reqwest::Client, PlatformError> {
-    let mut builder = reqwest::Client::builder().timeout(REQUEST_TIMEOUT);
-    builder = if follow_redirects {
-        builder.redirect(reqwest::redirect::Policy::limited(10))
-    } else {
-        builder.redirect(reqwest::redirect::Policy::none())
-    };
-    if let Some(proxy) = proxy.and_then(normalize_proxy) {
+/// Build an HTTP client that follows redirects and uses the given proxy.
+pub(crate) fn build_client(proxy: Option<&str>) -> Result<reqwest::Client, PlatformError> {
+    let mut builder = reqwest::Client::builder()
+        .timeout(REQUEST_TIMEOUT)
+        .redirect(reqwest::redirect::Policy::limited(10));
+    if let Some(proxy) = normalize_proxy(proxy.unwrap_or_default())? {
         let proxy = reqwest::Proxy::all(&proxy)
-            .map_err(|error| PlatformError::Network(format!("invalid proxy {proxy}: {error}")))?;
+            .map_err(|error| PlatformError::Config(format!("代理地址无效 {proxy}: {error}")))?;
         builder = builder.proxy(proxy);
     }
     builder
@@ -489,14 +507,39 @@ mod tests {
     #[test]
     fn proxy_gets_http_scheme_when_missing() {
         assert_eq!(
-            normalize_proxy("127.0.0.1:7890").as_deref(),
+            normalize_proxy("127.0.0.1:7890").unwrap().as_deref(),
             Some("http://127.0.0.1:7890")
         );
         assert_eq!(
-            normalize_proxy("socks5://127.0.0.1:1080").as_deref(),
+            normalize_proxy("socks5://127.0.0.1:1080")
+                .unwrap()
+                .as_deref(),
             Some("socks5://127.0.0.1:1080")
         );
-        assert_eq!(normalize_proxy("  "), None);
+        assert_eq!(normalize_proxy("  ").unwrap(), None);
+    }
+
+    #[test]
+    fn socks_proxies_build_and_unknown_schemes_are_config_errors() {
+        for proxy in [
+            "socks5://127.0.0.1:7891",
+            "socks5h://127.0.0.1:7891",
+            "127.0.0.1:7890",
+        ] {
+            assert!(build_client(Some(proxy)).is_ok(), "{proxy}");
+        }
+        for proxy in ["ftp://127.0.0.1:21", "quic://127.0.0.1:1"] {
+            assert_eq!(
+                normalize_proxy(proxy).unwrap_err().kind(),
+                "config",
+                "{proxy}"
+            );
+            assert_eq!(
+                build_client(Some(proxy)).unwrap_err().kind(),
+                "config",
+                "{proxy}"
+            );
+        }
     }
 
     #[test]
