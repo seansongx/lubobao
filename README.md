@@ -4,6 +4,8 @@
 
 项目处于初始化阶段，当前包含 Tauri 2 桌面工程和 TypeScript 示例界面。直播间解析、开播监控与录制功能待实现。
 
+各页面、录制流程、平台覆盖与分阶段验收条件见[功能地图](docs/feature-map.md)。
+
 ## 本地开发
 
 开发环境需要 Node.js、npm 和 Rust 稳定版。Windows 还需要 Microsoft C++ Build Tools（含 C++ 桌面开发工作负载和 Windows SDK）以及 WebView2 Runtime。
