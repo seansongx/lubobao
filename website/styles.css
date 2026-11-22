@@ -578,6 +578,7 @@ h2 {
 .footer-inner { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 32px; }
 .footer-brand { display: inline-flex; align-items: center; gap: 10px; margin-right: auto; color: var(--ink); font-weight: 700; font-size: 17px; }
 .footer-brand .logo { width: 24px; height: 24px; }
+.footer-slogan { margin-left: 4px; color: var(--ink-3); font-weight: 400; font-size: 15px; }
 
 /* ---------- 响应式 ---------- */
 @media (max-width: 1080px) {
