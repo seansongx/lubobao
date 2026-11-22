@@ -104,12 +104,14 @@ async fn readme_link_resolves_against_live_kuaishou() {
 }
 
 fn ffmpeg_path() -> PathBuf {
-    if let Ok(path) = std::env::var("LUBOBAO_FFMPEG") {
-        return PathBuf::from(path);
+    for var in ["LUBOBAO_TEST_FFMPEG", "LUBOBAO_FFMPEG"] {
+        if let Ok(path) = std::env::var(var) {
+            return PathBuf::from(path);
+        }
     }
-    let base = std::env::var("LOCALAPPDATA").expect("LOCALAPPDATA or LUBOBAO_FFMPEG");
+    let base = std::env::var("LOCALAPPDATA").expect("LOCALAPPDATA or LUBOBAO_TEST_FFMPEG");
     PathBuf::from(base)
-        .join("io.github.xsong13.lubobao")
+        .join("com.xiaofany.lubobao")
         .join("components")
         .join("ffmpeg")
         .join("9.0.2-9.0.1")

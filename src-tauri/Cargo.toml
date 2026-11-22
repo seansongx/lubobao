@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "录播宝：开播自动录，不用再蹲直播"
 authors = ["Song"]
 license = "MIT"
-repository = "https://github.com/xsong13/lubobao"
+repository = "https://github.com/seansongx/lubobao"
 edition = "2024"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
