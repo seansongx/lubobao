@@ -1,5 +1,6 @@
 //! Douyin `a_bogus` request signature, ported from StreamGet v4.0.10
-//! (`streamget/platforms/douyin/ab_sign.py`). The Python version is pure
+//! (`streamget/platforms/douyin/ab_sign.py`), Copyright (c) 2025 Hmily,
+//! MIT License; see `THIRD_PARTY_NOTICES.md`. The Python version is pure
 //! computation (SM3 + RC4 + custom base64), so no JavaScript runtime is needed.
 //!
 //! Every intermediate "string" in the Python code only holds code points
