@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
-import { api, isCommandError, type Settings } from "@/lib/api";
+import { api, isCommandError, SETTINGS_CHANGED_EVENT, type Settings } from "@/lib/api";
 
 export type SettingKey = keyof Settings;
 export type FieldErrors = Partial<Record<SettingKey, string>>;
@@ -118,6 +118,15 @@ export function useSettings() {
   }, [apply]);
 
   useEffect(load, [load]);
+
+  // 设置在别处被修改（例如关窗时记住选择）后重新读取，页面显示新值。
+  useEffect(() => {
+    const refresh = () => {
+      api.getSettings().then(apply, () => undefined);
+    };
+    window.addEventListener(SETTINGS_CHANGED_EVENT, refresh);
+    return () => window.removeEventListener(SETTINGS_CHANGED_EVENT, refresh);
+  }, [apply]);
 
   const setError = useCallback((key: SettingKey, message: string | null) => {
     setErrors((current) => {

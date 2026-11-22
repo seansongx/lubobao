@@ -288,6 +288,16 @@ export type QuitPhase = "idle" | "confirming" | "finishing";
 
 export type CloseWindowAction = "ask" | "tray" | "quit";
 
+/**
+ * 设置在设置页以外被修改（例如关窗时「记住我的选择」）后，在 window 上派发这个事件，
+ * 设置页据此重新读取。
+ */
+export const SETTINGS_CHANGED_EVENT = "lubobao:settings-changed";
+
+export function announceSettingsChanged() {
+  window.dispatchEvent(new Event(SETTINGS_CHANGED_EVENT));
+}
+
 /** 有录制时点托盘「全部暂停监控」，pause-all-prompt 事件请前端确认。 */
 export interface PauseAllPrompt {
   recording: number;
@@ -402,7 +412,10 @@ export interface Backend {
   confirmQuit(): Promise<void>;
   /** 取消退出；已在收尾时不能取消，原样返回。 */
   cancelQuit(): Promise<QuitState>;
-  /** 关窗三选一的结果（取消时不调用）。remember 时写入 close_window_action。 */
+  /**
+   * 关窗三选一的结果（取消时不调用）。remember 时写入 close_window_action；保存失败时所选操作
+   * 照常执行，Promise 以保存失败的原因（字符串）reject。
+   */
   resolveClose(choice: "tray" | "quit", remember: boolean): Promise<void>;
   /** 确认托盘「全部暂停监控」：暂停全部监控中的任务（同时停止录制）。 */
   confirmPauseAll(): Promise<void>;
