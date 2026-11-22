@@ -155,6 +155,33 @@ impl FfmpegManager {
         self.run_exclusive(true).await
     }
 
+    /// 只检查本地已安装的版本，不下载也不改动文件：当前版本校验通过为 `Ready`，只有旧版本时
+    /// 为 `outdated` 的 `Ready`，都没有时为 `NotInstalled`。命令行程序在 `run` 未运行时查询用。
+    pub async fn check_local(&self) -> FfmpegStatus {
+        let component = match &self.component {
+            Ok(component) => component.clone(),
+            Err(reason) => {
+                return FfmpegStatus::Failed {
+                    reason: reason.clone(),
+                    retryable: false,
+                };
+            }
+        };
+        if self.check_current(&component, false).await == Ok(true) {
+            return self.ready_current(&component);
+        }
+        match self.find_fallback(&component).await {
+            Some(old) => FfmpegStatus::Ready {
+                path: old.path,
+                ffmpeg_version: old.ffmpeg_version,
+                package_version: old.package_version,
+                outdated: true,
+                install_error: None,
+            },
+            None => FfmpegStatus::NotInstalled,
+        }
+    }
+
     async fn run_exclusive(&self, force: bool) -> FfmpegStatus {
         let Ok(_guard) = self.install_lock.try_lock() else {
             return self.status();

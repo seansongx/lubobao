@@ -15,6 +15,8 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 pub mod douyin;
+#[cfg(feature = "e2e")]
+pub mod e2e;
 pub mod kuaishou;
 mod sign;
 
@@ -29,6 +31,9 @@ pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 pub enum Platform {
     Douyin,
     Kuaishou,
+    /// 端到端测试用的本地直播间（feature `e2e`），发布版没有。
+    #[cfg(feature = "e2e")]
+    E2e,
 }
 
 impl Platform {
@@ -37,6 +42,8 @@ impl Platform {
         match self {
             Platform::Douyin => "douyin",
             Platform::Kuaishou => "kuaishou",
+            #[cfg(feature = "e2e")]
+            Platform::E2e => "e2e",
         }
     }
 
@@ -45,6 +52,8 @@ impl Platform {
         match self {
             Platform::Douyin => "抖音",
             Platform::Kuaishou => "快手直播",
+            #[cfg(feature = "e2e")]
+            Platform::E2e => "测试直播间",
         }
     }
 }
@@ -333,10 +342,14 @@ pub trait PlatformAdapter: Send + Sync {
 
 /// All built-in adapters.
 pub fn adapters() -> Vec<Box<dyn PlatformAdapter>> {
-    vec![
+    #[allow(unused_mut)]
+    let mut list: Vec<Box<dyn PlatformAdapter>> = vec![
         Box::new(douyin::DouyinAdapter::new()),
         Box::new(kuaishou::KuaishouAdapter::new()),
-    ]
+    ];
+    #[cfg(feature = "e2e")]
+    list.push(Box::new(e2e::E2eAdapter));
+    list
 }
 
 /// First adapter that accepts the link.
