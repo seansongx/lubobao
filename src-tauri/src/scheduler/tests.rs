@@ -179,12 +179,15 @@ struct Shared {
     /// `start` 是否已经返回。
     returned: AtomicBool,
     outcome: tokio::sync::watch::Sender<Option<RecordingOutcome>>,
+    /// 结束结果里的文件。
+    files: Vec<PathBuf>,
 }
 
 impl Shared {
     fn finish(&self, reason: EndReason) {
         if !self.finished.swap(true, Ordering::SeqCst) {
-            let outcome = outcome(reason);
+            let mut outcome = outcome(reason);
+            outcome.files = self.files.clone();
             (self.listener)(&RecorderEvent::Finished {
                 outcome: outcome.clone(),
             });
@@ -266,6 +269,8 @@ struct FakeEngine {
     on_ffmpeg_path: Mutex<Option<Hook>>,
     recordings: Mutex<Vec<FakeRecording>>,
     stop_all_calls: AtomicUsize,
+    /// 录制结果里的文件，缺省为不存在的 `rec_000.ts`（不会触发转 MP4）。
+    files: Mutex<Option<Vec<PathBuf>>>,
 }
 
 impl Default for FakeEngine {
@@ -279,6 +284,7 @@ impl Default for FakeEngine {
             on_ffmpeg_path: Mutex::default(),
             recordings: Mutex::default(),
             stop_all_calls: AtomicUsize::new(0),
+            files: Mutex::default(),
         }
     }
 }
@@ -348,6 +354,12 @@ impl RecordEngine for Arc<FakeEngine> {
                 finished: AtomicBool::new(false),
                 returned: AtomicBool::new(false),
                 outcome: tokio::sync::watch::channel(None).0,
+                files: engine
+                    .files
+                    .lock()
+                    .unwrap()
+                    .clone()
+                    .unwrap_or_else(|| vec![PathBuf::from("rec_000.ts")]),
             });
             engine.recordings.lock().unwrap().push(FakeRecording {
                 request,
@@ -1221,4 +1233,140 @@ b=2" }),
     let error = h.tasks.update_settings(map).unwrap_err();
     assert_eq!(error.kind, crate::tasks::ErrorKind::Config);
     assert_eq!(h.tasks.settings()["platform_cookies"], json!({}));
+}
+
+// ---- 录后转 MP4 ----
+
+fn test_ffmpeg() -> Option<PathBuf> {
+    match std::env::var_os("LUBOBAO_TEST_FFMPEG") {
+        Some(path) if !path.is_empty() => Some(PathBuf::from(path)),
+        _ => {
+            eprintln!("跳过：未设置 LUBOBAO_TEST_FFMPEG（ffmpeg 可执行文件路径）");
+            None
+        }
+    }
+}
+
+fn make_ts(ffmpeg: &std::path::Path, path: &std::path::Path) {
+    let output = std::process::Command::new(ffmpeg)
+        .args(["-hide_banner", "-loglevel", "error", "-y"])
+        .args(["-f", "lavfi", "-i", "testsrc=size=160x120:rate=25"])
+        .args(["-f", "lavfi", "-i", "sine=frequency=440"])
+        .args(["-t", "2", "-c:v", "libx264", "-preset", "veryfast"])
+        .args(["-pix_fmt", "yuv420p", "-c:a", "aac", "-f", "mpegts"])
+        .arg(path)
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+}
+
+fn activity_of(h: &Harness, kind: ActivityKind) -> Vec<crate::tasks::ActivityEntry> {
+    h.tasks
+        .list_activity(&crate::tasks::ActivityQuery {
+            kinds: vec![kind],
+            ..Default::default()
+        })
+        .unwrap()
+        .items
+}
+
+/// 准备两个真实的 TS 分段，录制结束后交给转换队列。用真实时钟（ffmpeg 是真实进程）。
+fn conversion_harness(ffmpeg: &std::path::Path) -> (Harness, Vec<PathBuf>) {
+    let h = harness();
+    let dir = h._dir.path().join("videos").join("抖音").join("主播 甲");
+    std::fs::create_dir_all(&dir).unwrap();
+    let files: Vec<PathBuf> = (0..2)
+        .map(|n| dir.join(format!("主播 甲_2026-11-22_12-00-00_{n:03}.ts")))
+        .collect();
+    for file in &files {
+        make_ts(ffmpeg, file);
+    }
+    *h.engine.ffmpeg.lock().unwrap() = Some(ffmpeg.to_path_buf());
+    *h.engine.files.lock().unwrap() = Some(files.clone());
+    (h, files)
+}
+
+#[tokio::test]
+async fn finished_recordings_are_converted_to_mp4_with_activity() {
+    let Some(ffmpeg) = test_ffmpeg() else { return };
+    let (h, files) = conversion_harness(&ffmpeg);
+    h.update_settings(json!({ "delete_original": true }));
+    let (id, _) = h.add("2001", Reply::Live, false);
+    h.start();
+    until(SHORT, "开始录制", || h.engine.starts() == 1).await;
+    h.tasks.stop_recording(&[id]).unwrap();
+    until(Duration::from_secs(60), "转换完成", || {
+        activity_of(&h, ActivityKind::Convert).len() == 4
+    })
+    .await;
+
+    // 新的在前：完成、开始、完成、开始。
+    let entries = activity_of(&h, ActivityKind::Convert);
+    let messages: Vec<&str> = entries.iter().map(|entry| entry.message.as_str()).collect();
+    assert_eq!(
+        messages,
+        [
+            "已转为 MP4，已删除原 TS 文件",
+            "开始转为 MP4",
+            "已转为 MP4，已删除原 TS 文件",
+            "开始转为 MP4",
+        ]
+    );
+    assert!(entries.iter().all(|entry| entry.task_id == Some(id)));
+    for file in &files {
+        assert!(!file.exists());
+        assert!(file.with_extension("mp4").is_file());
+    }
+    assert!(
+        activity_of(&h, ActivityKind::RecordEnd)[0].id < entries.last().unwrap().id,
+        "录制结束的动态应在转换之前"
+    );
+    assert_eq!(h.scheduler.post_processor().pending(), 0);
+}
+
+#[tokio::test]
+async fn no_conversion_when_disabled_or_the_disk_is_full() {
+    let Some(ffmpeg) = test_ffmpeg() else { return };
+    let (h, files) = conversion_harness(&ffmpeg);
+    h.update_settings(json!({ "convert_to_mp4": false }));
+    let (id, url) = h.add("2002", Reply::Live, false);
+    h.start();
+    until(SHORT, "开始录制", || h.engine.starts() == 1).await;
+    h.tasks.stop_recording(&[id]).unwrap();
+    until(SHORT, "收尾", || h.task(id).record == RecordState::Idle).await;
+
+    // 打开转换后因磁盘不足结束：也不转换。
+    h.update_settings(json!({ "convert_to_mp4": true }));
+    h.tasks.set_monitoring(&[id], false).unwrap();
+    h.source.set(&url, Reply::Live);
+    h.tasks.set_monitoring(&[id], true).unwrap();
+    until(SHORT, "再次录制", || h.engine.starts() == 2).await;
+    h.engine.end(1, EndReason::DiskFull);
+    until(SHORT, "需处理", || {
+        matches!(h.task(id).record, RecordState::Failed { .. })
+    })
+    .await;
+    sleep(Duration::from_millis(500)).await;
+    assert!(activity_of(&h, ActivityKind::Convert).is_empty());
+    assert_eq!(h.scheduler.post_processor().pending(), 0);
+    for file in &files {
+        assert!(file.exists());
+        assert!(!file.with_extension("mp4").exists());
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn shutdown_closes_the_conversion_queue() {
+    let h = harness();
+    h.start();
+    h.scheduler.shutdown().await;
+    let accepted = h.scheduler.post_processor().enqueue(
+        vec![PathBuf::from("a.ts")],
+        crate::recorder::postprocess::ConvertOptions {
+            ffmpeg_path: PathBuf::from("ffmpeg.exe"),
+            delete_original: false,
+        },
+        Arc::new(|_: &ConvertEvent| {}),
+    );
+    assert!(!accepted);
 }

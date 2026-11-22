@@ -6,6 +6,7 @@ use std::time::Duration;
 use serde_json::{Map, Value};
 
 use crate::platforms::{FetchOptions, LiveInfo, Platform, PlatformError};
+use crate::recorder::postprocess::ConvertOptions;
 use crate::recorder::{OutputFormat, RecordOptions, RecordingRequest};
 use crate::tasks::{PlatformErrorKind, TaskSnapshot};
 
@@ -152,6 +153,32 @@ pub fn record_options(settings: &Map<String, Value>) -> RecordOptions {
         folder_by_anchor: flag(settings, "folder_name_author", defaults.folder_by_anchor),
         ..defaults
     }
+}
+
+/// 录后转 MP4 的选项（设置 `convert_to_mp4`、`delete_original`，缺省值同 StreamCap：
+/// 转换、保留原件）。关闭转换时返回 `None`。
+pub fn convert_options(
+    settings: &Map<String, Value>,
+    ffmpeg_path: PathBuf,
+) -> Option<ConvertOptions> {
+    flag(settings, "convert_to_mp4", true).then(|| ConvertOptions {
+        ffmpeg_path,
+        delete_original: flag(settings, "delete_original", false),
+    })
+}
+
+/// 一次录制里要转 MP4 的文件：磁盘上存在的 TS，保持原顺序。引擎目前只录 TS
+/// （`video_format` 暂时忽略），所以按扩展名判断，与 StreamCap `save_format == "ts"` 等价。
+pub fn convertible_files(files: &[PathBuf]) -> Vec<PathBuf> {
+    files
+        .iter()
+        .filter(|path| {
+            path.extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("ts"))
+                && path.is_file()
+        })
+        .cloned()
+        .collect()
 }
 
 /// 组装好的录制请求，以及要提示用户的问题（例如代理协议不支持、已直连）。
