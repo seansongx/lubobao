@@ -109,7 +109,7 @@ fn restores_tasks_and_monitoring_intent_after_reopen() {
 }
 
 #[test]
-fn marks_recording_and_finishing_as_interrupted_on_startup() {
+fn logs_interrupted_recordings_on_startup_and_returns_them_to_idle() {
     let dir = tempfile::tempdir().unwrap();
     let (recording_id, finishing_id, idle_id) = {
         let (manager, _) = open(dir.path());
@@ -151,18 +151,11 @@ fn marks_recording_and_finishing_as_interrupted_on_startup() {
     };
 
     let (manager, events) = open(dir.path());
+    // 中断只写动态，任务回到空闲，不会每次启动都显示需处理。
     for id in [recording_id, finishing_id] {
         let task = manager.get(id).unwrap();
-        match &task.record {
-            RecordState::Failed {
-                reason, file_path, ..
-            } => {
-                assert_eq!(reason, INTERRUPTED_REASON);
-                assert!(file_path.is_some());
-            }
-            other => panic!("expected failed, got {other:?}"),
-        }
-        assert_eq!(task.display, DisplayStatus::NeedsAction);
+        assert_eq!(task.record, RecordState::Idle);
+        assert_eq!(task.display, DisplayStatus::Waiting);
     }
     assert_eq!(manager.get(idle_id).unwrap().record, RecordState::Idle);
 
@@ -505,6 +498,10 @@ fn live_and_record_transitions_write_activity() {
     };
     let snapshot = manager.set_live_state(task.id, failure.clone()).unwrap();
     assert_eq!(snapshot.display, DisplayStatus::Retrying);
+    // 调度器的实际顺序：检测中 → 失败 → 检测中 → 失败，连续失败只写一条动态。
+    manager.set_live_state(task.id, LiveState::Checking { since: 2 });
+    manager.set_live_state(task.id, failure.clone());
+    manager.set_live_state(task.id, LiveState::Checking { since: 3 });
     manager.set_live_state(task.id, failure);
     // 检测失败后恢复为开播，不算新的开播。
     manager.set_live_state(task.id, live);
@@ -695,4 +692,247 @@ async fn live_douyin_add_and_duplicate() {
         .unwrap();
     println!("second: {second:?}");
     assert!(matches!(second, TaskMutation::Duplicate { .. }));
+}
+
+fn fail_activity_inserts(manager: &TaskManager, fail: bool) {
+    let sql = if fail {
+        "CREATE TRIGGER fail_activity BEFORE INSERT ON activity BEGIN SELECT RAISE(ABORT, 'boom'); END;"
+    } else {
+        "DROP TRIGGER fail_activity;"
+    };
+    manager.lock().store.db().execute_batch(sql).unwrap();
+}
+
+fn add(manager: &TaskManager, room: &str) -> TaskSnapshot {
+    added(
+        manager
+            .add_resolved(
+                add_input(&format!("https://live.douyin.com/{room}")),
+                &info(room, Some(&format!("sec-{room}")), room),
+            )
+            .unwrap(),
+    )
+}
+
+#[test]
+fn commands_roll_back_and_emit_nothing_when_activity_write_fails() {
+    let dir = tempfile::tempdir().unwrap();
+    let (manager, events) = open(dir.path());
+    let a = add(&manager, "1");
+    let b = add(&manager, "2");
+    events.lock().unwrap().clear();
+    fail_activity_inserts(&manager, true);
+
+    assert_eq!(
+        manager.delete_tasks(&[a.id, b.id]).unwrap_err().kind,
+        ErrorKind::Storage
+    );
+    assert!(
+        manager
+            .add_resolved(
+                add_input("https://live.douyin.com/3"),
+                &info("3", Some("sec-3"), "3")
+            )
+            .is_err()
+    );
+    assert!(manager.set_monitoring(&[a.id], false).is_err());
+    assert!(
+        manager
+            .update_resolved(
+                UpdateTaskInput {
+                    id: a.id,
+                    note: Some("x".into()),
+                    ..UpdateTaskInput::default()
+                },
+                None,
+            )
+            .is_err()
+    );
+    let recording = RecordState::Recording {
+        file_path: PathBuf::from("a.ts"),
+        started_at: 1,
+        bytes_written: 0,
+        bitrate_kbps: 0.0,
+    };
+    assert!(manager.set_record_state(a.id, recording).is_err());
+
+    // 内存、数据库都没有变化，也没有发出任何事件。
+    assert!(events.lock().unwrap().is_empty());
+    let tasks = manager.list();
+    assert_eq!(tasks.len(), 2);
+    assert_eq!(tasks[0].monitoring, Monitoring::Enabled);
+    assert_eq!(tasks[0].config.note, "");
+    assert_eq!(tasks[0].record, RecordState::Idle);
+
+    // 恢复后重试不会被误判为重复。
+    fail_activity_inserts(&manager, false);
+    add(&manager, "3");
+    drop(manager);
+    let (manager, _) = open(dir.path());
+    let tasks = manager.list();
+    assert_eq!(tasks.len(), 3);
+    assert_eq!(tasks[0].monitoring, Monitoring::Enabled);
+    assert_eq!(tasks[0].record, RecordState::Idle);
+}
+
+#[test]
+fn check_failures_log_again_after_a_successful_check() {
+    let dir = tempfile::tempdir().unwrap();
+    let (manager, _) = open(dir.path());
+    let task = add(&manager, "1");
+    let failure = |attempt| LiveState::CheckFailed {
+        kind: PlatformErrorKind::Network,
+        message: "超时".into(),
+        failed_at: 1,
+        next_retry_at: None,
+        attempt,
+    };
+    for state in [
+        LiveState::Checking { since: 1 },
+        failure(1),
+        LiveState::Checking { since: 2 },
+        failure(2),
+        LiveState::Checking { since: 3 },
+        LiveState::Offline { checked_at: 3 },
+        LiveState::Checking { since: 4 },
+        failure(1),
+    ] {
+        manager.set_live_state(task.id, state);
+    }
+    let failures = manager
+        .list_activity(&ActivityQuery {
+            kinds: vec![ActivityKind::Failure],
+            ..ActivityQuery::default()
+        })
+        .unwrap();
+    assert_eq!(failures.items.len(), 2);
+}
+
+#[test]
+fn new_task_takes_live_state_from_the_resolved_room() {
+    let dir = tempfile::tempdir().unwrap();
+    let (manager, _) = open(dir.path());
+    let mut live_info = info("1", Some("a"), "a");
+    live_info.is_live = true;
+    live_info.title = Some("标题".into());
+    let live = added(
+        manager
+            .add_resolved(
+                AddTaskInput {
+                    notify_only: Some(true),
+                    ..add_input("https://live.douyin.com/1")
+                },
+                &live_info,
+            )
+            .unwrap(),
+    );
+    assert!(matches!(&live.live, LiveState::Live { title: Some(t), .. } if t == "标题"));
+    assert_eq!(live.display, DisplayStatus::Notify);
+    let offline = add(&manager, "2");
+    assert!(matches!(offline.live, LiveState::Offline { .. }));
+    assert_eq!(offline.display, DisplayStatus::Waiting);
+
+    // 第一次轮询仍为开播，不再写一条开播动态。
+    manager.set_live_state(
+        live.id,
+        LiveState::Live {
+            checked_at: 2,
+            title: None,
+        },
+    );
+    let starts = manager
+        .list_activity(&ActivityQuery {
+            kinds: vec![ActivityKind::LiveStart],
+            ..ActivityQuery::default()
+        })
+        .unwrap();
+    assert!(starts.items.is_empty());
+}
+
+#[test]
+fn enabling_monitoring_clears_a_record_failure() {
+    let dir = tempfile::tempdir().unwrap();
+    let (manager, _) = open(dir.path());
+    let task = add(&manager, "1");
+    manager
+        .set_record_state(
+            task.id,
+            RecordState::Failed {
+                reason: "磁盘空间不足".into(),
+                file_path: None,
+                failed_at: 1,
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        manager.get(task.id).unwrap().display,
+        DisplayStatus::NeedsAction
+    );
+    manager.set_monitoring(&[task.id], false).unwrap();
+    let resumed = manager.set_monitoring(&[task.id], true).unwrap();
+    assert_eq!(resumed[0].record, RecordState::Idle);
+    assert_eq!(resumed[0].display, DisplayStatus::Waiting);
+    drop(manager);
+    let (manager, _) = open(dir.path());
+    assert_eq!(manager.get(task.id).unwrap().record, RecordState::Idle);
+}
+
+#[test]
+fn skips_unreadable_task_rows_on_startup() {
+    let dir = tempfile::tempdir().unwrap();
+    {
+        let (manager, _) = open(dir.path());
+        add(&manager, "1");
+        manager
+            .lock()
+            .store
+            .db()
+            .execute_batch(
+                "INSERT INTO tasks (url, platform, room_id, anchor_name, quality, created_at)
+                 VALUES ('https://example.com/x', 'from_the_future', 'x', 'x', 'OD', 0);",
+            )
+            .unwrap();
+    }
+    let (manager, _) = open(dir.path());
+    let tasks = manager.list();
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(tasks[0].config.room_id, "1");
+}
+
+#[test]
+fn refuses_a_database_from_a_newer_version_with_a_readable_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("lubobao.db");
+    Store::open(&path)
+        .unwrap()
+        .db()
+        .execute_batch("PRAGMA user_version = 99;")
+        .unwrap();
+    let error = Store::open(&path).err().expect("newer version is refused");
+    assert!(error.0.contains("请升级录播宝"), "{error}");
+}
+
+#[test]
+fn rejects_unknown_values_for_enum_settings() {
+    let dir = tempfile::tempdir().unwrap();
+    let (manager, _) = open(dir.path());
+    for (key, value) in [
+        ("record_quality", "BLURAY"),
+        ("video_format", "ts"),
+        ("default_live_source", "RTMP"),
+    ] {
+        let mut values = Map::new();
+        values.insert(key.into(), json!(value));
+        assert_eq!(
+            manager.update_settings(values).unwrap_err().kind,
+            ErrorKind::InvalidInput,
+            "{key} = {value}"
+        );
+    }
+    let mut values = Map::new();
+    values.insert("record_quality".into(), json!("HD"));
+    values.insert("video_format".into(), json!("MKV"));
+    values.insert("default_live_source".into(), json!("HLS"));
+    let settings = manager.update_settings(values).unwrap();
+    assert_eq!(settings["video_format"], json!("MKV"));
 }

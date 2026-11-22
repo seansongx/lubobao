@@ -5,13 +5,14 @@
 //! 调度和录制引擎通过 `set_live_state`、`set_record_state`、`update_record_progress`
 //! 回写状态，由这里负责持久化、写动态和推送事件。
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use tauri::{Emitter, Manager};
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 
 use crate::platforms::{FetchOptions, LiveInfo, Platform, PlatformError, Quality, adapter_for};
 
@@ -36,7 +37,7 @@ pub const TASK_UPDATED_EVENT: &str = "task-updated";
 pub const TASK_REMOVED_EVENT: &str = "task-removed";
 pub const ACTIVITY_EVENT: &str = "activity";
 
-/// 启动时把未正常结束的录制标记为失败所用的原因。
+/// 启动时发现上次录制未正常结束，写入动态所用的说明。
 pub const INTERRUPTED_REASON: &str = "录制异常中断：上次退出时录制未正常结束";
 
 /// 推送给前端的变化。
@@ -197,6 +198,8 @@ struct Inner {
     tasks: BTreeMap<TaskId, Task>,
     /// 最近一次成功检测的结果，用来判断开播、下播的转变；检测失败不改变它。
     last_known_live: HashMap<TaskId, bool>,
+    /// 最近一次检测失败、尚未成功过的任务。连续失败（中间穿插检测中）只写一条动态。
+    failing: HashSet<TaskId>,
 }
 
 pub struct TaskManager {
@@ -205,15 +208,29 @@ pub struct TaskManager {
     listener: Listener,
 }
 
+fn user_action(task: &Task, message: &str, detail: Option<Value>) -> NewActivity {
+    NewActivity {
+        task_id: Some(task.id),
+        anchor_name: task.config.anchor_name.clone(),
+        kind: ActivityKind::UserAction,
+        message: message.into(),
+        detail,
+    }
+}
+
 impl TaskManager {
-    /// 读出任务，把上次未正常结束的录制标记为异常中断并各写一条动态。
+    /// 读出任务。无法识别的行跳过并记日志；上次未正常结束的录制各写一条动态，任务回到空闲。
     pub fn open(store: Store, save_dir: &Path, listener: Listener) -> CommandResult<TaskManager> {
-        let tasks = store.load_tasks()?;
+        let (tasks, skipped) = store.db().load_tasks()?;
+        for row in &skipped {
+            eprintln!("跳过无法读取的任务 #{}：{}", row.id, row.reason);
+        }
         let manager = TaskManager {
             inner: Mutex::new(Inner {
                 store,
                 tasks: tasks.into_iter().map(|task| (task.id, task)).collect(),
                 last_known_live: HashMap::new(),
+                failing: HashSet::new(),
             }),
             defaults: settings::defaults(save_dir),
             listener,
@@ -234,43 +251,46 @@ impl TaskManager {
         }
     }
 
+    /// 录制中、收尾中的任务说明上次退出时录制被打断。文件已经写到哪里就是哪里，用户
+    /// 无从「处理」，所以只写一条失败动态，任务回到空闲，等下一次检测重新开始录制。
     fn recover_interrupted(&self) -> CommandResult<()> {
-        let mut events = Vec::new();
-        {
-            let mut inner = self.lock();
-            let interrupted: Vec<TaskId> = inner
-                .tasks
-                .values()
-                .filter(|task| task.record.is_active())
-                .map(|task| task.id)
-                .collect();
-            for id in interrupted {
-                let task = inner.tasks.get(&id).cloned().expect("task exists");
+        let mut guard = self.lock();
+        let inner = &mut *guard;
+        let interrupted: Vec<Task> = inner
+            .tasks
+            .values()
+            .filter(|task| task.record.is_active())
+            .cloned()
+            .collect();
+        if interrupted.is_empty() {
+            return Ok(());
+        }
+        let entries = inner.store.transaction(|db| {
+            let mut entries = Vec::new();
+            for task in &interrupted {
                 let file_path = match &task.record {
                     RecordState::Recording { file_path, .. }
                     | RecordState::Finishing { file_path, .. } => Some(file_path.clone()),
                     _ => None,
                 };
-                let record = RecordState::Failed {
-                    reason: INTERRUPTED_REASON.into(),
-                    file_path: file_path.clone(),
-                    failed_at: now_ms(),
-                };
-                inner.store.set_record_state(id, &record)?;
-                let entry = inner.store.insert_activity(&NewActivity {
-                    task_id: Some(id),
+                db.set_record_state(task.id, &RecordState::Idle)?;
+                entries.push(db.insert_activity(&NewActivity {
+                    task_id: Some(task.id),
                     anchor_name: task.config.anchor_name.clone(),
                     kind: ActivityKind::Failure,
                     message: INTERRUPTED_REASON.into(),
                     detail: Some(json!({ "filePath": file_path, "previous": task.record })),
-                })?;
-                if let Some(task) = inner.tasks.get_mut(&id) {
-                    task.record = record;
-                }
-                events.push(TaskEvent::Activity(entry));
+                })?);
+            }
+            Ok(entries)
+        })?;
+        for task in &interrupted {
+            if let Some(task) = inner.tasks.get_mut(&task.id) {
+                task.record = RecordState::Idle;
             }
         }
-        self.emit_all(events);
+        drop(guard);
+        self.emit_all(entries.into_iter().map(TaskEvent::Activity).collect());
         Ok(())
     }
 
@@ -332,7 +352,8 @@ impl TaskManager {
         self.add_resolved(input, &info)
     }
 
-    /// 用已解析的直播间信息添加任务。去重检查与写入在同一把锁内完成。
+    /// 用已解析的直播间信息添加任务。去重检查与写入在同一把锁内完成；初始直播状态
+    /// 取自这次解析，不必等第一次轮询。
     pub fn add_resolved(
         &self,
         input: AddTaskInput,
@@ -346,7 +367,13 @@ impl TaskManager {
             anchor_id: info.anchor_id.clone(),
             anchor_name: info.anchor_name.clone(),
             live_url: info.live_url.clone(),
-            quality: input.quality.unwrap_or_else(|| self.default_quality()),
+            quality: input.quality.unwrap_or_else(|| {
+                settings
+                    .get("record_quality")
+                    .and_then(Value::as_str)
+                    .map(Quality::parse_lenient)
+                    .unwrap_or_default()
+            }),
             notify_only: input.notify_only.unwrap_or_else(|| {
                 settings
                     .get("only_notify_no_record")
@@ -356,45 +383,56 @@ impl TaskManager {
             note: input.note.unwrap_or_default(),
             created_at: now_ms(),
         };
-        let mut events = Vec::new();
-        let result = {
-            let mut inner = self.lock();
-            let duplicates = dedup::find_duplicates(inner.tasks.values(), &config, None);
-            if !duplicates.is_empty() && !input.force {
-                return Ok(TaskMutation::Duplicate {
-                    existing: duplicates
-                        .iter()
-                        .filter_map(|id| inner.tasks.get(id).map(Task::snapshot))
-                        .collect(),
-                    candidate: ResolvedRoom::from_live_info(&config.url, info),
-                });
+        let checked_at = now_ms();
+        let live = if info.is_live {
+            LiveState::Live {
+                checked_at,
+                title: info.title.clone(),
             }
-            let id = inner.store.insert_task(&config, Monitoring::Enabled)?;
-            let task = Task {
-                id,
-                config,
-                monitoring: Monitoring::Enabled,
-                live: LiveState::Unknown,
-                record: RecordState::Idle,
-            };
-            let snapshot = task.snapshot();
-            let detail = json!({ "url": task.config.url, "forced": !duplicates.is_empty() });
-            let anchor_name = task.config.anchor_name.clone();
-            inner.tasks.insert(id, task);
-            events.push(TaskEvent::Updated(Box::new(snapshot.clone())));
-            events.push(TaskEvent::Activity(inner.store.insert_activity(
-                &NewActivity {
-                    task_id: Some(id),
-                    anchor_name,
-                    kind: ActivityKind::UserAction,
-                    message: "添加任务".into(),
-                    detail: Some(detail),
-                },
-            )?));
-            TaskMutation::Added { task: snapshot }
+        } else {
+            LiveState::Offline { checked_at }
         };
-        self.emit_all(events);
-        Ok(result)
+
+        let mut guard = self.lock();
+        let inner = &mut *guard;
+        let duplicates = dedup::find_duplicates(inner.tasks.values(), &config, None);
+        if !duplicates.is_empty() && !input.force {
+            return Ok(TaskMutation::Duplicate {
+                existing: duplicates
+                    .iter()
+                    .filter_map(|id| inner.tasks.get(id).map(Task::snapshot))
+                    .collect(),
+                candidate: ResolvedRoom::from_live_info(&config.url, info),
+            });
+        }
+        let detail = json!({ "url": config.url, "forced": !duplicates.is_empty() });
+        let (id, entry) = inner.store.transaction(|db| {
+            let id = db.insert_task(&config, Monitoring::Enabled)?;
+            let entry = db.insert_activity(&NewActivity {
+                task_id: Some(id),
+                anchor_name: config.anchor_name.clone(),
+                kind: ActivityKind::UserAction,
+                message: "添加任务".into(),
+                detail: Some(detail),
+            })?;
+            Ok((id, entry))
+        })?;
+        let task = Task {
+            id,
+            config,
+            monitoring: Monitoring::Enabled,
+            live,
+            record: RecordState::Idle,
+        };
+        let snapshot = task.snapshot();
+        inner.tasks.insert(id, task);
+        inner.last_known_live.insert(id, info.is_live);
+        drop(guard);
+        self.emit_all(vec![
+            TaskEvent::Updated(Box::new(snapshot.clone())),
+            TaskEvent::Activity(entry),
+        ]);
+        Ok(TaskMutation::Added { task: snapshot })
     }
 
     pub async fn update_task(&self, input: UpdateTaskInput) -> CommandResult<TaskMutation> {
@@ -419,16 +457,16 @@ impl TaskManager {
         input: UpdateTaskInput,
         info: Option<&LiveInfo>,
     ) -> CommandResult<TaskMutation> {
-        let mut events = Vec::new();
-        let result = {
-            let mut inner = self.lock();
-            let task = inner
-                .tasks
-                .get(&input.id)
-                .cloned()
-                .ok_or_else(|| not_found(input.id))?;
-            let mut config = task.config.clone();
-            if let (Some(info), Some(url)) = (info, input.url.as_deref()) {
+        let mut guard = self.lock();
+        let inner = &mut *guard;
+        let task = inner
+            .tasks
+            .get(&input.id)
+            .cloned()
+            .ok_or_else(|| not_found(input.id))?;
+        let mut config = task.config.clone();
+        let relinked = match (info, input.url.as_deref()) {
+            (Some(info), Some(url)) => {
                 if task.record.is_active() {
                     return Err(CommandError::new(
                         ErrorKind::RecordingActive,
@@ -452,90 +490,98 @@ impl TaskManager {
                         candidate: ResolvedRoom::from_live_info(&config.url, info),
                     });
                 }
+                Some(info)
             }
-            if let Some(quality) = input.quality {
-                config.quality = quality;
-            }
-            if let Some(notify_only) = input.notify_only {
-                config.notify_only = notify_only;
-            }
-            if let Some(note) = input.note {
-                config.note = note;
-            }
-            if config != task.config {
-                inner.store.update_task_config(task.id, &config)?;
-                let url_changed = config.url != task.config.url;
-                let updated = inner.tasks.get_mut(&task.id).expect("task exists");
-                updated.config = config;
-                if url_changed {
-                    updated.live = LiveState::Unknown;
-                    inner.last_known_live.remove(&task.id);
-                }
-                let anchor_name = inner.tasks[&task.id].config.anchor_name.clone();
-                events.push(TaskEvent::Activity(inner.store.insert_activity(
-                    &NewActivity {
-                        task_id: Some(task.id),
-                        anchor_name,
-                        kind: ActivityKind::UserAction,
-                        message: "修改任务".into(),
-                        detail: None,
-                    },
-                )?));
-            }
-            let snapshot = inner.tasks[&task.id].snapshot();
-            events.insert(0, TaskEvent::Updated(Box::new(snapshot.clone())));
-            TaskMutation::Updated { task: snapshot }
+            _ => None,
         };
+        if let Some(quality) = input.quality {
+            config.quality = quality;
+        }
+        if let Some(notify_only) = input.notify_only {
+            config.notify_only = notify_only;
+        }
+        if let Some(note) = input.note {
+            config.note = note;
+        }
+
+        let mut events = Vec::new();
+        if config != task.config {
+            let entry = inner.store.transaction(|db| {
+                db.update_task_config(task.id, &config)?;
+                let mut updated = task.clone();
+                updated.config = config.clone();
+                db.insert_activity(&user_action(&updated, "修改任务", None))
+            })?;
+            let updated = inner.tasks.get_mut(&task.id).expect("task exists");
+            updated.config = config;
+            if let Some(info) = relinked {
+                let checked_at = now_ms();
+                updated.live = if info.is_live {
+                    LiveState::Live {
+                        checked_at,
+                        title: info.title.clone(),
+                    }
+                } else {
+                    LiveState::Offline { checked_at }
+                };
+                inner.last_known_live.insert(task.id, info.is_live);
+                inner.failing.remove(&task.id);
+            }
+            events.push(TaskEvent::Activity(entry));
+        }
+        let snapshot = inner.tasks[&task.id].snapshot();
+        drop(guard);
+        events.insert(0, TaskEvent::Updated(Box::new(snapshot.clone())));
         self.emit_all(events);
-        Ok(result)
+        Ok(TaskMutation::Updated { task: snapshot })
     }
 
     // ---- 批量操作 ----
 
-    /// 删除任务。任一任务正在录制时整批不删除。返回实际删除的 id。
+    /// 删除任务。任一任务正在录制时整批不删除。整批在一个事务里完成。返回实际删除的 id。
     pub fn delete_tasks(&self, ids: &[TaskId]) -> CommandResult<Vec<TaskId>> {
-        let mut events = Vec::new();
-        let removed = {
-            let mut inner = self.lock();
-            if let Some(task) = ids
-                .iter()
-                .filter_map(|id| inner.tasks.get(id))
-                .find(|task| task.record.is_active())
-            {
-                return Err(CommandError::new(
-                    ErrorKind::RecordingActive,
-                    format!("{} 正在录制，停止录制后才能删除", task.config.anchor_name),
-                ));
+        let mut guard = self.lock();
+        let inner = &mut *guard;
+        let targets: Vec<Task> = ids
+            .iter()
+            .filter_map(|id| inner.tasks.get(id).cloned())
+            .collect();
+        if let Some(task) = targets.iter().find(|task| task.record.is_active()) {
+            return Err(CommandError::new(
+                ErrorKind::RecordingActive,
+                format!("{} 正在录制，停止录制后才能删除", task.config.anchor_name),
+            ));
+        }
+        if targets.is_empty() {
+            return Ok(Vec::new());
+        }
+        let entries = inner.store.transaction(|db| {
+            let mut entries = Vec::new();
+            for task in &targets {
+                db.delete_task(task.id)?;
+                entries.push(db.insert_activity(&user_action(
+                    task,
+                    "删除任务",
+                    Some(json!({ "url": task.config.url })),
+                ))?);
             }
-            let mut removed = Vec::new();
-            for id in ids {
-                let Some(task) = inner.tasks.get(id).cloned() else {
-                    continue;
-                };
-                inner.store.delete_task(*id)?;
-                inner.tasks.remove(id);
-                inner.last_known_live.remove(id);
-                removed.push(*id);
-                events.push(TaskEvent::Activity(inner.store.insert_activity(
-                    &NewActivity {
-                        task_id: Some(*id),
-                        anchor_name: task.config.anchor_name.clone(),
-                        kind: ActivityKind::UserAction,
-                        message: "删除任务".into(),
-                        detail: Some(json!({ "url": task.config.url })),
-                    },
-                )?));
-            }
-            if !removed.is_empty() {
-                events.insert(0, TaskEvent::Removed(removed.clone()));
-            }
-            removed
-        };
+            Ok(entries)
+        })?;
+        let removed: Vec<TaskId> = targets.iter().map(|task| task.id).collect();
+        for id in &removed {
+            inner.tasks.remove(id);
+            inner.last_known_live.remove(id);
+            inner.failing.remove(id);
+        }
+        drop(guard);
+        let mut events = vec![TaskEvent::Removed(removed.clone())];
+        events.extend(entries.into_iter().map(TaskEvent::Activity));
         self.emit_all(events);
         Ok(removed)
     }
 
-    /// 批量启用或暂停监控，只改监控意图。返回变化后的快照（含未变化的任务）。
+    /// 批量启用或暂停监控。重新启用时一并清除录制失败（例如磁盘不足），给用户一个
+    /// 「处理完了，重新开始」的入口。返回这些任务的快照（含未变化的任务）。
     pub fn set_monitoring(
         &self,
         ids: &[TaskId],
@@ -546,170 +592,183 @@ impl TaskManager {
         } else {
             Monitoring::Paused
         };
-        let mut events = Vec::new();
-        let snapshots = {
-            let mut inner = self.lock();
-            let mut snapshots = Vec::new();
-            for id in ids {
-                let Some(task) = inner.tasks.get(id).cloned() else {
-                    continue;
-                };
-                if task.monitoring != monitoring {
-                    inner.store.set_monitoring(*id, monitoring)?;
-                    let updated = inner.tasks.get_mut(id).expect("task exists");
-                    updated.monitoring = monitoring;
-                    // 暂停后旧的检测结果不再有效，重新启用时从未知开始。
-                    if !updated.record.is_active() {
-                        updated.live = LiveState::Unknown;
-                    }
-                    inner.last_known_live.remove(id);
-                    let snapshot = inner.tasks[id].snapshot();
-                    events.push(TaskEvent::Updated(Box::new(snapshot)));
-                    events.push(TaskEvent::Activity(
-                        inner.store.insert_activity(&NewActivity {
-                            task_id: Some(*id),
-                            anchor_name: task.config.anchor_name.clone(),
-                            kind: ActivityKind::UserAction,
-                            message: if enabled {
-                                "开始监控"
-                            } else {
-                                "暂停监控"
-                            }
-                            .into(),
-                            detail: None,
-                        })?,
-                    ));
+        let mut guard = self.lock();
+        let inner = &mut *guard;
+        let changed: Vec<Task> = ids
+            .iter()
+            .filter_map(|id| inner.tasks.get(id))
+            .filter(|task| task.monitoring != monitoring)
+            .cloned()
+            .collect();
+        let clears_failure =
+            |task: &Task| enabled && matches!(task.record, RecordState::Failed { .. });
+        let entries = inner.store.transaction(|db| {
+            let mut entries = Vec::new();
+            for task in &changed {
+                db.set_monitoring(task.id, monitoring)?;
+                if clears_failure(task) {
+                    db.set_record_state(task.id, &RecordState::Idle)?;
                 }
-                snapshots.push(inner.tasks[id].snapshot());
+                let message = if enabled {
+                    "开始监控"
+                } else {
+                    "暂停监控"
+                };
+                entries.push(db.insert_activity(&user_action(task, message, None))?);
             }
-            snapshots
-        };
+            Ok(entries)
+        })?;
+        let mut events = Vec::new();
+        for (task, entry) in changed.iter().zip(entries) {
+            let updated = inner.tasks.get_mut(&task.id).expect("task exists");
+            updated.monitoring = monitoring;
+            if clears_failure(task) {
+                updated.record = RecordState::Idle;
+            }
+            // 暂停后旧的检测结果不再有效，重新启用时从未知开始。
+            if !updated.record.is_active() {
+                updated.live = LiveState::Unknown;
+            }
+            events.push(TaskEvent::Updated(Box::new(updated.snapshot())));
+            events.push(TaskEvent::Activity(entry));
+            inner.last_known_live.remove(&task.id);
+            inner.failing.remove(&task.id);
+        }
+        let snapshots = ids
+            .iter()
+            .filter_map(|id| inner.tasks.get(id).map(Task::snapshot))
+            .collect();
+        drop(guard);
         self.emit_all(events);
         Ok(snapshots)
     }
 
     // ---- 调度与录制引擎回写 ----
 
-    /// 更新直播状态（只在内存中）。在开播、下播和首次检测失败时写动态。
+    /// 更新直播状态（只在内存中）。开播、下播时写动态；检测失败只在连续失败的第一次
+    /// 写动态，中间穿插的「检测中」不打断连续，直到一次检测成功。
     pub fn set_live_state(&self, id: TaskId, live: LiveState) -> Option<TaskSnapshot> {
-        let mut events = Vec::new();
-        let snapshot = {
-            let mut inner = self.lock();
-            let task = inner.tasks.get(&id)?.clone();
-            let previous_live = inner.last_known_live.get(&id).copied();
-            let activity = match &live {
-                LiveState::Live { title, .. } if previous_live != Some(true) => {
-                    inner.last_known_live.insert(id, true);
-                    Some((
+        let mut guard = self.lock();
+        let inner = &mut *guard;
+        let task = inner.tasks.get(&id)?.clone();
+        let previous_live = inner.last_known_live.get(&id).copied();
+        let activity = match &live {
+            LiveState::Live { title, .. } => {
+                inner.failing.remove(&id);
+                inner.last_known_live.insert(id, true);
+                (previous_live != Some(true)).then(|| {
+                    (
                         ActivityKind::LiveStart,
                         "检测到开播".to_string(),
                         title.as_ref().map(|title| json!({ "title": title })),
-                    ))
-                }
-                LiveState::Live { .. } => None,
-                LiveState::Offline { .. } => {
-                    inner.last_known_live.insert(id, false);
-                    (previous_live == Some(true))
-                        .then(|| (ActivityKind::LiveEnd, "已下播".to_string(), None))
-                }
-                LiveState::CheckFailed { kind, message, .. }
-                    if !matches!(task.live, LiveState::CheckFailed { .. }) =>
-                {
-                    Some((
-                        ActivityKind::Failure,
-                        format!("检测失败：{message}"),
-                        Some(json!({ "kind": kind })),
-                    ))
-                }
-                _ => None,
-            };
-            let updated = inner.tasks.get_mut(&id).expect("task exists");
-            updated.live = live;
-            let snapshot = updated.snapshot();
-            events.push(TaskEvent::Updated(Box::new(snapshot.clone())));
-            if let Some((kind, message, detail)) = activity {
-                match inner.store.insert_activity(&NewActivity {
+                    )
+                })
+            }
+            LiveState::Offline { .. } => {
+                inner.failing.remove(&id);
+                inner.last_known_live.insert(id, false);
+                (previous_live == Some(true))
+                    .then(|| (ActivityKind::LiveEnd, "已下播".to_string(), None))
+            }
+            LiveState::CheckFailed { kind, message, .. } => inner.failing.insert(id).then(|| {
+                (
+                    ActivityKind::Failure,
+                    format!("检测失败：{message}"),
+                    Some(json!({ "kind": kind })),
+                )
+            }),
+            LiveState::Checking { .. } | LiveState::Unknown => None,
+        };
+        let entry = activity.and_then(|(kind, message, detail)| {
+            inner
+                .store
+                .db()
+                .insert_activity(&NewActivity {
                     task_id: Some(id),
                     anchor_name: task.config.anchor_name.clone(),
                     kind,
                     message,
                     detail,
-                }) {
-                    Ok(entry) => events.push(TaskEvent::Activity(entry)),
-                    Err(error) => eprintln!("写入动态失败：{error}"),
-                }
-            }
-            snapshot
-        };
+                })
+                .inspect_err(|error| eprintln!("写入动态失败：{error}"))
+                .ok()
+        });
+        let updated = inner.tasks.get_mut(&id).expect("task exists");
+        updated.live = live;
+        let snapshot = updated.snapshot();
+        drop(guard);
+        let mut events = vec![TaskEvent::Updated(Box::new(snapshot.clone()))];
+        events.extend(entry.map(TaskEvent::Activity));
         self.emit_all(events);
         Some(snapshot)
     }
 
-    /// 更新录制状态并持久化。在开始录制、录制结束和录制失败时写动态。
+    /// 更新录制状态并持久化。在开始录制、录制结束和录制失败时写动态，与状态在同一事务。
     pub fn set_record_state(&self, id: TaskId, record: RecordState) -> CommandResult<TaskSnapshot> {
-        let mut events = Vec::new();
-        let snapshot = {
-            let mut inner = self.lock();
-            let task = inner.tasks.get(&id).cloned().ok_or_else(|| not_found(id))?;
-            inner.store.set_record_state(id, &record)?;
-            let activity = match (&task.record, &record) {
-                (previous, RecordState::Recording { file_path, .. })
-                    if !matches!(previous, RecordState::Recording { .. }) =>
-                {
-                    Some((
-                        ActivityKind::RecordStart,
-                        "开始录制".to_string(),
-                        Some(json!({ "filePath": file_path, "quality": task.config.quality })),
-                    ))
+        let mut guard = self.lock();
+        let inner = &mut *guard;
+        let task = inner.tasks.get(&id).cloned().ok_or_else(|| not_found(id))?;
+        let activity = match (&task.record, &record) {
+            (previous, RecordState::Recording { file_path, .. })
+                if !matches!(previous, RecordState::Recording { .. }) =>
+            {
+                Some((
+                    ActivityKind::RecordStart,
+                    "开始录制".to_string(),
+                    Some(json!({ "filePath": file_path, "quality": task.config.quality })),
+                ))
+            }
+            (
+                RecordState::Recording {
+                    file_path,
+                    started_at,
+                    ..
                 }
-                (
-                    RecordState::Recording {
-                        file_path,
-                        started_at,
-                        ..
-                    }
-                    | RecordState::Finishing {
-                        file_path,
-                        started_at,
-                    },
-                    RecordState::Idle,
-                ) => Some((
-                    ActivityKind::RecordEnd,
-                    "录制结束".to_string(),
-                    Some(json!({
-                        "filePath": file_path,
-                        "durationMs": now_ms() - started_at,
-                    })),
-                )),
-                (
-                    _,
-                    RecordState::Failed {
-                        reason, file_path, ..
-                    },
-                ) => Some((
-                    ActivityKind::Failure,
-                    format!("录制失败：{reason}"),
-                    Some(json!({ "filePath": file_path })),
-                )),
-                _ => None,
-            };
-            let updated = inner.tasks.get_mut(&id).expect("task exists");
-            updated.record = record;
-            let snapshot = updated.snapshot();
-            events.push(TaskEvent::Updated(Box::new(snapshot.clone())));
-            if let Some((kind, message, detail)) = activity {
-                events.push(TaskEvent::Activity(inner.store.insert_activity(
-                    &NewActivity {
+                | RecordState::Finishing {
+                    file_path,
+                    started_at,
+                },
+                RecordState::Idle,
+            ) => Some((
+                ActivityKind::RecordEnd,
+                "录制结束".to_string(),
+                Some(json!({
+                    "filePath": file_path,
+                    "durationMs": now_ms() - started_at,
+                })),
+            )),
+            (
+                _,
+                RecordState::Failed {
+                    reason, file_path, ..
+                },
+            ) => Some((
+                ActivityKind::Failure,
+                format!("录制失败：{reason}"),
+                Some(json!({ "filePath": file_path })),
+            )),
+            _ => None,
+        };
+        let entry = inner.store.transaction(|db| {
+            db.set_record_state(id, &record)?;
+            activity
+                .map(|(kind, message, detail)| {
+                    db.insert_activity(&NewActivity {
                         task_id: Some(id),
                         anchor_name: task.config.anchor_name.clone(),
                         kind,
                         message,
                         detail,
-                    },
-                )?));
-            }
-            snapshot
-        };
+                    })
+                })
+                .transpose()
+        })?;
+        let updated = inner.tasks.get_mut(&id).expect("task exists");
+        updated.record = record;
+        let snapshot = updated.snapshot();
+        drop(guard);
+        let mut events = vec![TaskEvent::Updated(Box::new(snapshot.clone()))];
+        events.extend(entry.map(TaskEvent::Activity));
         self.emit_all(events);
         Ok(snapshot)
     }
@@ -742,20 +801,20 @@ impl TaskManager {
 
     /// 写一条动态并推送。
     pub fn record_activity(&self, entry: NewActivity) -> CommandResult<ActivityEntry> {
-        let entry = self.lock().store.insert_activity(&entry)?;
+        let entry = self.lock().store.db().insert_activity(&entry)?;
         (self.listener)(TaskEvent::Activity(entry.clone()));
         Ok(entry)
     }
 
     pub fn list_activity(&self, query: &ActivityQuery) -> CommandResult<ActivityPage> {
-        Ok(self.lock().store.list_activity(query)?)
+        Ok(self.lock().store.db().list_activity(query)?)
     }
 
     // ---- 设置 ----
 
     /// 默认值与用户设置合并后的完整设置。
     pub fn settings(&self) -> Map<String, Value> {
-        let stored = self.lock().store.load_settings().unwrap_or_default();
+        let stored = self.lock().store.db().load_settings().unwrap_or_default();
         let mut merged = self.defaults.clone();
         for (key, value) in stored {
             if merged.contains_key(&key) {
@@ -775,7 +834,9 @@ impl TaskManager {
             settings::validate(&self.defaults, key, value)
                 .map_err(|message| CommandError::new(ErrorKind::InvalidInput, message))?;
         }
-        self.lock().store.save_settings(&values)?;
+        self.lock()
+            .store
+            .transaction(|db| db.save_settings(&values))?;
         Ok(self.settings())
     }
 
@@ -799,10 +860,14 @@ fn default_save_dir(app: &tauri::AppHandle, data_dir: &Path) -> PathBuf {
         .unwrap_or_else(|_| data_dir.join("recordings"))
 }
 
-/// 在 Tauri `setup` 中调用：打开数据库、恢复任务并登记 `Arc<TaskManager>`。
-pub fn init(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
-    let data_dir = app.path().app_local_data_dir()?;
-    let store = Store::open(&data_dir.join("lubobao.db"))?;
+fn open_manager(app: &tauri::AppHandle) -> Result<TaskManager, String> {
+    let data_dir = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|error| format!("找不到应用数据目录：{error}"))?;
+    let db_path = data_dir.join("lubobao.db");
+    let store =
+        Store::open(&db_path).map_err(|error| format!("{error}\n数据库：{}", db_path.display()))?;
     let handle = app.clone();
     let listener: Listener = Box::new(move |event| {
         let _ = match event {
@@ -811,7 +876,29 @@ pub fn init(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
             TaskEvent::Activity(entry) => handle.emit(ACTIVITY_EVENT, entry),
         };
     });
-    let manager = TaskManager::open(store, &default_save_dir(app, &data_dir), listener)?;
-    app.manage(Arc::new(manager));
+    TaskManager::open(store, &default_save_dir(app, &data_dir), listener)
+        .map_err(|error| format!("{}\n数据库：{}", error.message, db_path.display()))
+}
+
+/// 在 Tauri `setup` 中调用：打开数据库、恢复任务并登记 `Arc<TaskManager>`。
+///
+/// 打不开数据库（例如被更新版本的录播宝升级过）时不 panic：记日志，弹出错误对话框，
+/// 用户确认后退出。
+pub fn init(app: &tauri::AppHandle) -> tauri::Result<()> {
+    match open_manager(app) {
+        Ok(manager) => {
+            app.manage(Arc::new(manager));
+        }
+        Err(message) => {
+            eprintln!("录播宝无法打开任务数据：{message}");
+            let handle = app.clone();
+            app.dialog()
+                .message(format!("无法打开任务数据，录播宝将退出。\n\n{message}"))
+                .title("录播宝启动失败")
+                .kind(MessageDialogKind::Error)
+                .buttons(MessageDialogButtons::Ok)
+                .show(move |_| handle.exit(1));
+        }
+    }
     Ok(())
 }

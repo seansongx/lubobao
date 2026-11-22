@@ -196,17 +196,31 @@ export interface ActivityPage {
 
 // ---- 设置（src-tauri/src/tasks/settings.rs，键名沿用 StreamCap） ----
 
+/** 与 settings.rs 的 ENUM_SETTINGS 一致。 */
+export type VideoFormat =
+  | "TS"
+  | "MP4"
+  | "FLV"
+  | "MKV"
+  | "MOV"
+  | "NUT"
+  | "WAV"
+  | "MP3"
+  | "WMA"
+  | "M4A"
+  | "AAC";
+
 export interface Settings {
   live_save_path: string;
   loop_time_seconds: number;
   platform_max_concurrent_requests: number;
-  video_format: string;
+  video_format: VideoFormat;
   record_quality: Quality;
   segmented_recording_enabled: boolean;
   video_segment_time: number;
   /** GB */
   recording_space_threshold: number;
-  default_live_source: string;
+  default_live_source: "FLV" | "HLS";
   force_https_recording: boolean;
   flv_use_direct_download: boolean;
   convert_to_mp4: boolean;

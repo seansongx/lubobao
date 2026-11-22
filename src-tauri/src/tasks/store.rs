@@ -123,6 +123,38 @@ impl Store {
         Ok(())
     }
 
+    /// 只读访问，以及不需要事务的单条写入。
+    pub fn db(&self) -> Db<'_> {
+        Db { conn: &self.conn }
+    }
+
+    /// 在一个事务里执行 `f`。`f` 返回错误时回滚，数据库保持原样。
+    pub fn transaction<T>(&mut self, f: impl FnOnce(&Db<'_>) -> StoreResult<T>) -> StoreResult<T> {
+        let tx = self.conn.transaction()?;
+        let value = f(&Db { conn: &tx })?;
+        tx.commit()?;
+        Ok(value)
+    }
+}
+
+/// 一行无法读取的任务，启动时跳过。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SkippedRow {
+    pub id: TaskId,
+    pub reason: String,
+}
+
+/// 绑定到连接或事务上的读写操作。
+pub struct Db<'a> {
+    conn: &'a Connection,
+}
+
+impl Db<'_> {
+    #[cfg(test)]
+    pub fn execute_batch(&self, sql: &str) -> StoreResult<()> {
+        Ok(self.conn.execute_batch(sql)?)
+    }
+
     // ---- 任务 ----
 
     pub fn insert_task(&self, config: &TaskConfig, monitoring: Monitoring) -> StoreResult<TaskId> {
@@ -192,7 +224,8 @@ impl Store {
     }
 
     /// 按 id 升序读出全部任务。直播状态不持久化，读出时为 `Unknown`。
-    pub fn load_tasks(&self) -> StoreResult<Vec<Task>> {
+    /// 无法识别的行（例如更新版本写入的未知平台）跳过并在第二个返回值中列出。
+    pub fn load_tasks(&self) -> StoreResult<(Vec<Task>, Vec<SkippedRow>)> {
         let mut statement = self.conn.prepare(
             "SELECT id, url, platform, room_id, anchor_id, anchor_name, live_url, quality,
                 notify_only, note, created_at, monitoring, record_state
@@ -216,6 +249,7 @@ impl Store {
             ))
         })?;
         let mut tasks = Vec::new();
+        let mut skipped = Vec::new();
         for row in rows {
             let (
                 id,
@@ -232,7 +266,16 @@ impl Store {
                 monitoring,
                 record_state,
             ) = row?;
-            let platform: Platform = serde_json::from_value(Value::String(platform))?;
+            let platform: Platform = match serde_json::from_value(Value::String(platform.clone())) {
+                Ok(platform) => platform,
+                Err(_) => {
+                    skipped.push(SkippedRow {
+                        id,
+                        reason: format!("未知平台 {platform}"),
+                    });
+                    continue;
+                }
+            };
             let record = serde_json::from_str(&record_state).unwrap_or(RecordState::Idle);
             tasks.push(Task {
                 id,
@@ -253,7 +296,7 @@ impl Store {
                 record,
             });
         }
-        Ok(tasks)
+        Ok((tasks, skipped))
     }
 
     // ---- 动态 ----
@@ -374,16 +417,14 @@ impl Store {
         Ok(map)
     }
 
-    pub fn save_settings(&mut self, values: &Map<String, Value>) -> StoreResult<()> {
-        let tx = self.conn.transaction()?;
+    pub fn save_settings(&self, values: &Map<String, Value>) -> StoreResult<()> {
         for (key, value) in values {
-            tx.execute(
+            self.conn.execute(
                 "INSERT INTO settings (key, value) VALUES (?1, ?2)
                  ON CONFLICT (key) DO UPDATE SET value = excluded.value",
                 params![key, serde_json::to_string(value)?],
             )?;
         }
-        tx.commit()?;
         Ok(())
     }
 }

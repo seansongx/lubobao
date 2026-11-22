@@ -1,3 +1,5 @@
+use tauri::Manager;
+
 pub mod ffmpeg;
 pub mod platforms;
 pub mod tasks;
@@ -5,7 +7,17 @@ pub mod tasks;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // 只允许一个实例：第二次启动时把已有窗口显示到前台，新进程随即退出。
+        // 必须最先注册。
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             ffmpeg::init(app.handle())?;
             tasks::init(app.handle())?;

@@ -48,7 +48,21 @@ pub fn defaults(save_dir: &Path) -> Map<String, Value> {
     }
 }
 
-/// 校验一项更新：键必须存在于默认值中，值的类型必须一致，数值项必须为正。
+/// 取值有限的设置项及其合法值。格式取自 StreamCap `VideoFormat` 与 `AudioFormat`，
+/// 直播源取自设置页的下拉选项。
+pub const ENUM_SETTINGS: &[(&str, &[&str])] = &[
+    ("record_quality", &["OD", "UHD", "HD", "SD", "LD"]),
+    (
+        "video_format",
+        &[
+            "TS", "MP4", "FLV", "MKV", "MOV", "NUT", "WAV", "MP3", "WMA", "M4A", "AAC",
+        ],
+    ),
+    ("default_live_source", &["FLV", "HLS"]),
+];
+
+/// 校验一项更新：键必须存在于默认值中，值的类型必须一致，数值项必须为正，
+/// 枚举项必须是 [`ENUM_SETTINGS`] 中的值。
 pub fn validate(defaults: &Map<String, Value>, key: &str, value: &Value) -> Result<(), String> {
     let Some(default) = defaults.get(key) else {
         return Err(format!("未知的设置项：{key}"));
@@ -63,6 +77,15 @@ pub fn validate(defaults: &Map<String, Value>, key: &str, value: &Value) -> Resu
     }
     if default.is_u64() && !value.is_u64() {
         return Err(format!("设置项 {key} 需要正整数：{value}"));
+    }
+    if let Some((_, allowed)) = ENUM_SETTINGS.iter().find(|(name, _)| *name == key) {
+        let text = value.as_str().unwrap_or_default();
+        if !allowed.contains(&text) {
+            return Err(format!(
+                "设置项 {key} 只能是 {} 之一：{value}",
+                allowed.join("、")
+            ));
+        }
     }
     Ok(())
 }

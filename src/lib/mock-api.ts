@@ -1,6 +1,6 @@
 // 浏览器假数据（npm run dev，不在 Tauri 里时使用），方便调界面。
 // 任务覆盖七种显示状态；FFmpeg 状态可用地址参数切换：
-//   ?ffmpeg=checking | notInstalled | waiting | downloading | verifying | ready | outdated | failed | fatal
+//   ?ffmpeg=checking | notInstalled | waiting | downloading | verifying | ready | updating | outdated | failed | fatal
 // 缺省时模拟一次下载：下载中 → 校验 → 可用。控制台可调用 window.__lubobaoMock.setFfmpeg("failed")。
 // 显示状态的推导复刻 src-tauri/src/tasks/model.rs 的 derive_display，只用于假数据。
 
@@ -42,6 +42,14 @@ const ffmpegPresets: Record<string, FfmpegStatus> = {
     ffmpegVersion: "9.0.2",
     packageVersion: "9.0.2",
     outdated: false,
+    installError: null,
+  },
+  updating: {
+    state: "ready",
+    path: "C:\\Users\\me\\AppData\\Local\\com.lubobao.app\\components\\ffmpeg\\9.0.1\\ffmpeg.exe",
+    ffmpegVersion: "9.0.1",
+    packageVersion: "9.0.1",
+    outdated: true,
     installError: null,
   },
   outdated: {
@@ -375,7 +383,7 @@ export function createMockBackend(): Backend {
           anchorName: candidate.anchorName,
           roomId,
           monitoring: "enabled",
-          live: { state: "unknown" },
+          live: { state: "offline", checkedAt: Date.now() },
           record: { state: "idle" },
           quality: input.quality ?? settings.record_quality,
           notifyOnly: input.notifyOnly ?? settings.only_notify_no_record,
@@ -430,6 +438,8 @@ export function createMockBackend(): Backend {
         const next = rederive(task, {
           monitoring,
           live: recording ? task.live : { state: "unknown" },
+          // 与 Rust 一致：重新启用监控时清除录制失败。
+          record: enabled && task.record.state === "failed" ? { state: "idle" } : task.record,
         });
         replace(next);
         log(next, "user_action", enabled ? "开始监控" : "暂停监控");

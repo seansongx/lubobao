@@ -61,12 +61,20 @@ function describeFfmpeg(status: FfmpegStatus | null): FfmpegView {
     case "verifying":
       return { label: "FFmpeg 校验中", hint: "正在校验并安装下载的文件", busy: true };
     case "ready":
-      if (status.outdated) {
+      if (status.installError) {
+        // 旧版本可用，新版本安装失败：提示原因并允许重试。
         return {
           label: `FFmpeg ${status.ffmpegVersion}（旧版本）`,
-          hint: `正在使用旧版本 ${status.ffmpegVersion}。新版本安装失败：${status.installError ?? "未知原因"}`,
+          hint: `正在使用旧版本 ${status.ffmpegVersion}。新版本安装失败：${status.installError}`,
           tone: "warning",
           retry: true,
+        };
+      }
+      if (status.outdated) {
+        // 旧版本可用，新版本正在后台安装，属于正常状态。
+        return {
+          label: `FFmpeg ${status.ffmpegVersion}（正在更新）`,
+          hint: `正在使用旧版本 ${status.ffmpegVersion}，新版本在后台安装，完成后自动切换`,
         };
       }
       return { label: `FFmpeg ${status.ffmpegVersion}`, hint: `FFmpeg 可用：${status.path}` };
