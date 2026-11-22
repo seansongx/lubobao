@@ -14,9 +14,12 @@
 
 ## Project Structure
 
-LuBoBao (录播宝) is a Tauri 2 desktop app for live-stream recording, with a headless Linux CLI and Docker image planned for the same core. The 0.1.0 launch scope and acceptance status live in `docs/feature-map.md`.
+LuBoBao (录播宝) is a Tauri 2 desktop app for live-stream recording, with a headless CLI (`lubobao-cli`) and Docker image built on the same core. The 0.1.0 launch scope and acceptance status live in `docs/feature-map.md`.
 
-- Rust modules in `src-tauri/src/`: `platforms/` (adapters that resolve a room link into live status, qualities and stream URLs), `recorder/` (FFmpeg process lifecycle), `ffmpeg/` (download, verify and install FFmpeg from `@seankit/ffmpeg`), `tasks/` (task model, SQLite storage, activity, settings and Tauri commands). Keep these modules free of Tauri; put `tauri::` code, commands and event emission in thin glue files so the CLI can reuse the core.
+- The Rust code is a Cargo workspace (root `Cargo.toml` and `Cargo.lock`, build output in the root `target/`). The version lives in `[workspace.package]`; members inherit it.
+  - `crates/lubobao-core` (library): `platforms/` (adapters that resolve a room link into live status, qualities and stream URLs), `recorder/` (FFmpeg process lifecycle, MP4 post-processing), `ffmpeg/` (download, verify and install FFmpeg from `@seankit/ffmpeg`), `tasks/` (task model, SQLite storage, activity, settings), `scheduler/` (polling, concurrency, backoff, shutdown) and `library/`. It must not depend on Tauri or any GUI crate. The `e2e` feature adds a test-only adapter for `e2e+http://…` links; release builds never enable it.
+  - `crates/lubobao-cli` (binary `lubobao-cli`): the headless CLI. `run` holds the data-dir lock and serves a local control channel (Unix socket `control.sock` with mode 0600, or a named pipe on Windows); other subcommands go through it, or open the database directly when `run` is not running. See `docs/cli.md`.
+  - `src-tauri` (desktop app, depends on `lubobao-core`): `ffmpeg.rs`, `tasks.rs`, `scheduler.rs` and `library.rs` re-export the core modules and add the Tauri glue (`tauri_glue.rs`, `commands.rs`); `desktop/` holds the tray, quit confirmation and notifications. Put `tauri::` code, commands and event emission only here.
 
 - `index.html` only mounts `#root`. `src/main.tsx` renders `src/App.tsx`, which holds the current page in React local state; there is no router.
 - `src/components/` holds app components such as `app-sidebar.tsx` and `status-bar.tsx`. shadcn/ui components live in `src/components/ui/`; add them with `npx shadcn@latest add <name>` as pages need them (`components.json` uses the Nova style). Shared helpers such as `cn` live in `src/lib/`.
@@ -34,8 +37,9 @@ Run commands from the repository root. Install Node.js, npm, and stable Rust. On
 - `npm run dev` starts Vite at `http://127.0.0.1:1420` for browser-based layout work. The dev server binds to IPv4 loopback because `localhost` can resolve to an unreachable `::1`, which leaves `tauri dev` waiting for the frontend.
 - `npm run tauri dev` starts Vite and opens the desktop app with native commands available.
 - `npm run build` type-checks with `tsc -b` and builds the frontend into `dist/`.
-- `cargo check --manifest-path src-tauri/Cargo.toml` checks the Rust side without building the app.
-- `npm run tauri build` builds the desktop app and writes installers to `src-tauri/target/release/bundle/`.
+- `cargo check --workspace` checks the Rust side without building the app.
+- `cargo run -p lubobao-cli -- run` starts the CLI in the foreground; use `--data-dir` to keep test data apart.
+- `npm run tauri build` builds the desktop app and writes installers to `target/release/bundle/`.
 
 ## Coding Style
 
@@ -45,15 +49,16 @@ Use two spaces in TypeScript, HTML, and CSS. Name React components in PascalCase
 
 ## Testing
 
-Rust tests live beside the implementation in `#[cfg(test)]` modules, plus offline fixtures and `#[ignore]` live-network tests under `src-tauri/tests/`. Name each test after the behavior it checks. There is no frontend test runner yet. Before committing, run `npm run build`, then `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` in `src-tauri/`. Set `LUBOBAO_TEST_FFMPEG` to an ffmpeg binary to run the recorder tests; without it they are skipped. Run live tests with `cargo test -- --ignored --nocapture` when a change touches a platform adapter.
+Rust tests live beside the implementation in `#[cfg(test)]` modules, plus offline fixtures and `#[ignore]` live-network tests under `crates/lubobao-core/tests/`. Name each test after the behavior it checks. There is no frontend test runner yet. Before committing, run `npm run build`, then `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings` and `cargo test --workspace` from the repository root. Set `LUBOBAO_TEST_FFMPEG` to an ffmpeg binary to run the recorder tests; without it they are skipped. Run live tests with `cargo test -p lubobao-core -- --ignored --nocapture` when a change touches a platform adapter. The CLI end-to-end test (`run`, `add`, recording, `stop`, stream end, SIGTERM) needs `LUBOBAO_TEST_FFMPEG` and runs with `cargo test -p lubobao-cli --features e2e --test e2e -- --nocapture`.
 
 To check the shell manually, run `npm run dev` and open `http://127.0.0.1:1420`. Switch between the four pages, check the sidebar, content area, and status bar in both light and dark system themes, and confirm that a 1024px-wide window has no horizontal scrollbar.
 
 ## CI and Releases
 
-- `.github/workflows/test.yml` runs on every push and pull request on Windows, macOS (arm64), and Ubuntu: `npm run build`, `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `cargo test`. It installs FFmpeg from `@seankit/ffmpeg@9.0.1` and sets `LUBOBAO_TEST_FFMPEG`, so the recorder tests run too; `#[ignore]` network tests are skipped. Run the same three cargo commands locally before pushing.
-- `.github/workflows/release.yml` builds unsigned installers: Windows NSIS (x64), separate macOS dmg for arm64 and x64 (ad-hoc signed), and Linux AppImage and deb built on Ubuntu 22.04. Files are renamed to ASCII (`lubobao_<version>_<os>_<arch>…`), uploaded as Actions artifacts, and the run summary lists each file's size and SHA-256. Manual runs (`workflow_dispatch`) only build; a `v*` tag also creates a draft GitHub Release with `SHA256SUMS.txt` and first-launch notes.
-- Release steps: `node scripts/set-version.mjs <x.y.z>` (updates `package.json`, `package-lock.json`, `tauri.conf.json`, `Cargo.toml`, and `Cargo.lock`), commit, then `git tag v<x.y.z>` and push the tag. The workflow fails if the tag differs from the app version. Review and publish the draft release by hand.
+- `.github/workflows/test.yml` runs on every push and pull request on Windows, macOS (arm64), and Ubuntu: `npm run build`, `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace` and the CLI end-to-end test. It installs FFmpeg from `@seankit/ffmpeg@9.0.1` and sets `LUBOBAO_TEST_FFMPEG`, so the recorder tests run too; `#[ignore]` network tests are skipped. Run the same three cargo commands locally before pushing.
+- `.github/workflows/cli.yml` runs on every branch push and pull request: it builds static musl `lubobao-cli` for x64 (`ubuntu-24.04`) and arm64 (`ubuntu-24.04-arm`), checks the release binary has no test adapter, installs FFmpeg with the CLI itself, runs the end-to-end test, packages `lubobao-cli_<version>_linux_<arch>.tar.gz`, then builds the Docker image per architecture and runs the end-to-end test and a `docker stop` check inside it. Images are only pushed when `release.yml` calls it for a `v*` tag. Pin third-party actions to commit SHAs.
+- `.github/workflows/release.yml` builds unsigned installers: Windows NSIS (x64), separate macOS dmg for arm64 and x64 (ad-hoc signed), and Linux AppImage and deb built on Ubuntu 22.04. It also calls `cli.yml` for the Linux CLI archives and the Docker image (`ghcr.io/seansongx/lubobao`, multi-arch, pushed with tags `<version>` and `latest` only for `v*` tags). Files are renamed to ASCII (`lubobao_<version>_<os>_<arch>…`), uploaded as Actions artifacts, and the run summary lists each file's size and SHA-256. Manual runs (`workflow_dispatch`) only build; a `v*` tag also creates a draft GitHub Release with `SHA256SUMS.txt` and first-launch notes.
+- Release steps: `node scripts/set-version.mjs <x.y.z>` (updates `package.json`, `package-lock.json`, `tauri.conf.json`, the root `Cargo.toml` `[workspace.package]`, and the workspace crates in `Cargo.lock`; `node scripts/check-version.mjs` verifies them), commit, then `git tag v<x.y.z>` and push the tag. The workflow fails if the tag differs from the app version. Review and publish the draft release by hand.
 - The icon source is `docs/brand/app-icon.svg` (full-bleed, for Windows and Linux) and `docs/brand/app-icon-macos.svg` (on the macOS icon grid). Regenerate with `npx tauri icon docs/brand/app-icon.png`, then replace `src-tauri/icons/icon.icns` with the one generated from `app-icon-macos.png`, and delete the `android/` and `ios/` folders.
 
 ## Commits and Pull Requests

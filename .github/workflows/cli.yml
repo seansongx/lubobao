@@ -1,0 +1,303 @@
+name: CLI
+
+# Linux 命令行（musl 静态链接，x64 和 arm64）与 Docker 镜像。
+# - 推送分支、拉取请求、手动运行：构建、端到端测试、构建镜像并在镜像里跑端到端测试，不推送镜像。
+# - 由 release.yml 在推送 v* 标签时调用（publish-image: true）：另外把多架构镜像推送到 GHCR。
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      publish-image:
+        description: 推送多架构镜像到 GHCR
+        type: boolean
+        default: false
+
+concurrency:
+  group: cli-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: build (linux-${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            os: ubuntu-24.04
+            target: x86_64-unknown-linux-musl
+            musl: x86_64-linux-musl
+          # 原生 arm64 runner，不用交叉编译或 QEMU。
+          - arch: arm64
+            os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            musl: aarch64-linux-musl
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      TARGET: ${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # rusqlite（bundled SQLite）和 aws-lc-sys（rustls）要编译 C 代码，用 musl-gcc。
+      # musl-gcc 不搜索 /usr/include，把 Linux 内核头文件链接进 musl 的头文件目录。
+      - name: Install musl toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools file
+          inc="/usr/include/${{ matrix.musl }}"
+          for dir in linux asm-generic; do
+            [ -e "$inc/$dir" ] || sudo ln -s "/usr/include/$dir" "$inc/$dir"
+          done
+          [ -e "$inc/asm" ] || sudo ln -s "/usr/include/$(gcc -dumpmachine)/asm" "$inc/asm"
+          echo "CC_${TARGET//-/_}=musl-gcc" >> "$GITHUB_ENV"
+
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Read version
+        run: |
+          version="$(cargo metadata --no-deps --format-version 1 | node -p 'JSON.parse(require("fs").readFileSync(0)).packages.find(p => p.name === "lubobao-cli").version')"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Build release binary
+        run: cargo build --release --locked -p lubobao-cli --target "$TARGET"
+
+      - name: Check release binary
+        run: |
+          bin="target/$TARGET/release/lubobao-cli"
+          file "$bin"
+          file "$bin" | grep -Eq 'statically linked|static-pie linked' || { echo "::error::不是静态链接"; exit 1; }
+          # 测试用平台适配器只在 feature e2e 下编译，发布版里不能有。
+          if grep -aq '测试直播间' "$bin"; then
+            echo "::error::发布版包含测试用平台适配器"
+            exit 1
+          fi
+          "$bin" --version
+
+      # 用发布版自己下载 FFmpeg：验证 musl 上 rustls 能读到系统证书，也给后面的测试用。
+      - name: Install FFmpeg with the CLI
+        run: |
+          bin="target/$TARGET/release/lubobao-cli"
+          data="$RUNNER_TEMP/cli-data"
+          "$bin" --data-dir "$data" ffmpeg install
+          "$bin" --data-dir "$data" ffmpeg status
+          ffmpeg="$("$bin" --data-dir "$data" ffmpeg status --json | node -p 'JSON.parse(require("fs").readFileSync(0)).path')"
+          "$ffmpeg" -hide_banner -version | head -n 1
+          echo "LUBOBAO_TEST_FFMPEG=$ffmpeg" >> "$GITHUB_ENV"
+
+      - name: End-to-end test
+        run: cargo test --locked -p lubobao-cli --features e2e --target "$TARGET" --test e2e -- --nocapture
+
+      - name: Package
+        run: |
+          name="lubobao-cli_${VERSION}_linux_${{ matrix.arch }}"
+          stage="$RUNNER_TEMP/$name"
+          mkdir -p "$stage" "$RUNNER_TEMP/dist"
+          cp "target/$TARGET/release/lubobao-cli" "$stage/"
+          cp LICENSE THIRD_PARTY_NOTICES.md "$stage/"
+          cp docs/cli.md "$stage/README.md"
+          cp deploy/systemd/lubobao.service "$stage/"
+          tar -C "$RUNNER_TEMP" -czf "$RUNNER_TEMP/dist/$name.tar.gz" "$name"
+          ls -l "$RUNNER_TEMP/dist"
+
+      # 带测试适配器的 lubobao-cli 和端到端测试程序，只给下面的镜像测试用。
+      - name: Collect e2e binaries
+        run: |
+          test_bin="$(cargo test --locked -p lubobao-cli --features e2e --target "$TARGET" --test e2e --no-run --message-format=json \
+            | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{for(const l of s.split("\n")){if(!l)continue;const m=JSON.parse(l);if(m.reason==="compiler-artifact"&&m.target.kind.includes("test")&&m.target.name==="e2e"&&m.executable)console.log(m.executable)}})')"
+          mkdir -p "$RUNNER_TEMP/e2e"
+          cp "$test_bin" "$RUNNER_TEMP/e2e/e2e"
+          cp "target/$TARGET/debug/lubobao-cli" "$RUNNER_TEMP/e2e/lubobao-cli"
+          tar -C "$RUNNER_TEMP/e2e" -czf "$RUNNER_TEMP/e2e-${{ matrix.arch }}.tar.gz" .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cli-linux-${{ matrix.arch }}
+          path: ${{ runner.temp }}/dist/*.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cli-e2e-${{ matrix.arch }}
+          path: ${{ runner.temp }}/e2e-${{ matrix.arch }}.tar.gz
+          if-no-files-found: error
+          retention-days: 3
+
+  docker:
+    name: docker (${{ matrix.platform }})
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            platform: amd64
+            os: ubuntu-24.04
+          - arch: arm64
+            platform: arm64
+            os: ubuntu-24.04-arm
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: cli-*-${{ matrix.arch }}
+          path: artifacts
+          merge-multiple: true
+
+      - name: Prepare Docker context
+        run: |
+          ctx="$RUNNER_TEMP/docker"
+          mkdir -p "$ctx/bin/${{ matrix.platform }}" "$ctx/e2e/${{ matrix.platform }}"
+          tar -xzf artifacts/lubobao-cli_*_linux_${{ matrix.arch }}.tar.gz -C "$RUNNER_TEMP"
+          cp "$RUNNER_TEMP"/lubobao-cli_*_linux_${{ matrix.arch }}/lubobao-cli "$ctx/bin/${{ matrix.platform }}/"
+          tar -xzf artifacts/e2e-${{ matrix.arch }}.tar.gz -C "$ctx/e2e/${{ matrix.platform }}"
+          cp deploy/docker/Dockerfile deploy/docker/fetch-ffmpeg.mjs "$ctx/"
+          cp crates/lubobao-core/src/ffmpeg/manifest.json "$ctx/"
+          find "$ctx" -type f | sort
+          echo "CTX=$ctx" >> "$GITHUB_ENV"
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Build image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ${{ env.CTX }}
+          platforms: linux/${{ matrix.platform }}
+          target: runtime
+          load: true
+          push: false
+          tags: lubobao:ci
+
+      - name: Build e2e image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ${{ env.CTX }}
+          platforms: linux/${{ matrix.platform }}
+          target: e2e
+          load: true
+          push: false
+          tags: lubobao:e2e
+
+      - name: End-to-end test in image
+        run: docker run --rm lubobao:e2e
+
+      # 发布镜像本身：非 root 运行、默认目录、docker stop 时正常收尾退出。
+      - name: Run and stop image
+        run: |
+          docker run -d --name lubobao -e TZ=Asia/Shanghai lubobao:ci
+          for _ in $(seq 1 50); do
+            if docker exec lubobao lubobao-cli status --json > status.json 2>/dev/null \
+              && node -e 'process.exit(JSON.parse(require("fs").readFileSync("status.json")).running ? 0 : 1)'; then
+              break
+            fi
+            sleep 0.2
+          done
+          cat status.json
+          node -e '
+            const s = JSON.parse(require("fs").readFileSync("status.json"));
+            const fail = (m) => { console.error("::error::" + m); process.exit(1); };
+            if (!s.running) fail("run 没有启动");
+            if (s.dataDir !== "/data") fail("数据目录应为 /data：" + s.dataDir);
+            if (s.saveDir !== "/recordings") fail("录像目录应为 /recordings：" + s.saveDir);
+            if (s.ffmpeg.state !== "external" || !s.ffmpeg.ffmpegVersion) fail("内置 FFmpeg 不可用");
+          '
+          docker exec lubobao lubobao-cli config set loop_time_seconds 60
+          uid="$(docker top lubobao -eo uid,comm | awk '$2 == "lubobao-cli" { print $1; exit }')"
+          echo "uid=$uid"
+          [ -n "$uid" ] && [ "$uid" != "0" ] && [ "$uid" != "root" ] || { echo "::error::容器以 root 运行"; exit 1; }
+          docker stop -t 45 lubobao
+          docker logs lubobao
+          code="$(docker inspect -f '{{.State.ExitCode}}' lubobao)"
+          [ "$code" = "0" ] || { echo "::error::退出码 $code"; exit 1; }
+          docker logs lubobao 2>&1 | grep -q '收到 SIGTERM' || { echo "::error::没有收到 SIGTERM"; exit 1; }
+          docker logs lubobao 2>&1 | grep -q '已退出' || { echo "::error::没有正常退出"; exit 1; }
+          docker rm lubobao
+
+  publish-image:
+    name: publish image
+    if: inputs.publish-image
+    needs: [build, docker]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: cli-linux-*
+          path: artifacts
+          merge-multiple: true
+
+      - name: Prepare Docker context
+        run: |
+          ctx="$RUNNER_TEMP/docker"
+          for pair in x64:amd64 arm64:arm64; do
+            arch="${pair%%:*}"; platform="${pair##*:}"
+            mkdir -p "$ctx/bin/$platform"
+            tar -xzf artifacts/lubobao-cli_*_linux_${arch}.tar.gz -C "$RUNNER_TEMP"
+            cp "$RUNNER_TEMP"/lubobao-cli_*_linux_${arch}/lubobao-cli "$ctx/bin/$platform/"
+          done
+          cp deploy/docker/Dockerfile deploy/docker/fetch-ffmpeg.mjs "$ctx/"
+          cp crates/lubobao-core/src/ffmpeg/manifest.json "$ctx/"
+          version="$(ls artifacts/lubobao-cli_*_linux_x64.tar.gz | sed -E 's/.*lubobao-cli_(.*)_linux_x64\.tar\.gz/\1/')"
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          tags="$image:$version"
+          # 预发布版本（带 -）不更新 latest。
+          case "$version" in *-*) ;; *) tags="$tags,$image:latest" ;; esac
+          echo "CTX=$ctx" >> "$GITHUB_ENV"
+          echo "TAGS=$tags" >> "$GITHUB_ENV"
+          echo "镜像标签：$tags"
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ${{ env.CTX }}
+          platforms: linux/amd64,linux/arm64
+          target: runtime
+          push: true
+          tags: ${{ env.TAGS }}
+
+      - name: Summary
+        run: |
+          {
+            echo "## Docker 镜像"
+            echo
+            for tag in ${TAGS//,/ }; do echo "- \`$tag\`"; done
+          } >> "$GITHUB_STEP_SUMMARY"

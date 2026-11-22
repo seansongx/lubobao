@@ -25,12 +25,19 @@ npm run tauri dev
 npm run tauri build
 ```
 
-默认安装包输出目录为 `src-tauri/target/release/bundle/`。
+默认安装包输出目录为 `target/release/bundle/`（Cargo workspace 根目录的 `target/`）。
+
+## 服务器命令行
+
+没有图形界面的 Linux 服务器可以用命令行版 `lubobao-cli`，或者 Docker 镜像 `ghcr.io/seansongx/lubobao`。安装、子命令、systemd 和 Docker 用法见[命令行文档](docs/cli.md)。本地运行：`cargo run -p lubobao-cli -- run`。
 
 ## 目录结构
 
 - `index.html` 和 `src/` 是桌面应用的前端入口、TypeScript 代码和样式。
-- `src-tauri/src/` 包含 Rust 桌面端入口。
+- `crates/lubobao-core/` 是不依赖 Tauri 的核心库：平台解析、录制、FFmpeg 组件、任务、调度和录像库。
+- `crates/lubobao-cli/` 是无界面命令行程序 `lubobao-cli`。
+- `src-tauri/src/` 包含 Rust 桌面端入口和 Tauri 胶水层。
+- `deploy/` 是 Docker 镜像、compose 和 systemd 示例。
 - `src-tauri/tauri.conf.json` 配置应用标识、窗口和打包选项。
 - `website/` 是独立的官网目录，包含首页和同域加载的样式，可直接作为静态站点发布。
 

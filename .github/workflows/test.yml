@@ -39,13 +39,12 @@ jobs:
           node-version: lts/*
           cache: npm
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
+          toolchain: stable
           components: rustfmt, clippy
 
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
       - name: Build frontend
         run: |
@@ -62,13 +61,17 @@ jobs:
           echo "LUBOBAO_TEST_FFMPEG=$ffmpeg" >> "$GITHUB_ENV"
 
       - name: cargo fmt
-        working-directory: src-tauri
-        run: cargo fmt --check
+        run: cargo fmt --all --check
 
       - name: cargo clippy
-        working-directory: src-tauri
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: cargo clippy (e2e)
+        run: cargo clippy -p lubobao-core -p lubobao-cli --all-targets --features lubobao-cli/e2e -- -D warnings
 
       - name: cargo test
-        working-directory: src-tauri
-        run: cargo test
+        run: cargo test --workspace
+
+      # 命令行端到端：本地样本流当直播间，run → add → 录制 → stop → 断流 → 退出信号。
+      - name: CLI end-to-end test
+        run: cargo test -p lubobao-cli --features e2e --test e2e -- --nocapture

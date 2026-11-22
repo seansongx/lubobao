@@ -6,7 +6,7 @@ LuBoBao (录播宝) is licensed under the MIT License (see [LICENSE](LICENSE)). 
 
 - Project: https://github.com/ihmily/streamget (v4.0.10, commit `e57e548`)
 - License: MIT
-- Used in: `src-tauri/src/platforms/sign.rs` is a Rust port of `streamget/platforms/douyin/ab_sign.py`. The Douyin adapter in `src-tauri/src/platforms/douyin.rs` follows StreamGet's request flow, headers, default cookies and quality handling. The Kuaishou adapter in `src-tauri/src/platforms/kuaishou.rs` is ported from `streamget/platforms/kuaishou/live_stream.py` (`KwaiLiveStream`): the cookie-only user-info check, page headers, reading `window.__INITIAL_STATE__` from the room page, and the bitrate-based quality mapping.
+- Used in: `crates/lubobao-core/src/platforms/sign.rs` is a Rust port of `streamget/platforms/douyin/ab_sign.py`. The Douyin adapter in `crates/lubobao-core/src/platforms/douyin.rs` follows StreamGet's request flow, headers, default cookies and quality handling. The Kuaishou adapter in `crates/lubobao-core/src/platforms/kuaishou.rs` is ported from `streamget/platforms/kuaishou/live_stream.py` (`KwaiLiveStream`): the cookie-only user-info check, page headers, reading `window.__INITIAL_STATE__` from the room page, and the bitrate-based quality mapping.
 
 ```
 MIT License
@@ -40,4 +40,4 @@ SOFTWARE.
 
 ## FFmpeg
 
-LuBoBao does not bundle FFmpeg. At runtime it downloads a verified FFmpeg build from the npm package [`@seankit/ffmpeg`](https://www.npmjs.com/package/@seankit/ffmpeg) and runs it as a separate program. Those builds are licensed under GPL-3.0-or-later; each package includes the license text and the location of the corresponding source code.
+LuBoBao does not bundle FFmpeg. At runtime it downloads a verified FFmpeg build from the npm package [`@seankit/ffmpeg`](https://www.npmjs.com/package/@seankit/ffmpeg) and runs it as a separate program. Those builds are licensed under GPL-3.0-or-later; each package includes the license text and the location of the corresponding source code. The Docker image `ghcr.io/seansongx/lubobao` contains the same verified Linux build at `/opt/ffmpeg/ffmpeg`, with the package's `LICENSE` and `README.md` (upstream build and source location) next to it in `/opt/ffmpeg/`.
