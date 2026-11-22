@@ -23,6 +23,7 @@ import type {
   TaskMutation,
   TaskSnapshot,
 } from "@/lib/api";
+import { settingDefaults } from "@/lib/api";
 
 const TOTAL_BYTES = 39_636_992;
 
@@ -244,36 +245,49 @@ function seedTasks(now: number): TaskSnapshot[] {
   return seeds.map((seed, index) => snapshot(index + 1, seed, now - (seeds.length - index) * 86_400_000));
 }
 
-const defaultSettings: Settings = {
-  live_save_path: "C:\\Users\\me\\Videos\\录播宝",
-  loop_time_seconds: 180,
-  platform_max_concurrent_requests: 3,
-  video_format: "TS",
-  record_quality: "OD",
-  segmented_recording_enabled: true,
-  video_segment_time: 1800,
-  recording_space_threshold: 2.0,
-  default_live_source: "FLV",
-  force_https_recording: true,
-  flv_use_direct_download: false,
-  convert_to_mp4: true,
-  delete_original: false,
-  generate_time_subtitle_file: false,
-  only_notify_no_record: false,
-  filename_includes_title: false,
-  remove_emojis: false,
-  folder_name_platform: true,
-  folder_name_author: true,
-  folder_name_time: false,
-  folder_name_title: false,
-  enable_proxy: true,
-  proxy_address: "",
-  execute_custom_script: false,
-  custom_script_command: "",
-  system_notification_enabled: true,
-  stream_start_notification_enabled: false,
-  stream_end_notification_enabled: false,
+const defaultSaveDir = "C:\\Users\\me\\Videos\\录播宝";
+
+// api.ts 与本文件互相导入，settingDefaults 只能在调用时读取，不能在模块顶层展开。
+function defaultSettings(): Settings {
+  return { live_save_path: defaultSaveDir, ...settingDefaults };
+}
+
+/** 与 src-tauri/src/tasks/settings.rs 的 ENUM_SETTINGS 一致。 */
+const enumSettings: Partial<Record<keyof Settings, readonly string[]>> = {
+  record_quality: ["OD", "UHD", "HD", "SD", "LD"],
+  video_format: ["TS", "MP4", "FLV", "MKV", "MOV", "NUT", "WAV", "MP3", "WMA", "M4A", "AAC"],
+  default_live_source: ["FLV", "HLS"],
 };
+
+/** 复刻 settings.rs 的 validate：类型一致、数值为正、整数项必须为整数、枚举项取合法值。 */
+function validateSetting(key: string, value: unknown): string | null {
+  const defaults = defaultSettings();
+  if (!(key in defaults)) return `未知的设置项：${key}`;
+  const fallback = defaults[key as keyof Settings];
+  const shown = JSON.stringify(value);
+  if (typeof fallback === "number") {
+    if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+      return `设置项 ${key} 的值无效：${shown}`;
+    }
+    if (Number.isInteger(fallback) && key !== "recording_space_threshold" && !Number.isInteger(value)) {
+      return `设置项 ${key} 需要正整数：${shown}`;
+    }
+  } else if (typeof fallback === "object") {
+    const valid =
+      typeof value === "object" &&
+      value !== null &&
+      !Array.isArray(value) &&
+      Object.values(value).every((item) => typeof item === "string");
+    if (!valid) return `设置项 ${key} 的值无效：${shown}`;
+  } else if (typeof value !== typeof fallback) {
+    return `设置项 ${key} 的值无效：${shown}`;
+  }
+  const allowed = enumSettings[key as keyof Settings];
+  if (allowed && !allowed.includes(value as string)) {
+    return `设置项 ${key} 只能是 ${allowed.join("、")} 之一：${shown}`;
+  }
+  return null;
+}
 
 type Handler<T> = (payload: T) => void;
 
@@ -305,7 +319,7 @@ export function createMockBackend(): Backend {
   const now = Date.now();
   let tasks = seedTasks(now);
   let nextId = tasks.length + 1;
-  let settings = { ...defaultSettings };
+  let settings = defaultSettings();
   const activity: ActivityEntry[] = [];
   let nextActivityId = 1;
 
@@ -380,6 +394,18 @@ export function createMockBackend(): Backend {
 
   const backend: Backend = {
     getFfmpegStatus: () => Promise.resolve(ffmpeg),
+    reverifyFfmpeg: () => {
+      const before = ffmpeg;
+      if (before.state === "failed") {
+        simulateDownload();
+      } else if (before.state === "ready") {
+        // 与后端一致：校验中 → 可用；旧版本加安装失败时重新安装仍失败，回到原状态。
+        clearInterval(simulation);
+        setFfmpeg({ state: "verifying" });
+        setTimeout(() => setFfmpeg(before), 1500);
+      }
+      return Promise.resolve(before);
+    },
     retryFfmpegInstall: () => {
       simulateDownload();
       return Promise.resolve(ffmpeg);
@@ -483,6 +509,11 @@ export function createMockBackend(): Backend {
 
     getSettings: () => Promise.resolve(settings),
     async updateSettings(values) {
+      await delay(150);
+      for (const [key, value] of Object.entries(values)) {
+        const message = validateSetting(key, value);
+        if (message) return reject("invalid_input", message);
+      }
       settings = { ...settings, ...values };
       return settings;
     },
@@ -500,6 +531,20 @@ export function createMockBackend(): Backend {
         items,
         nextBefore: matching.length > limit ? items[items.length - 1].id : null,
       };
+    },
+
+    defaultSaveDir: () => Promise.resolve(defaultSaveDir),
+    getAppVersion: () => Promise.resolve("0.1.0"),
+    pickDirectory: async (options) => {
+      // 浏览器里没有系统目录选择框，用输入框代替。
+      const picked = window.prompt(options?.title ?? "选择文件夹", options?.defaultPath ?? "");
+      return picked && picked.trim() ? picked.trim() : null;
+    },
+    openPath: async (path) => {
+      console.info("[mock] openPath", path);
+    },
+    openUrl: async (url) => {
+      window.open(url, "_blank", "noopener");
     },
 
     onFfmpegStatus: (handler) => ffmpegChannel.subscribe(handler),

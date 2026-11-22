@@ -1137,3 +1137,141 @@ fn extract_ignores_other_entries_and_checks_size() {
     assert_eq!(err, InstallError::BinaryMismatch);
     assert!(!dest.exists());
 }
+
+/// 改动已安装文件的内容，保持大小和修改时间不变，校验缓存因此仍然匹配。
+fn tamper_keeping_metadata(path: &Path) {
+    let modified = std::fs::metadata(path).unwrap().modified().unwrap();
+    let mut tampered = BINARY.to_vec();
+    tampered[0] ^= 0xff;
+    std::fs::write(path, &tampered).unwrap();
+    let file = std::fs::OpenOptions::new().write(true).open(path).unwrap();
+    file.set_modified(modified).unwrap();
+}
+
+#[tokio::test]
+async fn reverify_shows_verifying_then_ready_without_network() {
+    let tgz = sample_tgz();
+    let server = TestServer::start(vec![("/pkg.tgz", Route::File(tgz.clone()))]).await;
+    let harness = Harness::new();
+    let manager = harness.manager(component_for(&tgz, vec![server.url("/pkg.tgz")]));
+    assert!(manager.ensure().await.is_ready());
+    let requests_after_install = server.requests().len();
+    harness.events.lock().unwrap().clear();
+
+    let status = manager.reverify().await;
+
+    assert!(status.is_ready(), "{status:?}");
+    let events = harness.events.lock().unwrap().clone();
+    assert!(
+        matches!(
+            events.as_slice(),
+            [
+                FfmpegStatus::Verifying,
+                FfmpegStatus::Ready {
+                    outdated: false,
+                    ..
+                }
+            ]
+        ),
+        "{events:?}"
+    );
+    assert_eq!(server.requests().len(), requests_after_install);
+    assert_eq!(manager.ffmpeg_path(), Some(harness.installed()));
+    assert!(
+        harness
+            .root
+            .join("9.0.2-9.0.1")
+            .join("verified.json")
+            .exists()
+    );
+}
+
+#[tokio::test]
+async fn reverify_ignores_cache_and_reinstalls_tampered_file() {
+    let tgz = sample_tgz();
+    let server = TestServer::start(vec![("/pkg.tgz", Route::File(tgz.clone()))]).await;
+    let harness = Harness::new();
+    let manager = harness.manager(component_for(&tgz, vec![server.url("/pkg.tgz")]));
+    assert!(manager.ensure().await.is_ready());
+    tamper_keeping_metadata(&harness.installed());
+
+    // 普通检查信任缓存，发现不了改动。
+    assert!(manager.ensure().await.is_ready());
+    assert_ne!(std::fs::read(harness.installed()).unwrap(), BINARY);
+    let requests_before = server.requests().len();
+
+    let status = manager.reverify().await;
+
+    assert!(
+        matches!(
+            status,
+            FfmpegStatus::Ready {
+                outdated: false,
+                ..
+            }
+        ),
+        "{status:?}"
+    );
+    assert_eq!(std::fs::read(harness.installed()).unwrap(), BINARY);
+    assert!(server.requests().len() > requests_before);
+}
+
+#[tokio::test]
+async fn reverify_failure_keeps_older_version_usable() {
+    let tgz = sample_tgz();
+    let server = TestServer::start(vec![
+        ("/pkg.tgz", Route::File(tgz.clone())),
+        ("/gone.tgz", Route::Status(404)),
+    ])
+    .await;
+    let harness = Harness::new();
+    let old = with_versions(
+        component_for(&tgz, vec![server.url("/pkg.tgz")]),
+        "9.0.1",
+        "9.0.0",
+    );
+    assert!(harness.manager(old).ensure().await.is_ready());
+    let old_path = harness.root.join("9.0.1-9.0.0").join("ffmpeg");
+    assert!(
+        harness
+            .manager(component_for(&tgz, vec![server.url("/pkg.tgz")]))
+            .ensure()
+            .await
+            .is_ready()
+    );
+    tamper_keeping_metadata(&harness.installed());
+
+    // 下载源不可用时重新校验失败，退回旧版本。
+    let manager = harness.manager(component_for(&tgz, vec![server.url("/gone.tgz")]));
+    let status = manager.reverify().await;
+
+    match &status {
+        FfmpegStatus::Ready {
+            path,
+            outdated,
+            install_error,
+            ..
+        } => {
+            assert_eq!(path, &old_path);
+            assert!(*outdated);
+            assert!(install_error.is_some());
+        }
+        other => panic!("unexpected {other:?}"),
+    }
+    assert_eq!(manager.ffmpeg_path(), Some(old_path));
+}
+
+#[tokio::test]
+async fn reverify_while_install_runs_returns_current_status() {
+    let tgz = sample_tgz();
+    let server = TestServer::start(vec![("/pkg.tgz", Route::File(tgz.clone()))]).await;
+    let harness = Harness::new();
+    let manager = Arc::new(harness.manager(component_for(&tgz, vec![server.url("/pkg.tgz")])));
+
+    let (installed, reverified) = tokio::join!(manager.ensure(), manager.reverify());
+
+    // 安装先拿到锁，重新校验不会再启动一次，返回当时的“检查中”。
+    assert!(installed.is_ready(), "{installed:?}");
+    assert_eq!(reverified, FfmpegStatus::Checking);
+    assert_eq!(harness.probe.calls(), 1);
+}

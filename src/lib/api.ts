@@ -3,7 +3,11 @@
 // 不在 Tauri 环境里（npm run dev 在浏览器打开）时改用 mock-api.ts 的内存假数据。
 
 import { invoke, isTauri } from "@tauri-apps/api/core";
+import { getVersion } from "@tauri-apps/api/app";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { join, videoDir } from "@tauri-apps/api/path";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { openPath as openerOpenPath, openUrl as openerOpenUrl } from "@tauri-apps/plugin-opener";
 
 import { createMockBackend } from "@/lib/mock-api";
 
@@ -240,13 +244,56 @@ export interface Settings {
   system_notification_enabled: boolean;
   stream_start_notification_enabled: boolean;
   stream_end_notification_enabled: boolean;
+  /** 逗号分隔的平台键，只有列出的平台走代理。默认值沿用 StreamCap，只有海外平台。 */
+  default_platform_with_proxy: string;
+  /** 平台键（douyin、kuaishou）到 Cookie 字符串。 */
+  platform_cookies: Partial<Record<Platform, string>>;
 }
+
+/**
+ * 后端默认值（settings.rs 的 defaults），用于“恢复默认值”。保存目录依赖系统，
+ * 由 Backend.defaultSaveDir 提供。
+ */
+export const settingDefaults: Omit<Settings, "live_save_path"> = {
+  loop_time_seconds: 180,
+  platform_max_concurrent_requests: 3,
+  video_format: "TS",
+  record_quality: "OD",
+  segmented_recording_enabled: true,
+  video_segment_time: 1800,
+  recording_space_threshold: 2.0,
+  default_live_source: "FLV",
+  force_https_recording: true,
+  flv_use_direct_download: false,
+  convert_to_mp4: true,
+  delete_original: false,
+  generate_time_subtitle_file: false,
+  only_notify_no_record: false,
+  filename_includes_title: false,
+  remove_emojis: false,
+  folder_name_platform: true,
+  folder_name_author: true,
+  folder_name_time: false,
+  folder_name_title: false,
+  enable_proxy: true,
+  proxy_address: "",
+  execute_custom_script: false,
+  custom_script_command: "",
+  system_notification_enabled: true,
+  stream_start_notification_enabled: false,
+  stream_end_notification_enabled: false,
+  default_platform_with_proxy:
+    "tiktok, sooplive, pandalive, winktv, flextv, popkontv, twitch, liveme, showroom, chzzk, shopee, shp, youtu, youtube, lang",
+  platform_cookies: {},
+};
 
 // ---- 后端接口 ----
 
 export interface Backend {
   getFfmpegStatus(): Promise<FfmpegStatus>;
   retryFfmpegInstall(): Promise<FfmpegStatus>;
+  /** 忽略校验缓存重新计算哈希，不通过时重新安装。返回调用时的状态，后续变化走事件。 */
+  reverifyFfmpeg(): Promise<FfmpegStatus>;
   listTasks(): Promise<TaskSnapshot[]>;
   addTask(input: AddTaskInput): Promise<TaskMutation>;
   updateTask(input: UpdateTaskInput): Promise<TaskMutation>;
@@ -261,6 +308,17 @@ export interface Backend {
   updateSettings(values: Partial<Settings>): Promise<Settings>;
   listActivity(query?: ActivityQuery): Promise<ActivityPage>;
 
+  /** 默认保存目录：系统「视频」目录下的「录播宝」，与 tasks/mod.rs 的 default_save_dir 一致。 */
+  defaultSaveDir(): Promise<string>;
+  /** 应用版本号（tauri.conf.json 的 version）。 */
+  getAppVersion(): Promise<string>;
+  /** 弹出系统目录选择框，取消时返回 null。 */
+  pickDirectory(options?: { title?: string; defaultPath?: string }): Promise<string | null>;
+  /** 用系统默认程序打开文件或目录。 */
+  openPath(path: string): Promise<void>;
+  /** 用系统浏览器打开链接。 */
+  openUrl(url: string): Promise<void>;
+
   onFfmpegStatus(handler: (status: FfmpegStatus) => void): Promise<UnlistenFn>;
   onTaskUpdated(handler: (task: TaskSnapshot) => void): Promise<UnlistenFn>;
   onTaskRemoved(handler: (payload: { ids: TaskId[] }) => void): Promise<UnlistenFn>;
@@ -274,6 +332,7 @@ function on<T>(event: string, handler: (payload: T) => void): Promise<UnlistenFn
 const tauriBackend: Backend = {
   getFfmpegStatus: () => invoke("get_ffmpeg_status"),
   retryFfmpegInstall: () => invoke("retry_ffmpeg_install"),
+  reverifyFfmpeg: () => invoke("reverify_ffmpeg"),
   listTasks: () => invoke("list_tasks"),
   addTask: (input) => invoke("add_task", { input }),
   updateTask: (input) => invoke("update_task", { input }),
@@ -283,6 +342,15 @@ const tauriBackend: Backend = {
   getSettings: () => invoke("get_settings"),
   updateSettings: (values) => invoke("update_settings", { values }),
   listActivity: (query) => invoke("list_activity", { query: query ?? null }),
+
+  defaultSaveDir: async () => join(await videoDir(), "录播宝"),
+  getAppVersion: () => getVersion(),
+  async pickDirectory(options) {
+    const picked = await openDialog({ directory: true, multiple: false, ...options });
+    return typeof picked === "string" ? picked : null;
+  },
+  openPath: (path) => openerOpenPath(path),
+  openUrl: (url) => openerOpenUrl(url),
 
   onFfmpegStatus: (handler) => on("ffmpeg-status", handler),
   onTaskUpdated: (handler) => on("task-updated", handler),

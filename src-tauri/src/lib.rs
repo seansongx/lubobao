@@ -20,13 +20,14 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            ffmpeg::init(app.handle())?;
+            ffmpeg::tauri_glue::init(app.handle())?;
             tasks::init(app.handle())?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            ffmpeg::get_ffmpeg_status,
-            ffmpeg::retry_ffmpeg_install,
+            ffmpeg::tauri_glue::get_ffmpeg_status,
+            ffmpeg::tauri_glue::retry_ffmpeg_install,
+            ffmpeg::tauri_glue::reverify_ffmpeg,
             tasks::commands::list_tasks,
             tasks::commands::add_task,
             tasks::commands::update_task,
