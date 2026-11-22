@@ -100,6 +100,59 @@ pub fn tooltip_text(snapshot: QuitSnapshot) -> String {
     }
 }
 
+/// Linux 托盘标题（libappindicator 不支持提示文字，标题常驻显示在图标旁）：有录制或收尾时才
+/// 显示，平时只显示「录播宝」。
+pub fn title_text(snapshot: QuitSnapshot) -> String {
+    match snapshot.phase {
+        QuitPhase::Finishing => tooltip_text(snapshot),
+        _ if snapshot.recording > 0 => tooltip_text(snapshot),
+        _ => "录播宝".into(),
+    }
+}
+
+/// Linux：托盘依赖运行时加载的 AppIndicator 库，缺失时 libappindicator-sys 会直接 panic
+/// （发布构建为 abort），所以先自己探测。
+#[cfg(target_os = "linux")]
+fn appindicator_available() -> bool {
+    ["libayatana-appindicator3.so.1", "libappindicator3.so.1"]
+        .iter()
+        .any(|name| {
+            let name = std::ffi::CString::new(*name).expect("library name");
+            // SAFETY: 只加载后立即卸载，不调用库中的符号。
+            unsafe {
+                let handle = libc::dlopen(name.as_ptr(), libc::RTLD_LAZY | libc::RTLD_LOCAL);
+                if handle.is_null() {
+                    false
+                } else {
+                    libc::dlclose(handle);
+                    true
+                }
+            }
+        })
+}
+
+/// 任务变为监控中（任意线程）：不再算作「全部暂停」暂停的任务。全部移除后把「全部恢复」
+/// 置灰（菜单在主线程上更新）。
+pub fn on_task_enabled(app: &tauri::AppHandle, id: TaskId) {
+    let Some(state) = app.try_state::<TrayState>() else {
+        return;
+    };
+    let removed = {
+        let mut paused = lock(&state.paused_by_tray);
+        let before = paused.len();
+        paused.retain(|task| *task != id);
+        paused.len() != before
+    };
+    if removed {
+        let handle = app.clone();
+        let _ = app.run_on_main_thread(move || {
+            if let Some(state) = handle.try_state::<TrayState>() {
+                refresh_resume_item(&state);
+            }
+        });
+    }
+}
+
 /// 「全部暂停」要暂停的任务：当前在监控的。
 pub fn pause_targets(tasks: &[(TaskId, Monitoring)]) -> Vec<TaskId> {
     tasks
@@ -122,8 +175,16 @@ pub fn resume_targets(paused_by_tray: &[TaskId], tasks: &[(TaskId, Monitoring)])
         .collect()
 }
 
-/// 创建托盘。失败时返回错误，由调用方记日志并改为关窗即退出。
-pub fn create(app: &tauri::AppHandle) -> tauri::Result<()> {
+/// 创建托盘。失败时返回原因，由调用方记日志并改为关窗即退出。
+pub fn create(app: &tauri::AppHandle) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    if !appindicator_available() {
+        return Err("找不到 libayatana-appindicator3 或 libappindicator3".into());
+    }
+    build(app).map_err(|error| error.to_string())
+}
+
+fn build(app: &tauri::AppHandle) -> tauri::Result<()> {
     let resume = MenuItem::with_id(app, MENU_RESUME_ALL, "全部恢复监控", false, None::<&str>)?;
     let menu = Menu::with_items(
         app,
@@ -161,9 +222,8 @@ pub fn create(app: &tauri::AppHandle) -> tauri::Result<()> {
         builder = builder.icon(icon.clone());
     }
     let tray = builder.build(app)?;
-    // libappindicator 不支持提示文字，改在标题里显示。
     #[cfg(target_os = "linux")]
-    let _ = tray.set_title(Some(&tooltip));
+    let _ = tray.set_title(Some(title_text(QuitSnapshot::default())));
     #[cfg(not(target_os = "linux"))]
     let _ = tray;
     if let Some(state) = app.try_state::<TrayState>() {
@@ -181,11 +241,23 @@ pub fn set_tooltip<R: tauri::Runtime>(app: &tauri::AppHandle<R>, snapshot: QuitS
             eprintln!("录播宝更新托盘提示失败：{error}");
         }
         #[cfg(target_os = "linux")]
-        let _ = tray.set_title(Some(&text));
+        let _ = tray.set_title(Some(title_text(snapshot)));
     }
     if let Some(state) = app.try_state::<TrayState>() {
         *lock(&state.tooltip) = text;
     }
+}
+
+/// 调试命令用：「全部暂停」记下的任务和「全部恢复」是否可用。
+pub fn debug_state(app: &tauri::AppHandle) -> String {
+    let Some(state) = app.try_state::<TrayState>() else {
+        return String::new();
+    };
+    let paused = lock(&state.paused_by_tray).clone();
+    let resume_enabled = lock(&state.resume_item)
+        .as_ref()
+        .and_then(|item| item.is_enabled().ok());
+    format!("pausedByTray={paused:?} resumeEnabled={resume_enabled:?}")
 }
 
 pub fn current_tooltip(app: &tauri::AppHandle) -> String {
@@ -285,6 +357,22 @@ mod tests {
             ..snapshot
         };
         assert_eq!(tooltip_text(confirming), "录播宝 · 录制中 2");
+    }
+
+    #[test]
+    fn linux_title_shows_the_count_only_while_recording() {
+        let idle = QuitSnapshot::default();
+        assert_eq!(title_text(idle), "录播宝");
+        let recording = QuitSnapshot {
+            phase: QuitPhase::Idle,
+            recording: 2,
+        };
+        assert_eq!(title_text(recording), "录播宝 · 录制中 2");
+        let finishing = QuitSnapshot {
+            phase: QuitPhase::Finishing,
+            recording: 0,
+        };
+        assert_eq!(title_text(finishing), "录播宝 · 正在收尾…");
     }
 
     #[test]

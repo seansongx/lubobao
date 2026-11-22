@@ -6,7 +6,9 @@
 //! 一律经 `run_on_main_thread` 串行到主线程，不阻塞调用方。
 //!
 //! 退出一律经过 [`crate::scheduler::tauri_glue::on_exit_requested`]，由它停止录制、等文件收尾；
-//! 不经过它的系统退出由 [`crate::scheduler::tauri_glue::on_exit`] 兜底。
+//! 不经过它的系统退出（macOS Dock「退出」、Windows 注销关机）只有 `RunEvent::Exit`，由
+//! [`crate::scheduler::tauri_glue::on_exit`] 限时兜底。Linux 注销关机时进程收到 SIGTERM，这里
+//! 监听后改走 `app.exit(0)`，与普通退出一样收尾。
 
 pub mod close;
 mod hint;
@@ -18,12 +20,14 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 use tauri::Manager;
+#[cfg(target_os = "macos")]
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 
-use crate::tasks::{TaskEvent, TaskManager};
+use crate::tasks::{Monitoring, TaskEvent, TaskManager};
 
 pub const MAIN_WINDOW: &str = "main";
 
+#[cfg(target_os = "macos")]
 const MENU_APP_QUIT: &str = "app-quit";
 
 /// 通知用的运行时状态。
@@ -60,22 +64,44 @@ pub fn init(app: &tauri::AppHandle) -> tauri::Result<()> {
     if let Err(error) = tray::create(app) {
         eprintln!("录播宝无法创建托盘图标，关闭窗口将直接退出：{error}");
     }
-    let menu = app_menu(app)?;
     // 只有 macOS 有应用菜单：替换默认菜单里直接结束进程的「退出」。
-    if cfg!(target_os = "macos") {
-        app.set_menu(menu)?;
+    #[cfg(target_os = "macos")]
+    {
+        app.set_menu(app_menu(app)?)?;
         app.on_menu_event(|app, event| {
             if event.id().as_ref() == MENU_APP_QUIT {
                 quit::request_quit(app);
             }
         });
     }
+    #[cfg(target_os = "linux")]
+    exit_on_sigterm(app);
     tray::set_tooltip(app, quit::refresh(app));
     Ok(())
 }
 
+/// Linux 注销、关机或 `kill` 时进程收到 SIGTERM，不会有 `RunEvent::Exit`。收到后按普通退出
+/// 处理（不再确认），由调度停止录制、等文件收尾。
+#[cfg(target_os = "linux")]
+fn exit_on_sigterm(app: &tauri::AppHandle) {
+    use tokio::signal::unix::{SignalKind, signal};
+    let handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        match signal(SignalKind::terminate()) {
+            Ok(mut terminate) => {
+                if terminate.recv().await.is_some() {
+                    handle.exit(0);
+                }
+            }
+            Err(error) => eprintln!("录播宝无法监听 SIGTERM：{error}"),
+        }
+    });
+}
+
 /// macOS 应用菜单：与 Tauri 默认菜单相同，只是「退出录播宝」（Cmd+Q）改为先确认、再收尾。
-/// 保留「编辑」（输入框里的撤销、剪切、复制、粘贴、全选快捷键靠它）和「窗口」。
+/// 保留「编辑」（输入框里的撤销、剪切、复制、粘贴、全选快捷键靠它）、「显示」（进入全屏）
+/// 和「窗口」。
+#[cfg(target_os = "macos")]
 fn app_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     let name = app.package_info().name.clone();
     let quit = MenuItem::with_id(app, MENU_APP_QUIT, "退出录播宝", true, Some("CmdOrCtrl+Q"))?;
@@ -120,7 +146,13 @@ fn app_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
             &PredefinedMenuItem::close_window(app, None)?,
         ],
     )?;
-    Menu::with_items(app, &[&app_menu, &edit, &window])
+    let view = Submenu::with_items(
+        app,
+        "显示",
+        true,
+        &[&PredefinedMenuItem::fullscreen(app, None)?],
+    )?;
+    Menu::with_items(app, &[&app_menu, &edit, &view, &window])
 }
 
 /// 显示主窗口并置于前台：托盘、单实例、退出确认、macOS 点 Dock 图标时调用。
@@ -130,6 +162,11 @@ pub fn show_main_window(app: &tauri::AppHandle) {
         let _ = window.show();
         let _ = window.set_focus();
     }
+}
+
+/// 正在退出收尾：丢弃待发的通知。
+fn quitting(app: &tauri::AppHandle) -> bool {
+    quit::phase(app) == quit::QuitPhase::Finishing
 }
 
 /// 主窗口隐藏或最小化。
@@ -146,14 +183,19 @@ pub fn on_task_event(app: &tauri::AppHandle, event: &TaskEvent) {
     };
     match event {
         TaskEvent::Updated(task) => {
+            if task.monitoring == Monitoring::Enabled {
+                tray::on_task_enabled(app, task.id);
+            }
             let notice = lock(&desktop.tracker).on_updated(task);
             if let Some(notice) = notice {
                 let handle = app.clone();
                 let _ = app.run_on_main_thread(move || {
-                    let allowed = handle
-                        .try_state::<Arc<TaskManager>>()
-                        .map(|tasks| notify::NotifySettings::from_settings(&tasks.settings()))
-                        .is_some_and(|settings| notify::allow_needs_action(&settings));
+                    // 退出收尾时停录制会引起状态变化，不再弹通知。
+                    let allowed = !quitting(&handle)
+                        && handle
+                            .try_state::<Arc<TaskManager>>()
+                            .map(|tasks| notify::NotifySettings::from_settings(&tasks.settings()))
+                            .is_some_and(|settings| notify::allow_needs_action(&settings));
                     if allowed {
                         notify::show(&handle, &notice);
                     }
@@ -200,6 +242,9 @@ fn flush_live(app: &tauri::AppHandle) {
         pending.scheduled = false;
         std::mem::take(&mut pending.items)
     };
+    if quitting(app) {
+        return;
+    }
     let settings = notify::NotifySettings::from_settings(&tasks.settings());
     let background = main_window_in_background(app);
     for change in [notify::LiveChange::Start, notify::LiveChange::End] {
@@ -242,7 +287,8 @@ pub fn on_run_event(app: &tauri::AppHandle, event: &tauri::RunEvent) {
 
 /// 只在调试构建可用：不经过系统托盘和鼠标，直接触发托盘操作或关窗，返回当前托盘提示。
 /// `action`：`show`、`click`、`pause-all`、`resume-all`、`quit`、`close-window`（走关窗流程），
-/// 或 `tooltip`（只读取提示）。发布构建一律拒绝。
+/// `tooltip`（只读取提示），或 `tray-state`（「全部暂停」记下的任务和恢复项是否可用）。
+/// 发布构建一律拒绝。
 #[tauri::command]
 pub fn debug_desktop_action(app: tauri::AppHandle, action: String) -> Result<String, String> {
     if !cfg!(debug_assertions) {
@@ -250,6 +296,7 @@ pub fn debug_desktop_action(app: tauri::AppHandle, action: String) -> Result<Str
     }
     match action.as_str() {
         "tooltip" => {}
+        "tray-state" => return Ok(tray::debug_state(&app)),
         "close-window" => {
             let window = app
                 .get_webview_window(MAIN_WINDOW)

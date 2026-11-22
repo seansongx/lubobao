@@ -48,12 +48,6 @@ impl QuitState {
         *self.0.lock().unwrap_or_else(|error| error.into_inner())
     }
 
-    /// 先在锁外取录制数（`recording` 可能再次读取本状态），再写入并返回新值。
-    fn refresh_with(&self, recording: impl FnOnce() -> usize) -> QuitSnapshot {
-        let recording = recording();
-        self.update(|snapshot| snapshot.recording = recording)
-    }
-
     /// 修改并返回新值。`change` 里不要再访问 `QuitState`（同一把锁）。
     fn update(&self, change: impl FnOnce(&mut QuitSnapshot)) -> QuitSnapshot {
         let mut guard = self.0.lock().unwrap_or_else(|error| error.into_inner());
@@ -71,24 +65,26 @@ fn state<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<tauri::State<'_
     app.try_state::<QuitState>()
 }
 
-/// 当前录制数：以调度的实时数字为准，调度没启动（例如任务数据打不开）时用最近一次记下的
-/// 数字。不能在持有 `QuitState` 锁时调用。
-fn current_recording<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> usize {
-    match app.try_state::<Arc<Scheduler>>() {
-        Some(scheduler) => scheduler.status().recording,
-        None => state(app).map(|state| state.get().recording).unwrap_or(0),
+/// 当前状态：录制数以调度的实时数字为准，调度没启动（例如任务数据打不开）时用记下的数字。
+pub fn snapshot_now(scheduler_recording: Option<usize>, stored: QuitSnapshot) -> QuitSnapshot {
+    QuitSnapshot {
+        phase: stored.phase,
+        recording: scheduler_recording.unwrap_or(stored.recording),
     }
 }
 
-/// 刷新录制数并返回当前状态。
+fn current_recording<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> usize {
+    refresh(app).recording
+}
+
+/// 读取当前状态，不写入（写入和发布只在 [`set_recording`]、[`set_phase`]）。先取调度的数字，
+/// 再单独读本状态，任何时候都不在持有本状态的锁时访问别的状态。
 pub fn refresh<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> QuitSnapshot {
-    match state(app) {
-        Some(state) => state.refresh_with(|| current_recording(app)),
-        None => QuitSnapshot {
-            phase: QuitPhase::Idle,
-            recording: current_recording(app),
-        },
-    }
+    let scheduler = app
+        .try_state::<Arc<Scheduler>>()
+        .map(|scheduler| scheduler.status().recording);
+    let stored = state(app).map(|state| state.get()).unwrap_or_default();
+    snapshot_now(scheduler, stored)
 }
 
 pub fn phase<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> QuitPhase {
@@ -178,8 +174,6 @@ pub fn cancel_quit(app: tauri::AppHandle) -> QuitSnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::mpsc;
-    use std::time::Duration;
 
     fn snapshot(phase: QuitPhase, recording: usize) -> QuitSnapshot {
         QuitSnapshot { phase, recording }
@@ -197,20 +191,24 @@ mod tests {
         assert!(!needs_confirmation(snapshot(QuitPhase::Finishing, 3)));
     }
 
-    /// 没有登记调度（任务数据打不开）时，录制数取自本状态。曾在持有锁时再次加锁而卡死。
     #[test]
-    fn refreshing_from_the_cached_count_does_not_deadlock() {
-        let state = Arc::new(QuitState::default());
-        state.update(|snapshot| snapshot.recording = 2);
-        let (sender, receiver) = mpsc::channel();
-        let worker = Arc::clone(&state);
-        std::thread::spawn(move || {
-            let snapshot = worker.refresh_with(|| worker.get().recording);
-            let _ = sender.send(snapshot);
-        });
-        let snapshot = receiver
-            .recv_timeout(Duration::from_secs(5))
-            .expect("refresh deadlocked");
-        assert_eq!(snapshot, self::snapshot(QuitPhase::Idle, 2));
+    fn snapshot_prefers_the_live_scheduler_count() {
+        let stored = snapshot(QuitPhase::Confirming, 2);
+        assert_eq!(
+            snapshot_now(Some(0), stored),
+            snapshot(QuitPhase::Confirming, 0)
+        );
+    }
+
+    /// 没有登记调度（任务数据打不开）时用记下的数字。曾在持有锁时再次加锁而卡死；现在
+    /// `refresh` 先后两次各自取值，`snapshot_now` 只做组合。
+    #[test]
+    fn snapshot_without_a_scheduler_uses_the_stored_count() {
+        let stored = snapshot(QuitPhase::Finishing, 3);
+        assert_eq!(snapshot_now(None, stored), stored);
+        assert_eq!(
+            snapshot_now(None, QuitSnapshot::default()),
+            QuitSnapshot::default()
+        );
     }
 }

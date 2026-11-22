@@ -1,5 +1,6 @@
 import { Loader2Icon } from "lucide-react";
 import { useEffect, useId, useState, type MouseEvent } from "react";
+import { toast } from "sonner";
 
 import {
   AlertDialog,
@@ -14,7 +15,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
-import { api, type QuitState } from "@/lib/api";
+import { announceSettingsChanged, api, type QuitState } from "@/lib/api";
 
 /** 桌面外壳的对话框：退出确认与收尾提示、关窗三选一、托盘「全部暂停」确认。 */
 export function DesktopDialogs() {
@@ -132,7 +133,15 @@ function CloseDialog() {
 
   function choose(choice: "tray" | "quit") {
     setOpen(false);
-    void api.resolveClose(choice, remember).catch(() => {});
+    // 保存失败时所选操作照常执行，只提示没有记住。
+    api.resolveClose(choice, remember).then(
+      () => {
+        if (remember) announceSettingsChanged();
+      },
+      (error: unknown) => {
+        if (remember) toast.error(`没有记住这次选择：${typeof error === "string" ? error : String(error)}`);
+      },
+    );
   }
 
   return (

@@ -31,3 +31,8 @@ tauri-plugin-notification = "2"
 
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
 tauri-plugin-single-instance = "2"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc.workspace = true
+# 桌面层监听 SIGTERM（注销、关机），与通用依赖的 tokio 合并特性。
+tokio = { workspace = true, features = ["signal"] }
