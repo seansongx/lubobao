@@ -833,6 +833,10 @@ impl PlatformAdapter for DouyinAdapter {
         parse_link(url).is_ok()
     }
 
+    fn normalize_url(&self, url: &str) -> Option<String> {
+        parse_link(url).ok().map(|link| link.normalized_url())
+    }
+
     fn fetch<'a>(
         &'a self,
         url: &'a str,
