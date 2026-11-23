@@ -1,5 +1,6 @@
 // 同步录播宝的版本号：node scripts/set-version.mjs 0.2.0
-// 改写 package.json、package-lock.json、src-tauri/tauri.conf.json、src-tauri/Cargo.toml 和 Cargo.lock。
+// 改写 package.json、package-lock.json、src-tauri/tauri.conf.json、Cargo.toml 的 [workspace.package]
+// 和 Cargo.lock 中的 lubobao、lubobao-core、lubobao-cli。改完可用 scripts/check-version.mjs 核对。
 import { readFileSync, writeFileSync } from "node:fs";
 
 const version = process.argv[2];
@@ -31,14 +32,16 @@ editJson("src-tauri/tauri.conf.json", (d) => {
   d.version = version;
 });
 replaceOnce(
-  "src-tauri/Cargo.toml",
-  /^(\[package\][\s\S]*?\r?\nversion = )"[^"]*"/,
+  "Cargo.toml",
+  /^(\[workspace\.package\][\s\S]*?\r?\nversion = )"[^"]*"/m,
   `$1"${version}"`,
 );
-replaceOnce(
-  "src-tauri/Cargo.lock",
-  /(\r?\nname = "lubobao"\r?\nversion = )"[^"]*"/,
-  `$1"${version}"`,
-);
+for (const name of ["lubobao", "lubobao-core", "lubobao-cli"]) {
+  replaceOnce(
+    "Cargo.lock",
+    new RegExp(`(\\r?\\nname = "${name}"\\r?\\nversion = )"[^"]*"`),
+    `$1"${version}"`,
+  );
+}
 
 console.log(`版本号已改为 ${version}`);

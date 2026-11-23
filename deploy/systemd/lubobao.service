@@ -1,0 +1,39 @@
+# 录播宝命令行的 systemd 服务示例。安装步骤见 docs/cli.md：
+#   sudo useradd --system --home-dir /var/lib/lubobao --shell /usr/sbin/nologin lubobao
+#   sudo install -m 755 lubobao-cli /usr/local/bin/lubobao-cli
+#   sudo cp lubobao.service /etc/systemd/system/ && sudo systemctl daemon-reload
+#   sudo systemctl enable --now lubobao
+# 管理直播间（用服务的用户和数据目录）：
+#   sudo -u lubobao LUBOBAO_DATA_DIR=/var/lib/lubobao lubobao-cli add <链接>
+
+[Unit]
+Description=录播宝命令行（开播自动录）
+Documentation=https://github.com/seansongx/lubobao/blob/main/docs/cli.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=lubobao
+Group=lubobao
+# /var/lib/lubobao 由 systemd 创建并交给 lubobao 用户。
+StateDirectory=lubobao
+StateDirectoryMode=0700
+Environment=LUBOBAO_DATA_DIR=/var/lib/lubobao
+Environment=LUBOBAO_SAVE_DIR=/var/lib/lubobao/recordings
+# 使用系统里的 ffmpeg 时取消注释：
+# Environment=LUBOBAO_FFMPEG=/usr/bin/ffmpeg
+ExecStart=/usr/local/bin/lubobao-cli run
+# lubobao-cli 收到 SIGHUP 也按正常收尾退出，所以这里不配置 ExecReload。
+# 只给主进程发 SIGTERM，由它停止录制、等 ffmpeg 写完文件尾；超时后再结束剩下的进程。
+KillSignal=SIGTERM
+KillMode=mixed
+TimeoutStopSec=45
+Restart=on-failure
+RestartSec=10
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

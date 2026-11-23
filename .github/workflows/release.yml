@@ -43,7 +43,7 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
@@ -51,28 +51,23 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev patchelf libfuse2 file
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: lts/*
           cache: npm
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
+          toolchain: stable
           targets: ${{ matrix.target }}
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          workspaces: src-tauri
           key: ${{ matrix.target }}
 
       - name: Check tag matches app version
         if: startsWith(github.ref, 'refs/tags/v')
-        run: |
-          version="$(node -p "require('./src-tauri/tauri.conf.json').version")"
-          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
-            echo "::error::标签 $GITHUB_REF_NAME 与 tauri.conf.json 版本 $version 不一致"
-            exit 1
-          fi
+        run: node scripts/check-version.mjs "$GITHUB_REF_NAME"
 
       - run: npm ci
 
@@ -83,7 +78,7 @@ jobs:
       - name: Collect installers
         run: |
           version="$(node -p "require('./src-tauri/tauri.conf.json').version")"
-          bundle="src-tauri/target/${{ matrix.target }}/release/bundle"
+          bundle="target/${{ matrix.target }}/release/bundle"
           out="$RUNNER_TEMP/installers"
           mkdir -p "$out"
           case "${{ matrix.name }}" in
@@ -99,38 +94,55 @@ jobs:
           esac
           ls -l "$out"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: installer-${{ matrix.name }}
           path: ${{ runner.temp }}/installers/*
           if-no-files-found: error
           compression-level: 0
 
+  # Linux 命令行和 Docker 镜像。等桌面端构建（含标签与版本号检查）通过后才开始，推送 v* 标签时
+  # 把镜像以 `<版本>` 推送到 GHCR；`latest` 在人工发布 Release 后由 docker-latest.yml 加上。
+  cli:
+    needs: build
+    uses: ./.github/workflows/cli.yml
+    permissions:
+      contents: read
+      packages: write
+    with:
+      publish-image: ${{ startsWith(github.ref, 'refs/tags/v') }}
+
   publish:
     name: summary and draft release
-    needs: build
+    needs: [build, cli]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: installer-*
+          path: installers
+          merge-multiple: true
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: cli-linux-*
           path: installers
           merge-multiple: true
 
       - name: Checksums and summary
         working-directory: installers
         run: |
-          sha256sum lubobao_* > SHA256SUMS.txt
+          sha256sum lubobao_* lubobao-cli_* > SHA256SUMS.txt
           {
             echo "## 安装包"
             echo
             echo "| 文件 | 大小 | SHA-256 |"
             echo "| --- | ---: | --- |"
-            for f in lubobao_*; do
+            for f in lubobao_* lubobao-cli_*; do
               size="$(stat -c %s "$f")"
               mib="$(awk "BEGIN { printf \"%.1f MiB\", $size / 1048576 }")"
               sum="$(sha256sum "$f" | cut -d ' ' -f 1)"
@@ -139,7 +151,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           cat SHA256SUMS.txt
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: installers-all
           path: installers/*
@@ -159,6 +171,8 @@ jobs:
           | macOS（Apple 芯片） | `*_macos_arm64.dmg` |
           | macOS（Intel） | `*_macos_x64.dmg` |
           | Linux（x64） | `*_linux_amd64.AppImage` 或 `*_linux_amd64.deb` |
+          | Linux 服务器命令行（x64 / arm64） | `lubobao-cli_*_linux_x64.tar.gz` / `lubobao-cli_*_linux_arm64.tar.gz` |
+          | Docker（amd64 / arm64） | `ghcr.io/seansongx/lubobao:VERSION`（发布后同时为 `latest`） |
 
           首次启动时，录播宝会在后台下载 FFmpeg，安装包里不含 FFmpeg。校验值见 `SHA256SUMS.txt`。
 
@@ -169,7 +183,32 @@ jobs:
           - **Windows**：SmartScreen 提示“已保护你的电脑”时，点“更多信息”→“仍要运行”。
           - **macOS**：把录播宝拖进“应用程序”后，在 Finder 里右键点应用 →“打开”→ 再点“打开”。macOS 15 及以上如果没有“打开”按钮，先双击一次，再到“系统设置 → 隐私与安全性”底部点“仍要打开”。也可以在终端执行 `xattr -dr com.apple.quarantine /Applications/录播宝.app`。
           - **Linux**：AppImage 需要先 `chmod +x`；deb 用 `sudo apt install ./文件名.deb` 安装。
+
+          ## Linux 服务器（无界面命令行）
+
+          `lubobao-cli` 是静态链接的单个可执行文件，不依赖图形界面，首次运行时自动下载 FFmpeg。自动下载的 FFmpeg 需要 glibc 2.28 及以上（Debian 10、Ubuntu 18.10、RHEL/Rocky 8 起）；Alpine、CentOS 7 等系统请装好系统的 ffmpeg，再用 `--ffmpeg` 或 `LUBOBAO_FFMPEG` 指定。
+
+          ```sh
+          tar -xzf lubobao-cli_VERSION_linux_x64.tar.gz
+          sudo install -m 755 lubobao-cli_VERSION_linux_x64/lubobao-cli /usr/local/bin/
+          lubobao-cli run                      # 前台常驻，监控并自动录制
+          lubobao-cli add https://live.douyin.com/123456   # 另开终端添加直播间
+          lubobao-cli list
+          lubobao-cli stop 1                   # 停止录制
+          ```
+
+          Docker（内置 FFmpeg，停止时请留 45 秒收尾）：
+
+          ```sh
+          docker run -d --name lubobao --restart unless-stopped --stop-timeout 45 -v lubobao-data:/data -v lubobao-recordings:/recordings ghcr.io/seansongx/lubobao:VERSION
+          docker exec lubobao lubobao-cli add https://live.douyin.com/123456
+          docker stop -t 45 lubobao
+          ```
+
+          systemd 服务、compose 示例和全部子命令见 [docs/cli.md](https://github.com/seansongx/lubobao/blob/main/docs/cli.md)。国内拉取 GHCR 较慢时可使用镜像加速。
           EOF
+          version="${GITHUB_REF_NAME#v}"
+          sed -i "s/VERSION/$version/g" notes.md
           gh release create "$GITHUB_REF_NAME" installers/* \
             --draft \
             --title "录播宝 $GITHUB_REF_NAME" \

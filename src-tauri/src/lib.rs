@@ -1,8 +1,8 @@
 pub mod desktop;
 pub mod ffmpeg;
 pub mod library;
-pub mod platforms;
-pub mod recorder;
+pub use lubobao_core::platforms;
+pub use lubobao_core::recorder;
 pub mod scheduler;
 pub mod tasks;
 

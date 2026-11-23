@@ -33,11 +33,14 @@ export default defineConfig(() => ({
         }
       : undefined,
     watch: {
-      // 3. tell Vite to ignore watching `src-tauri`, and the session worktrees under this
+      // 3. tell Vite to ignore watching `src-tauri`, the Rust crates and the Cargo workspace's
+      // `target/` at the repository root, and the session worktrees under this
       // project's own `.claude/`. Anchor it to the project root: worktrees live inside
       // `.claude/worktrees/`, so a bare `**/.claude/**` would also hide their own sources.
       ignored: [
         "**/src-tauri/**",
+        "**/crates/**",
+        "**/target/**",
         `${path.resolve(import.meta.dirname, ".claude").replaceAll("\\", "/")}/**`,
       ],
     },

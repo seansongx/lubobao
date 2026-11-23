@@ -1,0 +1,23 @@
+# 录播宝命令行的 Docker Compose 示例：docker compose up -d
+# 管理直播间：docker compose exec lubobao lubobao-cli add <链接>
+# 详见 docs/cli.md。
+services:
+  lubobao:
+    image: ghcr.io/seansongx/lubobao:latest
+    container_name: lubobao
+    restart: unless-stopped
+    # 停止时要等录制收尾（最长约 30 秒），默认的 10 秒不够。
+    stop_grace_period: 45s
+    environment:
+      TZ: Asia/Shanghai
+    volumes:
+      - lubobao-data:/data
+      - lubobao-recordings:/recordings
+      # 想把数据或录像放在宿主机目录时改成下面这样，并先执行
+      # sudo mkdir -p ./data ./recordings && sudo chown 65532:65532 ./data ./recordings
+      # - ./data:/data
+      # - ./recordings:/recordings
+
+volumes:
+  lubobao-data:
+  lubobao-recordings:

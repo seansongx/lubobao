@@ -58,7 +58,7 @@ pub fn get_settings(manager: Manager<'_>) -> Map<String, Value> {
 /// 前端“恢复默认值”用它，不在前端另写一份。
 #[tauri::command]
 pub fn get_setting_defaults(manager: Manager<'_>) -> Map<String, Value> {
-    manager.defaults.clone()
+    manager.defaults().clone()
 }
 
 #[tauri::command]
