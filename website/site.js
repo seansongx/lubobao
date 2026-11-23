@@ -287,6 +287,24 @@
     });
   }
 
+  /* ---------- 首次打开：跳到某个系统的说明时自动展开 ---------- */
+
+  function openDetails(id) {
+    var el = id ? document.getElementById(id) : null;
+    if (el && el.tagName === "DETAILS") el.open = true;
+  }
+
+  function hashId(hash) {
+    try { return decodeURIComponent(String(hash || "").slice(1)); } catch (e) { return ""; }
+  }
+
+  document.addEventListener("click", function (event) {
+    var link = event.target.closest ? event.target.closest('a[href^="#"]') : null;
+    if (link) openDetails(hashId(link.getAttribute("href")));
+  });
+  window.addEventListener("hashchange", function () { openDetails(hashId(location.hash)); });
+  openDetails(hashId(location.hash));
+
   recommend(detectOs());
   load();
 })();
