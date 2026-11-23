@@ -1,0 +1,322 @@
+# 测试官网的一键安装脚本和服务器部署脚本，全部离线：
+# 用 python3 -m http.server 在 127.0.0.1 上提供假的 /asset 纯文本和安装包，通过 LUBOBAO_API_BASE 指过去。
+#   macos：website/install.sh（假 dmg 里放假的「录播宝.app」）
+#   linux：website/install-cli.sh 和 shellcheck
+#   site-deploy：deploy/site-setup.sh 建受限用户，再用与 deploy-site.yml 相同的 rsync 命令经 rrsync 同步 website/
+
+name: Install scripts
+
+on:
+  push:
+    paths:
+      - "website/install*.sh"
+      - "deploy/site-setup.sh"
+      - ".github/workflows/install-scripts.yml"
+      - ".github/workflows/deploy-site.yml"
+  pull_request:
+    paths:
+      - "website/install*.sh"
+      - "deploy/site-setup.sh"
+      - ".github/workflows/install-scripts.yml"
+      - ".github/workflows/deploy-site.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: install-scripts-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  macos:
+    name: install.sh (macOS)
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Test install.sh
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/lbb"
+          www="$work/www"
+          port=8765
+          base="http://127.0.0.1:$port"
+          mkdir -p "$work/src" "$www/api/v1/products/lubobao" "$www/dl"
+          cp website/install.sh "$www/install.sh"
+
+          # 假的 app：结构与 Tauri 打出的 dmg 相同（app 加一个指向 /Applications 的链接）
+          app="$work/src/录播宝.app"
+          mkdir -p "$app/Contents/MacOS"
+          cat > "$app/Contents/Info.plist" <<'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>CFBundleExecutable</key><string>lubobao</string>
+            <key>CFBundleIdentifier</key><string>com.xiaofany.lubobao.test</string>
+            <key>CFBundleName</key><string>录播宝</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+          </dict></plist>
+          EOF
+          printf '#!/bin/sh\necho fake-lubobao\n' > "$app/Contents/MacOS/lubobao"
+          chmod 755 "$app/Contents/MacOS/lubobao"
+          xattr -w com.apple.quarantine "0083;00000000;CI;" "$app"
+          xattr -w com.apple.quarantine "0083;00000000;CI;" "$app/Contents/MacOS/lubobao"
+          ln -s /Applications "$work/src/Applications"
+          name=lubobao_9.9.9_macos_test.dmg
+          hdiutil create -quiet -volname "录播宝" -srcfolder "$work/src" -format UDZO -ov "$www/dl/$name"
+          sha="$(shasum -a 256 "$www/dl/$name" | awk '{print $1}')"
+          size="$(stat -f %z "$www/dl/$name")"
+
+          write_asset() {
+            printf 'version=9.9.9\nname=%s\nsize=%s\nsha256=%s\nurl=%s/dl/%s\n' "$name" "$size" "$1" "$base" "$name" \
+              > "$www/api/v1/products/lubobao/asset"
+          }
+          write_asset "$sha"
+
+          python3 -m http.server "$port" --bind 127.0.0.1 --directory "$www" > "$work/http.log" 2>&1 &
+          for _ in $(seq 1 30); do curl -fsS -o /dev/null "$base/install.sh" && break; sleep 1; done
+
+          export LUBOBAO_API_BASE="$base"
+          fail() { echo "::error::$*"; exit 1; }
+          no_quarantine() {
+            if xattr -r -l "$1" | grep -q com.apple.quarantine; then fail "$1 仍有 quarantine 属性"; fi
+          }
+          no_mounts() {
+            if hdiutil info | grep -q lubobao-install; then hdiutil info; fail "dmg 没有卸载"; fi
+          }
+
+          echo "::group::正常安装（curl | sh）"
+          dir="$work/Applications"
+          mkdir -p "$dir"
+          curl -fsSL "$base/install.sh" | LUBOBAO_INSTALL_DIR="$dir" sh
+          [ -x "$dir/录播宝.app/Contents/MacOS/lubobao" ] || fail "app 没有安装到 $dir"
+          [ "$(ls -A "$dir")" = "录播宝.app" ] || { ls -la "$dir"; fail "安装目录里有多余文件"; }
+          no_quarantine "$dir/录播宝.app"
+          no_mounts
+          echo "::endgroup::"
+
+          echo "::group::覆盖安装"
+          touch "$dir/录播宝.app/Contents/old-marker"
+          LUBOBAO_INSTALL_DIR="$dir" LUBOBAO_VERSION=v9.9.9 sh website/install.sh
+          [ ! -e "$dir/录播宝.app/Contents/old-marker" ] || fail "旧版本没有被替换"
+          [ -x "$dir/录播宝.app/Contents/MacOS/lubobao" ] || fail "覆盖安装后 app 不完整"
+          no_quarantine "$dir/录播宝.app"
+          no_mounts
+          echo "::endgroup::"
+
+          echo "::group::安装到默认的 /Applications"
+          sh website/install.sh
+          [ -x "/Applications/录播宝.app/Contents/MacOS/lubobao" ] || fail "app 没有安装到 /Applications"
+          no_quarantine "/Applications/录播宝.app"
+          rm -rf "/Applications/录播宝.app"
+          echo "::endgroup::"
+
+          echo "::group::校验值错误时中止"
+          write_asset "0000000000000000000000000000000000000000000000000000000000000000"
+          dir="$work/Applications-bad"
+          mkdir -p "$dir"
+          if LUBOBAO_INSTALL_DIR="$dir" sh website/install.sh > "$work/bad.log" 2>&1; then
+            cat "$work/bad.log"; fail "校验值错误时脚本没有中止"
+          fi
+          cat "$work/bad.log"
+          grep -q "SHA-256 校验失败" "$work/bad.log" || fail "没有提示校验失败"
+          [ -z "$(ls -A "$dir")" ] || { ls -la "$dir"; fail "校验失败后仍安装了文件"; }
+          no_mounts
+          echo "::endgroup::"
+
+          echo "::group::没有权限写入安装目录"
+          write_asset "$sha"
+          dir="$work/Applications-ro"
+          mkdir -p "$dir"
+          chmod 555 "$dir"
+          if LUBOBAO_INSTALL_DIR="$dir" sh website/install.sh > "$work/ro.log" 2>&1; then
+            cat "$work/ro.log"; fail "目录不可写时脚本没有报错"
+          fi
+          cat "$work/ro.log"
+          grep -q "没有写入" "$work/ro.log" || fail "没有给出权限提示"
+          grep -q 'LUBOBAO_INSTALL_DIR="$HOME/Applications"' "$work/ro.log" || fail "没有提示改装到 ~/Applications"
+          no_mounts
+          echo "::endgroup::"
+
+          echo "::group::尚未发布（404）"
+          rm "$www/api/v1/products/lubobao/asset"
+          if LUBOBAO_INSTALL_DIR="$work/Applications" sh website/install.sh > "$work/404.log" 2>&1; then
+            cat "$work/404.log"; fail "404 时脚本没有报错"
+          fi
+          cat "$work/404.log"
+          grep -q "没有找到可下载的文件" "$work/404.log" || fail "404 时没有给出说明"
+          echo "::endgroup::"
+
+          echo "::group::无效的版本号"
+          if LUBOBAO_VERSION='1.0;rm' sh website/install.sh > "$work/ver.log" 2>&1; then fail "无效版本号没有被拒绝"; fi
+          grep -q "不是有效的版本号" "$work/ver.log" || { cat "$work/ver.log"; fail "无效版本号没有提示"; }
+          echo "::endgroup::"
+
+          # 临时目录都已清理
+          if ls "${TMPDIR:-/tmp}" | grep -q '^lubobao-install\.'; then fail "临时目录没有清理"; fi
+
+  linux:
+    name: install-cli.sh (Linux) and shellcheck
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: ShellCheck
+        run: |
+          command -v shellcheck >/dev/null || { sudo apt-get update && sudo apt-get install -y shellcheck; }
+          shellcheck --version
+          shellcheck website/install.sh website/install-cli.sh deploy/site-setup.sh
+          # /bin/sh 是 dash：确认脚本只用了 POSIX 语法
+          for f in website/install.sh website/install-cli.sh deploy/site-setup.sh; do dash -n "$f"; done
+
+      - name: Test install-cli.sh
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/lbb"
+          www="$work/www"
+          port=8765
+          base="http://127.0.0.1:$port"
+          mkdir -p "$www/api/v1/products/lubobao" "$www/dl"
+          cp website/install-cli.sh "$www/install-cli.sh"
+
+          case "$(uname -m)" in x86_64) arch=x64 ;; aarch64) arch=arm64 ;; esac
+          pkg="lubobao-cli_9.9.9_linux_$arch"
+          mkdir -p "$work/$pkg"
+          printf '#!/bin/sh\necho "lubobao-cli 9.9.9"\n' > "$work/$pkg/lubobao-cli"
+          chmod 755 "$work/$pkg/lubobao-cli"
+          echo test > "$work/$pkg/README.md"
+          name="$pkg.tar.gz"
+          tar -C "$work" -czf "$www/dl/$name" "$pkg"
+          sha="$(sha256sum "$www/dl/$name" | awk '{print $1}')"
+          size="$(stat -c %s "$www/dl/$name")"
+
+          write_asset() {
+            printf 'version=9.9.9\nname=%s\nsize=%s\nsha256=%s\nurl=%s/dl/%s\n' "$name" "$size" "$1" "$base" "$name" \
+              > "$www/api/v1/products/lubobao/asset"
+          }
+          write_asset "$sha"
+
+          python3 -m http.server "$port" --bind 127.0.0.1 --directory "$www" > "$work/http.log" 2>&1 &
+          for _ in $(seq 1 30); do curl -fsS -o /dev/null "$base/install-cli.sh" && break; sleep 1; done
+
+          export LUBOBAO_API_BASE="$base"
+          fail() { echo "::error::$*"; exit 1; }
+
+          echo "::group::正常安装（curl | sh）"
+          dir="$work/bin"
+          curl -fsSL "$base/install-cli.sh" | LUBOBAO_INSTALL_DIR="$dir" sh | tee "$work/ok.log"
+          [ "$("$dir/lubobao-cli" --version)" = "lubobao-cli 9.9.9" ] || fail "lubobao-cli 没有正确安装"
+          [ "$(ls -A "$dir")" = "lubobao-cli" ] || { ls -la "$dir"; fail "安装目录里有多余文件"; }
+          grep -q "lubobao-cli run" "$work/ok.log" || fail "没有打印下一步"
+          grep -q "docs/cli.md#systemd" "$work/ok.log" || fail "没有给出 systemd 文档链接"
+          grep -q "不在 PATH 里" "$work/ok.log" || fail "安装目录不在 PATH 时没有提示"
+          echo "::endgroup::"
+
+          echo "::group::用 sudo 安装到 /usr/local/bin"
+          curl -fsSL "$base/install-cli.sh" | sudo env LUBOBAO_API_BASE="$base" sh
+          [ "$(/usr/local/bin/lubobao-cli --version)" = "lubobao-cli 9.9.9" ] || fail "没有安装到 /usr/local/bin"
+          sudo rm -f /usr/local/bin/lubobao-cli
+          echo "::endgroup::"
+
+          echo "::group::校验值错误时中止"
+          write_asset "0000000000000000000000000000000000000000000000000000000000000000"
+          dir="$work/bin-bad"
+          if LUBOBAO_INSTALL_DIR="$dir" sh website/install-cli.sh > "$work/bad.log" 2>&1; then
+            cat "$work/bad.log"; fail "校验值错误时脚本没有中止"
+          fi
+          cat "$work/bad.log"
+          grep -q "SHA-256 校验失败" "$work/bad.log" || fail "没有提示校验失败"
+          [ ! -e "$dir/lubobao-cli" ] || fail "校验失败后仍安装了文件"
+          [ -z "$(ls -A "$dir")" ] || { ls -la "$dir"; fail "校验失败后留下了文件"; }
+          echo "::endgroup::"
+
+          echo "::group::没有权限写入安装目录"
+          write_asset "$sha"
+          dir="$work/bin-ro"
+          mkdir -p "$dir"
+          chmod 555 "$dir"
+          if LUBOBAO_INSTALL_DIR="$dir" sh website/install-cli.sh > "$work/ro.log" 2>&1; then
+            cat "$work/ro.log"; fail "目录不可写时脚本没有报错"
+          fi
+          cat "$work/ro.log"
+          grep -q "sudo sh" "$work/ro.log" || fail "没有提示用 sudo 重跑"
+          grep -q '.local/bin' "$work/ro.log" || fail "没有提示改装到 ~/.local/bin"
+          echo "::endgroup::"
+
+          echo "::group::尚未发布（404）"
+          rm "$www/api/v1/products/lubobao/asset"
+          if LUBOBAO_INSTALL_DIR="$work/bin" sh website/install-cli.sh > "$work/404.log" 2>&1; then
+            cat "$work/404.log"; fail "404 时脚本没有报错"
+          fi
+          cat "$work/404.log"
+          grep -q "没有找到可下载的文件" "$work/404.log" || fail "404 时没有给出说明"
+          echo "::endgroup::"
+
+          if ls "${TMPDIR:-/tmp}" | grep -q '^lubobao-cli-install\.'; then fail "临时目录没有清理"; fi
+
+  site-deploy:
+    name: site-setup.sh and rrsync deploy (Linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Start sshd
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y openssh-server rsync
+          sudo systemctl start ssh
+          sudo systemctl is-active ssh
+
+      - name: Run site-setup.sh twice
+        run: |
+          set -euo pipefail
+          ssh-keygen -q -t ed25519 -N '' -C lubobao-site-ci -f "$RUNNER_TEMP/site_key"
+          sudo sh deploy/site-setup.sh "$RUNNER_TEMP/site_key.pub" 127.0.0.1
+          # 可重复执行
+          sudo sh deploy/site-setup.sh "$(cat "$RUNNER_TEMP/site_key.pub")" 127.0.0.1 | tee "$RUNNER_TEMP/setup.log"
+          grep '^127\.0\.0\.1 ' "$RUNNER_TEMP/setup.log" > "$RUNNER_TEMP/known_hosts"
+          [ -s "$RUNNER_TEMP/known_hosts" ] || { echo "::error::没有打印 known_hosts"; exit 1; }
+          sudo cat /var/lib/lubobao-site/.ssh/authorized_keys
+          [ "$(sudo grep -c '^command=' /var/lib/lubobao-site/.ssh/authorized_keys)" = 1 ] || { echo "::error::authorized_keys 应只有一行"; exit 1; }
+
+      - name: Deploy with rrsync
+        run: |
+          set -euo pipefail
+          ssh_cmd="ssh -i $RUNNER_TEMP/site_key -p 22 -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$RUNNER_TEMP/known_hosts -o ConnectTimeout=20"
+          sync() {
+            rsync -rlz --checksum --delete --delay-updates --chmod=D755,F644 -p \
+              --exclude='.*' -e "$ssh_cmd" --itemize-changes "$1" "lubobao-site@127.0.0.1:./"
+          }
+          fail() { echo "::error::$*"; exit 1; }
+
+          # 先放一个多余的文件，再同步一次，确认 --delete 生效
+          extra="$RUNNER_TEMP/site-extra"
+          cp -r website "$extra"
+          echo stale > "$extra/stale.txt"
+          sync "$extra/"
+          [ -f /var/www/lubobao/stale.txt ] || fail "第一次同步没有写入文件"
+          sync website/
+          [ ! -e /var/www/lubobao/stale.txt ] || fail "--delete 没有删除多余的文件"
+          diff -r website /var/www/lubobao || fail "同步后的内容与 website/ 不一致"
+          stat -c '%U %a %n' /var/www/lubobao /var/www/lubobao/index.html
+
+          # 这把钥匙不能执行其他命令，也不能写到网站目录以外
+          if $ssh_cmd lubobao-site@127.0.0.1 id; then fail "受限的钥匙可以执行任意命令"; fi
+          if rsync -r -e "$ssh_cmd" website/favicon.svg "lubobao-site@127.0.0.1:../escape.svg"; then
+            [ ! -e /var/www/escape.svg ] || fail "可以写到网站目录以外"
+          fi
+          [ ! -e /var/www/escape.svg ] || fail "可以写到网站目录以外"
