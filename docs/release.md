@@ -79,10 +79,11 @@ xiaofany.com 后台还要先建好软件：slug `lubobao`、框架 `tauri`，「
 
 ## 每次发版
 
-1. **改版本号**：`node scripts/set-version.mjs 0.1.1`（同时改 package.json、package-lock.json、tauri.conf.json、Cargo.toml、Cargo.lock），`node scripts/check-version.mjs` 核对，提交并合入 main。
+1. **改版本号、写更新说明**：`node scripts/set-version.mjs 0.1.1`（同时改 package.json、package-lock.json、tauri.conf.json、Cargo.toml、Cargo.lock），`node scripts/check-version.mjs` 核对。在 `docs/release-notes/<版本>.md`（例如 `docs/release-notes/0.1.1.md`）写好本版本的更新说明，和版本号一起提交并合入 main。这个文件只写「更新内容」标题下面的正文，不带标题和分隔注释；只用纯文本和简单的 Markdown（标题、列表、粗体、链接），应用的更新对话框只认这些。0.1.0 的说明见 [docs/release-notes/0.1.0.md](release-notes/0.1.0.md)。
 2. **打标签**：`git tag v0.1.1`，`git push origin v0.1.1`。release.yml 先检查标签与版本号一致，再在 Windows、macOS（arm64、x64）、Linux 上打包，用 tauri.conf.json 里的公钥校验每个 `.sig`（私钥和公钥不是一对时失败），然后建草稿 Release，附上全部文件和 `SHA256SUMS.txt`。Docker 镜像以 `<版本>` 推到 GHCR。
 3. **审核草稿**：在 GitHub 的 Releases 页面打开草稿。
-   - 把正文最上面「更新内容」里的占位句换成本版本的变化（纯文本或简单的 Markdown：标题、列表、粗体、链接）。`<!-- 以上为应用内更新说明 -->` 以上的部分会显示在应用的更新对话框里，以下的安装说明不会。占位句没换掉时，上传到 xiaofany.com 会失败。
+   - 把正文最上面「更新内容」里的占位句（以「- （发布前把这里换成本版本的变化」开头的那一行）整行换成 `docs/release-notes/<版本>.md` 的全部内容；保留上面的「## 更新内容」标题和下面的 `<!-- 以上为应用内更新说明 -->`。这一行以上的部分会显示在应用的更新对话框里，也是 xiaofany.com 上的版本说明；以下的安装说明不会。占位句没换掉时，上传到 xiaofany.com 会失败。
+   - 用命令行编辑也可以，先把草稿正文存下来，替换占位行后写回：`gh release view v0.1.1 --json body --jq .body > body.md`，编辑后 `gh release edit v0.1.1 --notes-file body.md`。
    - 核对文件：`*_windows_x64-setup.exe`(.sig)、`*_macos_{arm64,x64}.dmg`、`*_macos_{arm64,x64}.app.tar.gz`(.sig)、`*_linux_amd64.AppImage`(.sig)、`*_linux_amd64.deb`、`lubobao-cli_*_linux_{x64,arm64}.tar.gz`、`SHA256SUMS.txt`。
    - 测试版勾选「Set as a pre-release」：发到 xiaofany.com 的 beta 渠道，Docker 不打 `latest`。
 4. **发布**：点「Publish release」。之后自动进行：
