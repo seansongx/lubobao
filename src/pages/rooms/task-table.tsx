@@ -13,6 +13,7 @@ import {
 } from "@tanstack/react-table";
 import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
 
+import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { TaskId, TaskSnapshot } from "@/lib/api";
@@ -140,17 +141,17 @@ const TaskRow = memo(function TaskRow({ task, selected, active, onSelect, onActi
         <div className="flex min-w-0 items-center gap-2.5">
           <AnchorAvatar task={task} />
           <div className="min-w-0">
-            <button
-              type="button"
-              className="block max-w-full truncate rounded-sm text-left font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            <Button
+              variant="link"
+              className="h-auto max-w-full min-w-0 shrink justify-start p-0"
               onClick={(event) => {
                 event.stopPropagation();
                 onActivate(task.id);
               }}
               title={task.anchorName}
             >
-              {task.anchorName}
-            </button>
+              <span className="truncate">{task.anchorName}</span>
+            </Button>
             <div className="flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
               <PlatformTag task={task} />
               <span className="truncate tabular-nums">{task.roomId}</span>
@@ -263,21 +264,22 @@ export function TaskTable({
                       onCheckedChange={() => toggleAllVisible(headerChecked !== true)}
                     />
                   ) : canSort ? (
-                    <button
-                      type="button"
-                      className="-mx-1 inline-flex items-center gap-1 rounded-sm px-1 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="-ml-2.5"
                       onClick={header.column.getToggleSortingHandler()}
                       aria-label={`按${String(header.column.columnDef.header)}排序`}
                     >
                       <table.FlexRender header={header} />
                       {sorted === "asc" ? (
-                        <ArrowUp className="size-3" aria-hidden />
+                        <ArrowUp aria-hidden />
                       ) : sorted === "desc" ? (
-                        <ArrowDown className="size-3" aria-hidden />
+                        <ArrowDown aria-hidden />
                       ) : (
-                        <ArrowUpDown className="size-3 opacity-40" aria-hidden />
+                        <ArrowUpDown aria-hidden />
                       )}
-                    </button>
+                    </Button>
                   ) : (
                     <table.FlexRender header={header} />
                   )}

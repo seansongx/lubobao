@@ -148,14 +148,9 @@ export function AddTaskDialog({ open, onOpenChange, onShowTask }: AddTaskDialogP
               <div className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
                 假数据示例：
                 {mockExamples.map((example) => (
-                  <button
-                    key={example.url}
-                    type="button"
-                    className="rounded-sm px-1 text-primary underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
-                    onClick={() => editUrl(example.url)}
-                  >
+                  <Button key={example.url} type="button" variant="link" size="xs" onClick={() => editUrl(example.url)}>
                     {example.label}
-                  </button>
+                  </Button>
                 ))}
               </div>
             )}

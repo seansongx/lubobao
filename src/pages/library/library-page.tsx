@@ -24,6 +24,7 @@ import type { Navigate } from "@/components/navigation";
 import {
   Breadcrumb,
   BreadcrumbItem,
+  BreadcrumbLink,
   BreadcrumbList,
   BreadcrumbPage,
   BreadcrumbSeparator,
@@ -540,14 +541,11 @@ function CrumbButton(props: { current: boolean; title?: string; onClick: () => v
     );
   }
   return (
-    <button
-      type="button"
-      title={props.title}
-      onClick={props.onClick}
-      className="block max-w-[16rem] truncate rounded px-1.5 py-0.5 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
-    >
-      {props.children}
-    </button>
+    <BreadcrumbLink asChild>
+      <button type="button" title={props.title} onClick={props.onClick} className="block max-w-[16rem] truncate px-1.5">
+        {props.children}
+      </button>
+    </BreadcrumbLink>
   );
 }
 

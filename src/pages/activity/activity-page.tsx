@@ -309,7 +309,7 @@ export function ActivityPage({ onNavigate, focusTask }: ActivityPageProps) {
           <SelectTrigger size="sm" className="w-40" aria-label="按任务筛选">
             <SelectValue />
           </SelectTrigger>
-          <SelectContent position="popper" align="end">
+          <SelectContent>
             <SelectItem value="all">全部任务</SelectItem>
             {taskOptions.length > 0 && <SelectSeparator />}
             {taskOptions.map((task) => (
@@ -419,14 +419,9 @@ function ActivityRow({ entry, task, fresh, onNavigate }: ActivityRowProps) {
       <div className="min-w-0">
         <div className="truncate">
           {open ? (
-            <button
-              type="button"
-              onClick={open}
-              className="rounded-sm font-medium hover:text-primary focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
-              title="在直播间中查看"
-            >
+            <Button variant="link" className="h-auto p-0" onClick={open} title="在直播间中查看">
               {name}
-            </button>
+            </Button>
           ) : (
             <span className="font-medium text-muted-foreground" title="任务已删除">
               {name || "已删除的任务"}

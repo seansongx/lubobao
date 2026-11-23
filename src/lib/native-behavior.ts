@@ -32,6 +32,12 @@ function isBrowserShortcut(event: KeyboardEvent): boolean {
 }
 
 export function installNativeBehavior(): void {
+  // 记下最后一次输入方式，供 index.css 判断焦点环：Radix 的 Tabs 等组件在鼠标按下时用脚本聚焦，浏览器在之前
+  // 没有焦点元素时会把这种聚焦也算作 :focus-visible；按钮类的焦点环只在最后一次输入来自键盘时显示。
+  const root = document.documentElement;
+  document.addEventListener("pointerdown", () => (root.dataset.input = "pointer"), { capture: true });
+  document.addEventListener("keydown", () => (root.dataset.input = "keyboard"), { capture: true });
+
   // 右键：输入框保留系统编辑菜单，其余一律不弹浏览器菜单。应用自己的菜单（任务行、录像条目在 React 里，
   // 选中文字的「复制」在 document 上）先处理并 preventDefault；这里挂在 window 上，冒泡到最后兜底。
   window.addEventListener("contextmenu", (event) => {

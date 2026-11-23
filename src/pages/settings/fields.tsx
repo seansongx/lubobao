@@ -177,7 +177,7 @@ export function SelectField({ label, description, value, options, disabled, erro
         >
           <SelectValue />
         </SelectTrigger>
-        <SelectContent position="popper">
+        <SelectContent>
           {options.map((entry) =>
             "group" in entry ? (
               <SelectGroup key={entry.group}>

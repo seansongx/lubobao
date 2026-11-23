@@ -17,8 +17,9 @@ import {
 import type { Navigate, TaskFocusRequest } from "@/components/navigation";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from "@/components/ui/input-group";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { TaskId, TaskSnapshot } from "@/lib/api";
 import { useAppCommand } from "@/lib/app-commands";
@@ -496,12 +497,11 @@ function SearchBox({
   onChange: (value: string) => void;
 }) {
   return (
-    <div className="relative w-[220px] min-w-[140px] shrink mac:w-[200px]">
-      <Search
-        className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground"
-        aria-hidden
-      />
-      <Input
+    <InputGroup className="w-[220px] min-w-[140px] shrink mac:w-[200px]">
+      <InputGroupAddon>
+        <Search aria-hidden />
+      </InputGroupAddon>
+      <InputGroupInput
         ref={inputRef}
         data-search-input
         value={value}
@@ -517,26 +517,19 @@ function SearchBox({
         title={withShortcut("搜索", "F")}
         spellCheck={false}
         autoComplete="off"
-        className="pr-7 pl-8"
       />
       {value && (
-        <button
-          type="button"
-          aria-label="清除搜索"
-          onClick={() => onChange("")}
-          className="absolute top-1/2 right-1.5 grid size-5 -translate-y-1/2 place-items-center rounded-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <X className="size-3.5" aria-hidden />
-        </button>
+        <InputGroupAddon align="inline-end">
+          <InputGroupButton size="icon-xs" aria-label="清除搜索" onClick={() => onChange("")}>
+            <X aria-hidden />
+          </InputGroupButton>
+        </InputGroupAddon>
       )}
-    </div>
+    </InputGroup>
   );
 }
 
-/**
- * 按状态筛选：一行带数字的筛选按钮。Windows 是文字标签，选中项下方有 Teal 短条；
- * macOS 是分段控件；Linux 是一组相连的平涂按钮。
- */
+/** 按状态筛选：shadcn Tabs（line 样式），每项带状态标记和数字。只用作筛选，没有对应的 TabsContent。 */
 function StatusFilter({
   value,
   counts,
@@ -547,37 +540,19 @@ function StatusFilter({
   onChange: (group: StatusGroup) => void;
 }) {
   return (
-    <div
-      role="group"
-      aria-label="按状态筛选"
-      className="flex min-w-0 flex-wrap items-center gap-0.5 mac:rounded-lg mac:bg-muted mac:p-0.5 linux:rounded-lg linux:bg-muted linux:p-0.5"
-    >
-      {statusGroups.map((group) => {
-        const on = value === group.id;
-        const mark = groupMark[group.id];
-        return (
-          <button
-            key={group.id}
-            type="button"
-            aria-pressed={on}
-            onClick={() => onChange(group.id)}
-            className={cn(
-              "relative inline-flex h-8 items-center gap-1.5 rounded-md px-2 whitespace-nowrap text-muted-foreground outline-none transition-colors",
-              "hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
-              "mac:h-7 mac:px-2 mac:hover:bg-transparent",
-              "linux:h-7",
-              on && "text-foreground",
-              on &&
-                "win:after:absolute win:after:bottom-0 win:after:left-1/2 win:after:h-[3px] win:after:w-4 win:after:-translate-x-1/2 win:after:rounded-full win:after:bg-primary",
-              on && "mac:bg-background mac:shadow-xs mac:hover:bg-background linux:bg-background linux:shadow-xs linux:hover:bg-background",
-            )}
-          >
-            {mark && <StatusMark status={mark} />}
-            {group.id === "all" ? "全部" : group.label}
-            <span className="font-semibold text-foreground tabular-nums">{counts[group.id]}</span>
-          </button>
-        );
-      })}
-    </div>
+    <Tabs value={value} onValueChange={(next) => onChange(next as StatusGroup)}>
+      <TabsList variant="line" aria-label="按状态筛选">
+        {statusGroups.map((group) => {
+          const mark = groupMark[group.id];
+          return (
+            <TabsTrigger key={group.id} value={group.id}>
+              {mark && <StatusMark status={mark} />}
+              {group.id === "all" ? "全部" : group.label}
+              <span className="tabular-nums">{counts[group.id]}</span>
+            </TabsTrigger>
+          );
+        })}
+      </TabsList>
+    </Tabs>
   );
 }

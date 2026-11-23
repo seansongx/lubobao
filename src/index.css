@@ -186,19 +186,36 @@
  * Nova 控件获得焦点时：边框变成 --ring（focus-visible:border-ring），再加 ring-3（3px、50% 不透明度的 --ring
  * 光晕），叠在一起显得很粗。Tailwind v4 的 ring-* 工具类只设置 --tw-ring-shadow，box-shadow 再引用它；下面是
  * 不分层的规则，优先于 utilities 层，只覆盖这个变量、只在 :focus-visible 时生效。
- * - 文本框和下拉框：去掉光晕，只保留 Teal 边框。鼠标点击文本框时浏览器也会把它算作 :focus-visible
- *   （输入框的默认行为），所以点击后也是 Teal 边框。
- * - 按钮、开关、复选框、toggle、badge：实心按钮和选中的开关、复选框本身就是 Teal，只改边框看不出焦点，
- *   保留一圈 2px 实色 Teal 细环。它们只在键盘操作时 :focus-visible，鼠标点击不出现。
+ * - 文本框、下拉框和 InputGroup 外框：去掉光晕，只保留 Teal 边框。鼠标点击文本框时浏览器也会把它算作
+ *   :focus-visible（输入框的默认行为），所以点击后也是 Teal 边框。
+ * - 按钮、开关、复选框、toggle、badge、Tabs 触发器：实心按钮和选中的开关、复选框本身就是 Teal，只改边框
+ *   看不出焦点，保留一圈 2px 实色 Teal 细环。它们只在键盘操作时 :focus-visible，鼠标点击不出现。
+ *   Tabs 触发器另有 Nova 的 1px outline，一并去掉，只留这一圈细环。Radix Tabs 在鼠标按下时用脚本聚焦，
+ *   浏览器可能把它也算作 :focus-visible，所以再看 <html data-input>：最后一次输入来自鼠标时不显示细环。
+ * - 面包屑链接（BreadcrumbLink）本身没有焦点样式，同样给 2px 实色 Teal 细环（用 outline，它没有 box-shadow）。
+ * - 左侧导航和设置页分组是页面里仅有的两处手写控件，在组件里用 focus-visible:ring-2 ring-ring 得到同样的细环。
  * 只列出 Nova 里真正带 focus-visible:ring 的控件：对话框、菜单、下拉列表这些浮层用 ring-1 当外框，拿到焦点时
  * 也是 :focus-visible（例如键盘打开下拉后鼠标移出），不能被换掉；shadow-* 工具类也引用这个变量，
  * 所以不用 [data-slot] 这种宽泛的写法。aria-invalid 的红色效果不受影响。
  */
-:is([data-slot="input"], [data-slot="textarea"], [data-slot="select-trigger"]):focus-visible:not([aria-invalid="true"]) {
+:is([data-slot="input"], [data-slot="textarea"], [data-slot="select-trigger"]):focus-visible:not([aria-invalid="true"]),
+[data-slot="input-group"]:has([data-slot="input-group-control"]:focus-visible):not(:has([aria-invalid="true"])) {
   --tw-ring-shadow: 0 0 #0000;
 }
-:is([data-slot="button"], [data-slot="switch"], [data-slot="checkbox"], [data-slot="toggle"], [data-slot="toggle-group-item"], [data-slot="badge"]):focus-visible:not([aria-invalid="true"]) {
+:is([data-slot="button"], [data-slot="switch"], [data-slot="checkbox"], [data-slot="toggle"], [data-slot="toggle-group-item"], [data-slot="badge"], [data-slot="tabs-trigger"]):focus-visible:not([aria-invalid="true"]) {
   --tw-ring-shadow: 0 0 0 2px var(--ring);
+}
+/* 最后一次输入来自鼠标或触控时不显示按钮类焦点环（见 native-behavior.ts 的 data-input），只保留 Nova 的边框变色 */
+:root[data-input="pointer"] :is([data-slot="button"], [data-slot="switch"], [data-slot="checkbox"], [data-slot="toggle"], [data-slot="toggle-group-item"], [data-slot="badge"], [data-slot="tabs-trigger"]):focus-visible:not([aria-invalid="true"]) {
+  --tw-ring-shadow: 0 0 #0000;
+}
+[data-slot="tabs-trigger"]:focus-visible {
+  outline: none;
+}
+:root:not([data-input="pointer"]) [data-slot="breadcrumb-link"]:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 0;
+  border-radius: calc(var(--radius) - 2px);
 }
 
 /* 选中文字的颜色用 Teal */

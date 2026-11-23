@@ -127,6 +127,9 @@ macOS 用 Cmd，其他平台用 Ctrl：
 
 ## 实现备注
 
+- **页面里不手写交互控件（2026-11-23）**：状态筛选用 `Tabs`（`line` 样式），搜索框用 `InputGroup`（图标 addon 加 `InputGroupButton` 清除），表头排序用 `Button variant="ghost"`，任务表主播名、动态里的主播名和添加对话框的假数据示例用 `Button variant="link"`，录像库路径用 `BreadcrumbLink`。都用默认 variant 和 size，className 只放布局类。只有左侧导航和设置页左侧分组保留手写，键盘焦点与按钮一致（2px 实色 Teal 细环）。
+- **Select 用 shadcn 默认弹出方式**（对齐选中项），所有调用处都不传 `position` / `align`。打开时跳动的问题来自全局的减少动态效果规则，已去掉（见上文），不要用 `position="popper"` 绕开。
+
 - macOS 的「添加直播间」是工具栏里的无框「+」图标按钮（悬停提示「添加直播间 ⌘N」），与系统应用的工具栏一致；Windows 和 Linux 是 Teal 实心主按钮。
 - 详情面板底部只保留一个带文字的主要操作（停止录制、重新开始录制、恢复或暂停监控），其余（暂停监控、编辑、打开文件夹、删除）是带悬停提示的图标按钮；这些操作也都在任务行的右键菜单里。
 - 设置页：Windows 每个设置项是一张 Fluent 设置卡片，macOS 是圆角分组表单，Linux 是 Adwaita 分组列表。
