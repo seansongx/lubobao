@@ -51,6 +51,14 @@ sudo sh site-setup.sh lubobao-site-deploy.pub 你的服务器 22
 
 - 打印 `SITE_DEPLOY_KNOWN_HOSTS` 要用的几行。
 
+网站目录默认是 `/var/www/lubobao`。用宝塔管理 nginx 时可以放在宝塔的站点目录，运行时用环境变量指定（`rrsync` 会限定在这个目录）：
+
+```sh
+sudo SITE_DIR=/www/wwwroot/lubobao.xiaofany.com sh site-setup.sh lubobao-site-deploy.pub 你的服务器 22
+```
+
+这时第 3、4 步改在宝塔面板里做：添加纯静态站点并把根目录设为同一个目录，用面板申请 Let's Encrypt 证书，再把 [`deploy/nginx/lubobao.xiaofany.com.conf`](../deploy/nginx/lubobao.xiaofany.com.conf) 里的 `map`、`add_header`、安装脚本和隐藏文件的 `location` 加进站点的配置文件（隐藏文件规则写成 `location ~ /\.(?!well-known/)`，免得挡住证书续期）。宝塔建站后会往目录里放默认文件并改属主，要删掉这些文件，再把目录交还给 `lubobao-site`。
+
 如果 `/etc/ssh/sshd_config` 里设置了 `AllowUsers` 或 `AllowGroups`，把 `lubobao-site` 加进去，然后 `sudo sshd -t && sudo systemctl reload ssh`（RHEL 系是 `sshd`）。
 
 ## 3. 证书

@@ -3,6 +3,9 @@
 #
 #   sh site-setup.sh <部署公钥或 .pub 文件> [部署时连接的主机名或 IP] [SSH 端口]
 #
+# 网站目录默认 /var/www/lubobao，用环境变量 SITE_DIR 指定别的目录（例如宝塔的
+# SITE_DIR=/www/wwwroot/lubobao.xiaofany.com sh site-setup.sh …）。
+#
 # 做的事：
 #   1. 安装 rsync（以及 rrsync 需要的 python3），找到 rrsync；
 #   2. 创建系统用户 lubobao-site 和网站目录 /var/www/lubobao；
@@ -16,7 +19,11 @@ set -eu
 
 SITE_USER=lubobao-site
 SITE_HOME=/var/lib/lubobao-site
-SITE_DIR=/var/www/lubobao
+SITE_DIR=${SITE_DIR:-/var/www/lubobao}
+case $SITE_DIR in
+    /*) ;;
+    *) echo "SITE_DIR 必须是绝对路径：$SITE_DIR" >&2; exit 1 ;;
+esac
 
 main() {
     [ "$(id -u)" -eq 0 ] || die "请用 root 执行：sudo sh $0 <部署公钥>"
