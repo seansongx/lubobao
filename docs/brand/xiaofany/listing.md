@@ -8,10 +8,12 @@
 | --- | --- | --- |
 | 图标 | `icon-256.png` | 256×256，透明圆角 |
 | 封面 | `cover.png`（或体积更小的 `cover.webp`） | 1600×1000，16:10，标题和界面图都在中间 4:3 范围内 |
-| 截图 1 | `screenshot-1-rooms.png`：直播间，选中录制中的一行，右侧显示详情 | 1440×900 |
-| 截图 2 | `screenshot-2-library.png`：录像库，某个主播的分段和 MP4 | 1440×900 |
-| 截图 3 | `screenshot-3-activity.png`：动态 | 1440×900 |
-| 截图 4 | `screenshot-4-settings.png`：设置的录制分组 | 1440×900 |
+| 截图 1 | `gallery-1-rooms.png`：直播间，选中录制中的一行，右侧显示详情 | 1600×1000 |
+| 截图 2 | `gallery-2-library.png`：录像库，某个主播的分段和 MP4 | 1600×1000 |
+| 截图 3 | `gallery-3-activity.png`：动态 | 1600×1000 |
+| 截图 4 | `gallery-4-settings.png`：设置的录制分组 | 1600×1000 |
+
+后台的截图请传 `gallery-*.png` 这一套：界面按 1280×800、两倍像素截取，放在和封面相同的纸色背景上，加圆角和淡阴影，四周留白。每张同时有体积更小的 `gallery-*.webp`，后台接受 WebP 时可以改传 WebP。原来 1440×900 的 `screenshot-*.png` 缩小后字太小，已经删除，不要再用。
 
 截图都是浏览器预览里的示例数据，主播名和直播间均为虚构。
 
@@ -90,9 +92,11 @@ node docs/brand/xiaofany/capture.mjs
 
 脚本用 `vite preview` 在 127.0.0.1:4180 提供正式构建（不占用 1420，正式构建的状态栏没有「调试」入口），再用无头 Edge（找不到时用 Chrome，也可用环境变量 `BROWSER` 指定）通过 DevTools 协议打开页面：
 
-- 页面地址带 `?platform=windows&ffmpeg=ready`，浅色，窗口 1440×900；浏览器里不在 Tauri 中，自动使用 `src/lib/mock-api.ts` 的示例数据。
+- 页面地址带 `?platform=windows&ffmpeg=ready`，浅色，窗口 1280×800、两倍像素；浏览器里不在 Tauri 中，自动使用 `src/lib/mock-api.ts` 的示例数据。
 - 示例数据默认会在启动约 10 秒后弹出「发现新版本」对话框，脚本在每次页面加载后调用 `window.__lubobaoMock.setUpdate("none")` 关掉它；每次截图前还会检查页面上没有对话框、菜单、提示框或 toast，有就报错退出。
 - 直播间页点选第一行「录制中」显示详情；录像库双击进入「抖音 / 一只小羊驼」；动态和设置直接打开。
+- 每页的整窗图用 `gallery.html` 排版成 1600×1000 的 `gallery-*.png` 和 `gallery-*.webp`。
+- 同一次运行还会更新官网的截图：`website/assets/rooms.webp`（首屏整窗，2560×1600）和四张局部放大图 `*-detail.webp`（裁剪区域写在脚本的 `websiteCrops` 里，界面布局变了要重新量）。调试时可以用环境变量 `CAPTURE_SOURCES` 指定一个目录，另存整窗原图。
 - 封面先按 1280×800、两倍像素截一张不选中行的直播间页，再用 `cover.html` 排版成 1600×1000，同时输出 `cover.png` 和 `cover.webp`。
 - 图标把 `docs/brand/app-icon.svg` 渲染成 256×256 透明底 PNG。
 

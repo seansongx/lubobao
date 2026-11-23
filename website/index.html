@@ -55,7 +55,7 @@
         </div>
         <figure class="wrap hero-shot">
           <div class="shot">
-            <img src="./assets/rooms.webp" width="1440" height="900" fetchpriority="high"
+            <img src="./assets/rooms.webp" width="1280" height="800" fetchpriority="high"
                  alt="录播宝的直播间页面：任务表列出各直播间的录制状态、画质和时长，右侧是当前录制的详情。">
           </div>
           <figcaption>直播间页面。图中为示例数据，主播名均为虚构。</figcaption>
@@ -77,34 +77,45 @@
 
           <article class="feature">
             <div class="feature-copy">
-              <h3>每次开播都有记录</h3>
-              <p>动态页按时间记下开播、录制和出错，出错时点「处理」直接去改。关掉窗口收进托盘照常录制，开播和失败会发系统通知。</p>
+              <h3>开播就录，状态一眼看清</h3>
+              <p>按设定间隔检测开播，断流后重新检测、接着录。哪个直播间在录、在等还是出了错，看状态列和右侧详情就知道。</p>
             </div>
             <figure class="shot">
-              <img src="./assets/activity.webp" width="892" height="608" loading="lazy" decoding="async"
-                   alt="动态页面：按时间列出开播、开始录制、检测失败等记录，出错的记录旁有「处理」按钮。">
+              <img src="./assets/rooms-detail.webp" width="818" height="476" loading="lazy" decoding="async"
+                   alt="直播间任务表的状态列：需处理、录制中、重试中、已开播仅通知等状态，右侧详情列出当前录制的文件、大小和码率。">
             </figure>
           </article>
 
           <article class="feature feature-flip">
             <div class="feature-copy">
-              <h3>分段写入，录完转 MP4</h3>
-              <p>按 TS 分段写入，断流不丢已录部分，恢复后接着录；录完转成 MP4，失败时原文件不动。录像只存在你选的目录。</p>
+              <h3>每次开播都有记录</h3>
+              <p>动态页按时间记下开播、录制和出错。关掉窗口收进托盘照常录制，开播和失败会发系统通知。</p>
             </div>
             <figure class="shot">
-              <img src="./assets/library.webp" width="1102" height="548" loading="lazy" decoding="async"
-                   alt="录像库页面：同一场直播的多个分段文件归在一组，列出大小和修改时间。">
+              <img src="./assets/activity-detail.webp" width="664" height="406" loading="lazy" decoding="async"
+                   alt="动态页面：按时间列出检测失败、录制失败、开始录制等记录。">
             </figure>
           </article>
 
           <article class="feature">
             <div class="feature-copy">
+              <h3>分段写入，录完转 MP4</h3>
+              <p>按 TS 分段写入，断流也不丢已录部分；录完转成 MP4，失败时原文件不动。录像只存在你选的目录。</p>
+            </div>
+            <figure class="shot">
+              <img src="./assets/library-detail.webp" width="544" height="530" loading="lazy" decoding="async"
+                   alt="录像库：同一场直播的多个 TS 分段归在一组，标出第几段，下面是转好的 MP4。">
+            </figure>
+          </article>
+
+          <article class="feature feature-flip">
+            <div class="feature-copy">
               <h3>装好就能用</h3>
               <p>首次启动时在后台下载并校验 FFmpeg，优先国内源。五档画质、分段、代理和 Cookie 都在设置里，改完自动保存；新版本在应用内更新。</p>
             </div>
             <figure class="shot">
-              <img src="./assets/settings.webp" width="952" height="660" loading="lazy" decoding="async"
-                   alt="设置页面的录制分组：保存目录、默认画质、分段录制、录制完成后转为 MP4 等选项。">
+              <img src="./assets/settings-detail.webp" width="788" height="361" loading="lazy" decoding="async"
+                   alt="设置页面的录制分组：保存目录、默认画质、录制格式、分段录制和分段时长。">
             </figure>
           </article>
         </div>
