@@ -91,6 +91,7 @@ node docs/brand/xiaofany/capture.mjs
 脚本用 `vite preview` 在 127.0.0.1:4180 提供正式构建（不占用 1420，正式构建的状态栏没有「调试」入口），再用无头 Edge（找不到时用 Chrome，也可用环境变量 `BROWSER` 指定）通过 DevTools 协议打开页面：
 
 - 页面地址带 `?platform=windows&ffmpeg=ready`，浅色，窗口 1440×900；浏览器里不在 Tauri 中，自动使用 `src/lib/mock-api.ts` 的示例数据。
+- 示例数据默认会在启动约 10 秒后弹出「发现新版本」对话框，脚本在每次页面加载后调用 `window.__lubobaoMock.setUpdate("none")` 关掉它；每次截图前还会检查页面上没有对话框、菜单、提示框或 toast，有就报错退出。
 - 直播间页点选第一行「录制中」显示详情；录像库双击进入「抖音 / 一只小羊驼」；动态和设置直接打开。
 - 封面先按 1280×800、两倍像素截一张不选中行的直播间页，再用 `cover.html` 排版成 1600×1000，同时输出 `cover.png` 和 `cover.webp`。
 - 图标把 `docs/brand/app-icon.svg` 渲染成 256×256 透明底 PNG。

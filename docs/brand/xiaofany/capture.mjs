@@ -120,12 +120,24 @@ async function navigate(cdp, url, settleMs = 1500) {
   const loaded = cdp.waitEvent("Page.loadEventFired");
   await cdp.send("Page.navigate", { url });
   await loaded;
+  // 示例数据默认「发现新版本」，启动约 10 秒后会弹出更新对话框；页面一加载就把检查结果改成「已是最新」。
+  // window.__lubobaoMock 由 src/lib/mock-api.ts 在模块加载时挂上，正式构建里也有。
+  await cdp.evaluate(`window.__lubobaoMock?.setUpdate("none"); true`);
   await cdp.evaluate("document.fonts.ready.then(() => true)");
   await sleep(settleMs);
 }
 
+// 截图前确认页面上没有对话框、弹出菜单、提示框或 toast，有就报错退出。
+// 不查 role="listbox"：录像库的文件列表本身就是 listbox；下拉框展开时由 popper 外层查到。
+const overlayCheck = `(() => {
+  const selector = '[role="dialog"], [role="alertdialog"], [role="menu"], [role="tooltip"], [data-sonner-toast], [data-radix-popper-content-wrapper]';
+  return [...document.querySelectorAll(selector)].map((item) => item.getAttribute("role") ?? item.tagName).join(", ");
+})()`;
+
 async function shot(cdp, file, options = {}) {
   const { format = "png", quality } = options;
+  const overlays = await cdp.evaluate(overlayCheck);
+  if (overlays) throw new Error(`截图 ${file} 时页面上有浮层：${overlays}`);
   const result = await cdp.send("Page.captureScreenshot", { format, quality, captureBeyondViewport: false });
   writeFileSync(file, Buffer.from(result.data, "base64"));
   console.log(`已生成 ${file}`);
