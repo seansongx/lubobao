@@ -52,7 +52,7 @@ lubobao-cli list
 lubobao-cli status
 ```
 
-`run` 运行时，其他子命令通过本地控制通道交给它执行，立刻生效。`run` 没有运行时，修改类命令（`add`、`pause`、`resume`、`remove`、`config set`）直接写数据库，下次 `run` 启动时生效；`stop`、`shutdown` 必须有 `run` 在运行，否则提示并以退出码 3 结束。
+`run` 运行时，其他子命令通过本地控制通道交给它执行，立刻生效。`run` 没有运行时，修改类命令（`add`、`pause`、`resume`、`remove`、`config set`）直接写数据库，下次 `run` 启动时生效；`stop`、`start`、`shutdown` 必须有 `run` 在运行，否则提示并以退出码 3 结束。
 
 按 Ctrl+C（或发送 SIGTERM、SIGHUP）后，`run` 停止所有录制、等 FFmpeg 写完文件尾（最长约 30 秒）再退出，录好的文件可以直接播放。收尾期间再按一次 Ctrl+C 会立即退出。Windows 上直接关闭控制台窗口时，系统只给约 5 秒，收尾可能来不及，请先按 Ctrl+C 或运行 `lubobao-cli shutdown`。
 
@@ -97,7 +97,8 @@ lubobao-cli config set live_save_path /srv/recordings
 | `pause <id…\|all>` | 暂停监控，正在录制的会停止 |
 | `resume <id…\|all>` | 恢复监控，同时清除录制失败和手动停止的状态 |
 | `remove <id…>` | 删除直播间；正在录制的要先 `stop` |
-| `stop <id…\|all>` | 停止录制。本次直播不再自动录制，下播后或重新 `resume` 后恢复（需要 `run`） |
+| `stop <id…\|all>` | 停止录制。本次直播不再自动录制，下播后、`start` 或重新 `resume` 后恢复（需要 `run`） |
+| `start <id…\|all>` | 重新开始录制：清除手动停止和录制失败的状态，立即检测一次，在播就开始录制。已暂停监控的要先 `resume`，仅通知的不录制（需要 `run`） |
 | `status [--json]` | `run` 是否在运行、数据目录、录像目录、FFmpeg、录制数、下次检测时间、各状态的直播间数 |
 | `config list [--json]` | 列出全部设置（含默认值） |
 | `config get <键>` | 读取一项设置 |
@@ -234,7 +235,7 @@ GHCR 在国内访问较慢或不稳定时，可以：
 
 ## 常见问题
 
-- **`stop` 提示 run 没有在运行**：`stop` 和 `shutdown` 只对正在运行的 `run` 有意义。检查 `status`，或者确认用的是同一个数据目录（systemd、Docker 下数据目录与你的用户默认目录不同）。
+- **`stop`、`start` 提示 run 没有在运行**：`stop`、`start` 和 `shutdown` 只对正在运行的 `run` 有意义。检查 `status`，或者确认用的是同一个数据目录（systemd、Docker 下数据目录与你的用户默认目录不同）。
 - **数据目录被另一个进程占用**：同一个数据目录已有 `run`。用 `status` 查看它的 pid。
 - **抖音在海外服务器上检测失败**：部分海外 IP 会被风控，可以配置代理（`proxy_address`）或 Cookie（`platform_cookies`），或把服务器放在国内。
 - **Ctrl+C 后 FFmpeg 也收到了中断信号**：在终端里按 Ctrl+C 时信号会发给整个前台进程组，FFmpeg 会自行写完文件尾后退出，文件同样可以播放。systemd 和 Docker 只给 `lubobao-cli` 发信号，由它统一收尾。

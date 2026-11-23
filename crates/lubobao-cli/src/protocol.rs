@@ -33,6 +33,9 @@ pub enum Request {
     Stop {
         target: Target,
     },
+    Start {
+        target: Target,
+    },
     Status,
     ConfigList,
     ConfigGet {
@@ -51,7 +54,10 @@ pub enum Request {
 impl Request {
     /// 只能由正在运行的 `run` 执行的请求。
     pub fn needs_daemon(&self) -> bool {
-        matches!(self, Request::Stop { .. } | Request::Shutdown)
+        matches!(
+            self,
+            Request::Stop { .. } | Request::Start { .. } | Request::Shutdown
+        )
     }
 
     /// 只涉及 FFmpeg 组件、不需要打开任务数据库的请求。
@@ -135,6 +141,18 @@ mod tests {
         })
         .unwrap();
         assert_eq!(all, r#"{"op":"stop","target":"all"}"#);
+    }
+
+    #[test]
+    fn start_goes_to_run_like_stop() {
+        let start = Request::Start {
+            target: Target::Ids(vec![3]),
+        };
+        assert_eq!(
+            serde_json::to_string(&start).unwrap(),
+            r#"{"op":"start","target":{"ids":[3]}}"#
+        );
+        assert!(start.needs_daemon());
     }
 
     #[test]

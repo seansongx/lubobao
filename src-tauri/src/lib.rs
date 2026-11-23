@@ -38,6 +38,7 @@ pub fn run() {
             tasks::commands::delete_tasks,
             tasks::commands::set_monitoring,
             tasks::commands::stop_recording,
+            tasks::commands::start_recording,
             tasks::commands::get_settings,
             tasks::commands::get_setting_defaults,
             tasks::commands::update_settings,

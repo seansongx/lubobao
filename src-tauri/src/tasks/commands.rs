@@ -50,6 +50,11 @@ pub fn stop_recording(manager: Manager<'_>, ids: Vec<TaskId>) -> CommandResult<V
 }
 
 #[tauri::command]
+pub fn start_recording(manager: Manager<'_>, ids: Vec<TaskId>) -> CommandResult<Vec<TaskSnapshot>> {
+    manager.start_recording(&ids)
+}
+
+#[tauri::command]
 pub fn get_settings(manager: Manager<'_>) -> Map<String, Value> {
     manager.settings()
 }

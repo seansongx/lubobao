@@ -130,6 +130,12 @@ enum Command {
         #[arg(required = true, num_args = 1..)]
         target: Vec<String>,
     },
+    /// 重新开始录制：清除手动停止和录制失败的状态，立即检测，在播就录（需要 run 正在运行）
+    Start {
+        /// 任务 id，可写多个，或 all
+        #[arg(required = true, num_args = 1..)]
+        target: Vec<String>,
+    },
     /// 查看运行状态
     Status {
         /// 输出 JSON
@@ -248,6 +254,9 @@ fn invocation(command: Command) -> Result<Invocation, String> {
         }),
         Command::Remove { ids } => plain(Request::Remove { ids }),
         Command::Stop { target } => plain(Request::Stop {
+            target: parse_target(&target)?,
+        }),
+        Command::Start { target } => plain(Request::Start {
             target: parse_target(&target)?,
         }),
         Command::Status { json } => Invocation {

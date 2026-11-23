@@ -68,13 +68,14 @@ fn make_sample(ffmpeg: &Path, dir: &Path) -> PathBuf {
     path
 }
 
-/// 分段录制时文件路径是 `…_%03d.ts` 这样的模板，展开成实际写出的文件。
-fn expand(pattern: &Path) -> Vec<PathBuf> {
-    let name = pattern.file_name().unwrap().to_string_lossy().into_owned();
-    let Some((prefix, suffix)) = name.split_once("%03d") else {
-        return vec![pattern.to_path_buf()];
+/// 分段录制时任务显示第一个分段 `…_000.ts`，展开成这次录制实际写出的所有分段。
+fn expand(first: &Path) -> Vec<PathBuf> {
+    let name = first.file_name().unwrap().to_string_lossy().into_owned();
+    let Some((prefix, suffix)) = name.rsplit_once("_000") else {
+        return vec![first.to_path_buf()];
     };
-    let dir = pattern.parent().unwrap();
+    let prefix = format!("{prefix}_");
+    let dir = first.parent().unwrap();
     let mut files: Vec<PathBuf> = std::fs::read_dir(dir)
         .map(|entries| {
             entries
@@ -82,7 +83,12 @@ fn expand(pattern: &Path) -> Vec<PathBuf> {
                 .map(|entry| entry.path())
                 .filter(|path| {
                     let name = path.file_name().unwrap().to_string_lossy();
-                    name.starts_with(prefix) && name.ends_with(suffix)
+                    // 只要序号是数字的分段：同一秒内再录的 `stem_2_000.ts` 不算。
+                    name.strip_prefix(prefix.as_str())
+                        .and_then(|rest| rest.strip_suffix(suffix))
+                        .is_some_and(|number| {
+                            !number.is_empty() && number.bytes().all(|b| b.is_ascii_digit())
+                        })
                 })
                 .collect()
         })
@@ -91,10 +97,10 @@ fn expand(pattern: &Path) -> Vec<PathBuf> {
     files
 }
 
-/// 完整解码录像（分段模板展开后逐个解码），确认没有错误输出。
-fn assert_recording_playable(ffmpeg: &Path, pattern: &Path) {
-    let files = expand(pattern);
-    assert!(!files.is_empty(), "no files for {}", pattern.display());
+/// 完整解码录像（展开成这次录制的所有分段后逐个解码），确认没有错误输出。
+fn assert_recording_playable(ffmpeg: &Path, first: &Path) {
+    let files = expand(first);
+    assert!(!files.is_empty(), "no files for {}", first.display());
     for file in &files {
         assert_playable(ffmpeg, file);
     }
@@ -447,14 +453,39 @@ async fn cli_records_stops_and_exits_cleanly() {
     let list: Value = serde_json::from_str(&harness.cli(&["list", "--json"]).await).unwrap();
     let id = list[0]["id"].as_i64().unwrap();
     let first = harness.wait_recording(id).await;
+    // 分段录制（默认开启）显示实际的第一个分段，不是 `%03d` 模板。
+    assert!(
+        first.to_string_lossy().ends_with("_000.ts"),
+        "{}",
+        first.display()
+    );
+    let listed = harness.cli(&["list"]).await;
+    assert!(
+        listed.contains("_000.ts") && !listed.contains('%'),
+        "{listed}"
+    );
     sleep(Duration::from_secs(4)).await;
 
-    // 2. 手动停止：收尾后回到空闲，本次直播不再自动录制。
+    // 2. 手动停止：收尾后回到空闲，本次直播不再自动录制；日志写明是手动停止。
     harness.cli(&["stop", &id.to_string()]).await;
     harness.wait_idle(id).await;
     let task = harness.task(id).await;
     assert_eq!(task["recordHeld"], true, "{task}");
     assert_recording_playable(&ffmpeg, &first);
+    let log = harness.log();
+    assert!(log.contains("录制结束：手动停止"), "{log}");
+    assert!(!log.contains("%03d"), "{log}");
+
+    // 2b. start 清除手动停止的保持状态，立即检测，仍在播就再次录制。
+    let started = harness.cli(&["start", &id.to_string()]).await;
+    assert!(started.contains("已重新开始录制"), "{started}");
+    let restarted = harness.wait_recording(id).await;
+    assert_ne!(restarted, first);
+    assert_eq!(harness.task(id).await["recordHeld"], false);
+    sleep(Duration::from_secs(3)).await;
+    harness.cli(&["stop", &id.to_string()]).await;
+    harness.wait_idle(id).await;
+    assert_recording_playable(&ffmpeg, &restarted);
 
     // 3. 下播 → 等待开播；再开播 → 自动续录；录制中断流 → 录制结束。
     source.live.store(false, Ordering::SeqCst);

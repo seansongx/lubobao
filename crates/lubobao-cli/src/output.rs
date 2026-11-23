@@ -309,6 +309,19 @@ pub fn print(request: &Request, json: bool, result: Result<Value, Failure>) -> E
                 print_task(task);
             }
         }
+        Request::Start { .. } => {
+            let tasks = value.as_array().cloned().unwrap_or_default();
+            if tasks.is_empty() {
+                outln!(
+                    "没有可以开始录制的直播间：已暂停监控的请先 resume，仅通知的不录制，正在录制的无需开始"
+                );
+            } else {
+                outln!("已重新开始录制，正在检测是否开播：");
+                for task in &tasks {
+                    print_task(task);
+                }
+            }
+        }
         Request::Status => print_status(&value),
         Request::ConfigList => print_settings(&value),
         Request::ConfigGet { .. } => print_value(&value),

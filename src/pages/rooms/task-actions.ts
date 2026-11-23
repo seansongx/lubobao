@@ -32,6 +32,19 @@ export async function stopRecording(task: TaskSnapshot): Promise<void> {
   }
 }
 
+export async function startRecording(task: TaskSnapshot): Promise<void> {
+  try {
+    const result = await api.startRecording([task.id]);
+    if (result.length === 0) {
+      toast.info(`${task.anchorName} 现在无法开始录制`, { description: "请先恢复监控，或等当前录制结束。" });
+      return;
+    }
+    toast.success(`正在检测 ${task.anchorName}`, { description: "仍在直播就会立即开始录制。" });
+  } catch (error) {
+    reportError("开始录制", error);
+  }
+}
+
 /** 录制文件所在位置；没有文件时为保存目录。 */
 export async function folderFor(task: TaskSnapshot): Promise<{ path: string; isFile: boolean }> {
   const { record } = task;

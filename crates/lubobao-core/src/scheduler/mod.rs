@@ -1,8 +1,11 @@
 //! 调度：按检测间隔轮询监控中的任务，开播后自动录制，录制结束后决定下一步。
 //!
 //! 行为参照 StreamCap `record_manager.py`、`stream_manager.py`，有意差异如下：
-//! - 手动停止录制后，本次直播不再自动录制，直到检测到下播或用户重新启用监控。
-//!   StreamCap 在下一轮检测时会重置 `manually_stopped` 并重新开始录制。
+//! - 手动停止录制后，本次直播不再自动录制，直到检测到下播、用户重新启用监控或点
+//!   「重新开始录制」（[`TaskManager::start_recording`]）。StreamCap 在下一轮检测时会重置
+//!   `manually_stopped` 并重新开始录制。
+//! - 「录制结束」动态写明原因（手动停止、暂停监控、应用退出、直播结束或断流、网络错误）
+//!   和实际生成的文件；分段录制显示第一个分段，不显示 `_%03d` 模板。
 //! - 断流或网络错误结束后立即重新检测，仍在播就续录。StreamCap 对抖音等 FLV 优先的
 //!   平台不立即重检，要等下一轮。录制不足 60 秒就结束的，重检前按 5 秒起翻倍退避。
 //! - 检测失败按类别退避：网络、限流、解析失败 10 秒起翻倍，不超过检测间隔；需要用户
@@ -40,11 +43,11 @@ use crate::ffmpeg::FfmpegManager;
 use crate::platforms::{BoxFuture, FetchOptions, LiveInfo, Platform, PlatformError};
 use crate::recorder::postprocess::{self, ConvertEvent, ConvertListener, PostProcessor};
 use crate::recorder::{
-    EndReason, EventListener, RecorderEvent, RecordingOutcome, RecordingRequest,
+    EndReason, EventListener, RecorderEvent, RecordingOutcome, RecordingRequest, naming,
 };
 use crate::tasks::{
-    ActivityKind, LiveState, Monitoring, NewActivity, PlatformErrorKind, RecordState,
-    SchedulerHook, TaskId, TaskManager, TaskSnapshot, now_ms,
+    ActivityKind, EndCause, LiveState, Monitoring, NewActivity, PlatformErrorKind, RecordState,
+    RecordingEnd, SchedulerHook, StopOrigin, TaskId, TaskManager, TaskSnapshot, now_ms,
 };
 
 mod engine;
@@ -124,6 +127,8 @@ struct Slot {
     id: u64,
     control: Option<Arc<dyn RecordingControl>>,
     stop_requested: bool,
+    /// 用户从哪个操作停止了录制；最先的那个有效。
+    stop_origin: Option<StopOrigin>,
     /// 已开始收尾，防止重复处理。
     finishing: bool,
     reserved_at: Instant,
@@ -622,6 +627,7 @@ impl Core {
                 id: slot_id,
                 control: None,
                 stop_requested: false,
+                stop_origin: None,
                 finishing: false,
                 reserved_at: Instant::now(),
                 file_path: None,
@@ -649,8 +655,15 @@ impl Core {
             RecorderEvent::Started {
                 output_path,
                 started_at_ms,
+                segmented,
                 ..
             } => {
+                // 分段时引擎给的是 `stem_%03d.ts` 模板，界面和日志显示第一个分段。
+                let output_path = if *segmented {
+                    naming::first_segment_path(output_path)
+                } else {
+                    output_path.clone()
+                };
                 {
                     let mut state = self.lock();
                     match state.slots.get_mut(&id) {
@@ -661,14 +674,14 @@ impl Core {
                     }
                 }
                 let recording = RecordState::Recording {
-                    file_path: output_path.clone(),
+                    file_path: output_path,
                     started_at: *started_at_ms,
                     bytes_written: 0,
                     bitrate_kbps: 0.0,
                 };
                 if self.tasks.set_record_state(id, recording).is_err() {
                     // 任务在启动期间被删除。
-                    self.stop_slot(id);
+                    self.stop_slot(id, StopOrigin::Deleted);
                 }
             }
             RecorderEvent::Progress { progress } => {
@@ -706,12 +719,13 @@ impl Core {
         }
     }
 
-    fn stop_slot(&self, id: TaskId) -> bool {
+    fn stop_slot(&self, id: TaskId, origin: StopOrigin) -> bool {
         let mut state = self.lock();
         let Some(slot) = state.slots.get_mut(&id) else {
             return false;
         };
         slot.stop_requested = true;
+        slot.stop_origin.get_or_insert(origin);
         if let Some(control) = &slot.control {
             control.stop();
         }
@@ -721,28 +735,37 @@ impl Core {
     /// 录制结束：先回写录制状态，再释放占位（退出时等的就是占位清空，状态必须已落盘），
     /// 最后按结束原因安排下一次检测。同一个录制只处理一次。
     fn finish(&self, id: TaskId, slot_id: u64, outcome: &RecordingOutcome) {
-        let (file_path, reserved_at) = {
+        let (file_path, reserved_at, cause) = {
             let mut state = self.lock();
+            let shutting_down = state.shutting_down;
             match state.slots.get_mut(&id) {
                 Some(slot) if slot.id == slot_id && !slot.finishing => {
                     slot.finishing = true;
-                    (slot.file_path.clone(), slot.reserved_at)
+                    let cause = end_cause(slot.stop_origin, shutting_down, outcome.reason);
+                    (slot.file_path.clone(), slot.reserved_at, cause)
                 }
                 _ => return,
             }
         };
 
         if let Some(task) = self.tasks.get(id) {
-            let record = if outcome.reason.needs_attention() {
-                RecordState::Failed {
-                    reason: describe(outcome),
-                    file_path: outcome.files.first().cloned().or(file_path),
-                    failed_at: outcome.ended_at_ms,
-                }
+            let result = if outcome.reason.needs_attention() {
+                self.tasks.set_record_state(
+                    id,
+                    RecordState::Failed {
+                        reason: describe(outcome),
+                        file_path: outcome.files.first().cloned().or(file_path),
+                        failed_at: outcome.ended_at_ms,
+                    },
+                )
             } else {
-                RecordState::Idle
+                let end = RecordingEnd {
+                    files: outcome.files.clone(),
+                    cause,
+                };
+                self.tasks.finish_recording(id, RecordState::Idle, &end)
             };
-            if let Err(error) = self.tasks.set_record_state(id, record) {
+            if let Err(error) = result {
                 eprintln!("写入录制结束状态失败（任务 {id}）：{error}");
             }
             self.convert_recording(&task, outcome);
@@ -970,13 +993,26 @@ impl SchedulerHook for Core {
         self.wake.notify_one();
     }
 
-    fn stop_recording(&self, id: TaskId) -> bool {
-        self.stop_slot(id)
+    fn stop_recording(&self, id: TaskId, origin: StopOrigin) -> bool {
+        self.stop_slot(id, origin)
     }
 
     fn settings_changed(&self) {
         self.lock().settings_changed = true;
         self.wake.notify_one();
+    }
+}
+
+/// 「录制结束」动态的原因：用户的停止操作优先，其次是退出，最后看引擎给的原因。
+fn end_cause(origin: Option<StopOrigin>, shutting_down: bool, reason: EndReason) -> EndCause {
+    match (origin, reason) {
+        (Some(StopOrigin::Manual), _) => EndCause::Manual,
+        (Some(StopOrigin::Paused), _) => EndCause::Paused,
+        (Some(StopOrigin::Deleted), _) => EndCause::Stopped,
+        (None, _) if shutting_down => EndCause::Shutdown,
+        (None, EndReason::StreamEnded) => EndCause::StreamEnded,
+        (None, EndReason::NetworkError) => EndCause::NetworkError,
+        (None, _) => EndCause::Stopped,
     }
 }
 

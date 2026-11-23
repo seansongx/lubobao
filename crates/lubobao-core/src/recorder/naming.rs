@@ -137,6 +137,17 @@ pub fn first_file_path(dir: &Path, stem: &str, segmented: bool) -> PathBuf {
     }
 }
 
+/// 把 [`output_path`] 给出的分段模板 `stem_%03d.ts` 换成第一个分段 `stem_000.ts`，给界面
+/// 和日志显示实际文件。只改文件名部分；不是模板的路径原样返回。
+pub fn first_segment_path(path: &Path) -> PathBuf {
+    match path.file_name().and_then(|name| name.to_str()) {
+        Some(name) if name.contains("_%03d.") => {
+            path.with_file_name(name.replacen("_%03d.", "_000.", 1))
+        }
+        _ => path.to_path_buf(),
+    }
+}
+
 /// 同一秒内重复开始录制时给文件名加序号：`stem`、`stem_2`、`stem_3`……
 /// `exists` 判断某个主体名对应的第一个文件是否已存在。
 pub fn unique_stem(base: &str, mut exists: impl FnMut(&str) -> bool) -> String {
@@ -271,6 +282,17 @@ mod tests {
         assert_eq!(output_path(dir, "a_1", false), dir.join("a_1.ts"));
         assert_eq!(output_path(dir, "a_1", true), dir.join("a_1_%03d.ts"));
         assert_eq!(first_file_path(dir, "a_1", true), dir.join("a_1_000.ts"));
+    }
+
+    #[test]
+    fn first_segment_path_expands_only_the_file_name() {
+        let dir = Path::new(r"D:\100% 录像\a_%03d.x");
+        assert_eq!(
+            first_segment_path(&output_path(dir, "主播_1", true)),
+            dir.join("主播_1_000.ts")
+        );
+        let plain = output_path(dir, "主播_1", false);
+        assert_eq!(first_segment_path(&plain), plain);
     }
 
     #[test]
