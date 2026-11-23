@@ -14,6 +14,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+pub mod bilibili;
 pub mod douyin;
 #[cfg(feature = "e2e")]
 pub mod e2e;
@@ -31,6 +32,7 @@ pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 pub enum Platform {
     Douyin,
     Kuaishou,
+    Bilibili,
     /// 端到端测试用的本地直播间（feature `e2e`），发布版没有。
     #[cfg(feature = "e2e")]
     E2e,
@@ -42,6 +44,7 @@ impl Platform {
         match self {
             Platform::Douyin => "douyin",
             Platform::Kuaishou => "kuaishou",
+            Platform::Bilibili => "bilibili",
             #[cfg(feature = "e2e")]
             Platform::E2e => "e2e",
         }
@@ -52,6 +55,7 @@ impl Platform {
         match self {
             Platform::Douyin => "抖音",
             Platform::Kuaishou => "快手直播",
+            Platform::Bilibili => "哔哩哔哩",
             #[cfg(feature = "e2e")]
             Platform::E2e => "测试直播间",
         }
@@ -346,6 +350,7 @@ pub fn adapters() -> Vec<Box<dyn PlatformAdapter>> {
     let mut list: Vec<Box<dyn PlatformAdapter>> = vec![
         Box::new(douyin::DouyinAdapter::new()),
         Box::new(kuaishou::KuaishouAdapter::new()),
+        Box::new(bilibili::BilibiliAdapter::new()),
     ];
     #[cfg(feature = "e2e")]
     list.push(Box::new(e2e::E2eAdapter));

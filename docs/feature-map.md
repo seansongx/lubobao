@@ -81,6 +81,16 @@
 - 缺少地址的画质档位会跳过，不影响其他档位。
 - 暂不支持 `v.kuaishou.com` 等分享短链：上游只识别 `live.kuaishou.com/u/` 链接，也没有可供验证的真实短链。
 
+**有意差异 · B站解析**（参考 StreamGet v4.0.10 `BilibiliLiveStream`）：
+- 主播昵称和标题都取自 `getH5InfoByRoom`，每次检测两次请求（`room_init` 加它）；该接口没有昵称时才请求 `Master/info`。上游每次都请求这三个接口。
+- 不存在的房间（`room_init` 60004、取流接口 19002003）判为链接无效，`-101` 判为需要登录，`-352`、`-412` 等风控和其他非零状态、HTTP 412 及非 JSON 响应按限流重试；锁定的直播间判为链接无效，加密且未验证的判为需要登录。上游遇到任何异常都当作未开播。
+- `playUrl` 失败改用 `getRoomPlayInfo` 时取 H.264 的 FLV（没有再取其他 FLV、HLS ts）。上游按画质下标在按 `current_qn` 排序的编码列表里取，会在 H.264 和 HEVC 之间随机落点。
+- 轮播（`live_status` 2）与上游一样算未开播。
+- 取流请求头带 PC User-Agent 和 `Referer: https://live.bilibili.com/`，用户 Cookie 不发给视频 CDN；上游取流时不带请求头。
+- 不做取流前的 HEAD 探测和换档：B站接口本身按账号权限降档，返回的就是可用的那一档。
+- 暂不支持 `b23.tv` 分享短链：上游只识别 `live.bilibili.com` 链接。
+- 实测 B站 FLV 时间戳只到毫秒，30 fps 的流用 FFmpeg 默认的 `-f null` 检查时会有个别「non monotonically increasing dts」提示（输出时基 1/30 秒，两帧落进同一格），并非解码错误；联网测试用 `-fps_mode passthrough -enc_time_base demux` 检查，结果 0 错误。
+
 **有意差异 · 桌面行为**（参考 StreamCap `app/lifecycle/`、`app/messages/desktop_notify.py`）：
 - 系统通知：与上游一样，总开关 `system_notification_enabled` 控制全部系统通知，开播通知只在主窗口隐藏或最小化时发。不同的是，上游的「开播通知」「下播通知」开关只管推送渠道，0.1.0 没有推送渠道，这两个开关改为控制系统通知：开播默认开、下播默认关。「仅通知」的直播间开播时只看总开关，不受「开播通知」开关和窗口状态影响（否则关掉开播通知后这类直播间既不录也不提醒）。任务进入「需处理」时提醒一次（上游没有）。短时间内的多条开播或下播合并成一条。
 - 关闭窗口：与上游一样询问「最小化到托盘 / 退出 / 取消」，另加「记住我的选择」，存入设置 `close_window_action`（`ask`、`tray`、`quit`），可在设置页「托盘与通知」修改。托盘创建失败（例如 Linux 没有 AppIndicator 库，启动时先探测）时关窗直接退出。GNOME 没装 AppIndicator 扩展时库存在但托盘不显示，隐藏后可以再次启动录播宝唤回窗口（单实例）。Linux 托盘不支持提示文字，改用标题：有录制时显示「录播宝 · 录制中 N」，平时显示「录播宝」。
@@ -99,5 +109,6 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | 抖音 | `live.douyin.com/{web_rid}`、`live.douyin.com/{抖音号}`、`v.douyin.com/{短码}`（直播间或主页，跳转后区分）、`www.douyin.com/user/{sec_uid}` | 不需要。内置默认 Cookie；用户 Cookie 含 `ttwid=` 时网页接口改用它 | 只按域名和路径识别，不发请求：`live.douyin.com` 后为纯数字视为 web_rid，否则视为抖音号 | 原画、超清、高清、标清、流畅，依次对应 ORIGIN、FULL_HD1、HD1、SD1、SD2；每档都有 FLV 和 HLS。缺档用最后一档补齐，取流失败降一档，流畅档失败升一档 | 2026-11-23：README 中五种示例链接全部解析成功；在播直播间取到 5 档画质，FLV 前 100 KB 为有效 `FLV` 头，HLS 为有效 m3u8。尚未通过 FFmpeg 录制 | 已实现待验证 |
 | 快手 | `live.kuaishou.com/u/{快手号或 3x… 加密 id}`（可带 `/{liveStreamId}` 和查询参数） | 不需要。用户 Cookie 只用于用户信息接口预检，房间页和取流都不带 | 只按域名 `live.kuaishou.com` 和 `/u/{id}` 识别，不发请求 | H.264 FLV 按码率从高到低（实测 8000/4000/2000/1000 kbps）。原画、超清、高清分别取不超过 99999、2000、1000 kbps 的最高档，标清（800）、流畅（600）无匹配档时取最低档；HLS 只有一条，挂在对应 FLV 档上。取流失败降一档，最低档时升一档 | 2026-11-23：`u/yall1102` 识别正确（未开播）；`u/beimu0315` 原画经录制引擎录 34.9 秒，36.6 MB，1080p60 H.264 + HE-AAC，FFmpeg 检查无错误 | 已实现待验证 |
+| B站 | `live.bilibili.com/{房间号}`（短号如 `320` 或长号，也认 `h5/{房间号}`、`blanc/{房间号}`，可带查询参数） | 不需要。未登录时 B站最高只给超清（qn 250），填了登录后的 Cookie（含 `SESSDATA`）才能取原画；Cookie 只发给 `api.live.bilibili.com`，取流不带 | 只按域名 `live.bilibili.com` 和纯数字房间号识别，不发请求；短号和长号在检测后按真实房间号和主播 uid 去重 | 按上游 qn：原画 10000、超清 250、高清 150、标清和流畅 80；接口按请求返回一条 FLV，实际档位以接口的 `current_qn` 为准（未登录一律 250）。档位列表取自 `quality_description`，只有实际返回的那档带地址 | 2026-11-23：README 示例 `320` 识别为长号 286893、主播 uid 13763303（未开播）；不存在的 `999999999` 判为链接无效（60004 房间不存在）。在播的 `7777`（长号 545068）四档请求均取到超清 FLV；经录制引擎录 29.9 秒（2.6 MB），`lubobao-cli run` 自动录制约 43 秒后手动停止，TS 和转出的 MP4 各 49.2 秒、1280x720 30fps H.264 High + AAC-LC 48 kHz 立体声，各解码 1473 帧 0 错误 | 已实现待验证 |
 
 上游项目与完整平台示例见 [StreamCap](https://github.com/ihmily/StreamCap)。录播宝的技术选型、FFmpeg 分发和验收规则见 [AGENTS.md](../AGENTS.md)。

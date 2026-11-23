@@ -284,6 +284,7 @@ function normalizePlatforms(value: string) {
 const supportedPlatforms: { key: Platform; name: string }[] = [
   { key: "douyin", name: "抖音" },
   { key: "kuaishou", name: "快手" },
+  { key: "bilibili", name: "B站" },
 ];
 
 export function NetworkSection({ ctx }: SectionProps) {

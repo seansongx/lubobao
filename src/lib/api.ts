@@ -31,7 +31,7 @@ export type FfmpegStatus =
 // ---- 任务（src-tauri/src/tasks/model.rs） ----
 
 export type TaskId = number;
-export type Platform = "douyin" | "kuaishou";
+export type Platform = "douyin" | "kuaishou" | "bilibili";
 export type Quality = "OD" | "UHD" | "HD" | "SD" | "LD";
 export type Monitoring = "enabled" | "paused";
 export type PlatformErrorKind =
