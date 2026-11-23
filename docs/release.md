@@ -80,15 +80,15 @@ xiaofany.com 后台还要先建好软件：slug `lubobao`、框架 `tauri`，「
 ## 每次发版
 
 1. **改版本号、写更新说明**：`node scripts/set-version.mjs 0.1.1`（同时改 package.json、package-lock.json、tauri.conf.json、Cargo.toml、Cargo.lock），`node scripts/check-version.mjs` 核对。在 `docs/release-notes/<版本>.md`（例如 `docs/release-notes/0.1.1.md`）写好本版本的更新说明，和版本号一起提交并合入 main。这个文件只写「更新内容」标题下面的正文，不带标题和分隔注释；只用纯文本和简单的 Markdown（标题、列表、粗体、链接），应用的更新对话框只认这些。0.1.0 的说明见 [docs/release-notes/0.1.0.md](release-notes/0.1.0.md)。
-2. **打标签**：`git tag v0.1.1`，`git push origin v0.1.1`。release.yml 先检查标签与版本号一致，再在 Windows、macOS（arm64、x64）、Linux 上打包，用 tauri.conf.json 里的公钥校验每个 `.sig`（私钥和公钥不是一对时失败），用 `scripts/updater-latest-json.mjs` 生成 GitHub 兜底更新清单 `latest.json`（四个平台的签名和 Release 下载地址，缺任何一个平台的更新包或 `.sig` 都失败；此时还没有更新说明），然后建草稿 Release，附上全部文件、`SHA256SUMS.txt` 和 `latest.json`。`latest.json` 不在 `SHA256SUMS.txt` 里：发布后它会被改写。Docker 镜像以 `<版本>` 推到 GHCR。
+2. **打标签**：`git tag v0.1.1`，`git push origin v0.1.1`。release.yml 先检查标签与版本号一致、`docs/release-notes/<版本>.md` 存在且有内容（没有就立即失败，不会白打包），再在 Windows、macOS（arm64、x64）、Linux 上打包，用 tauri.conf.json 里的公钥校验每个 `.sig`（私钥和公钥不是一对时失败），用 `scripts/updater-latest-json.mjs` 生成 GitHub 兜底更新清单 `latest.json`（四个平台的签名和 Release 下载地址，缺任何一个平台的更新包或 `.sig` 都失败；此时还没有更新说明），然后建草稿 Release，附上全部文件、`SHA256SUMS.txt` 和 `latest.json`。草稿正文的「## 更新内容」下面直接是 `docs/release-notes/<版本>.md` 的内容，接着是 `<!-- 以上为应用内更新说明 -->` 和安装说明。`latest.json` 不在 `SHA256SUMS.txt` 里：发布后它会被改写。Docker 镜像以 `<版本>` 推到 GHCR。
 3. **审核草稿**：在 GitHub 的 Releases 页面打开草稿。
-   - 把正文最上面「更新内容」里的占位句（以「- （发布前把这里换成本版本的变化」开头的那一行）整行换成 `docs/release-notes/<版本>.md` 的全部内容；保留上面的「## 更新内容」标题和下面的 `<!-- 以上为应用内更新说明 -->`。这一行以上的部分会显示在应用的更新对话框里，也是 xiaofany.com 上的版本说明；以下的安装说明不会。占位句没换掉时，上传到 xiaofany.com 会失败。
-   - 用命令行编辑也可以，先把草稿正文存下来，替换占位行后写回：`gh release view v0.1.1 --json body --jq .body > body.md`，编辑后 `gh release edit v0.1.1 --notes-file body.md`。
+   - 看一遍「更新内容」：`<!-- 以上为应用内更新说明 -->` 以上的部分会显示在应用的更新对话框里，也是 xiaofany.com 和官网上的版本说明；以下的安装说明不会。一般不用改；要改的话，先改 `docs/release-notes/<版本>.md` 并提交，再在草稿里改成同样的内容，保持仓库和发布出去的一致（保留标题和分隔注释）。
+   - 用命令行改也可以：`gh release view v0.1.1 --json body --jq .body > body.md`，编辑后 `gh release edit v0.1.1 --notes-file body.md`。
    - 核对文件：`*_windows_x64-setup.exe`(.sig)、`*_macos_{arm64,x64}.dmg`、`*_macos_{arm64,x64}.app.tar.gz`(.sig)、`*_linux_amd64.AppImage`(.sig)、`*_linux_amd64.deb`、`lubobao-cli_*_linux_{x64,arm64}.tar.gz`、`SHA256SUMS.txt`、`latest.json`。
    - 测试版勾选「Set as a pre-release」：发到 xiaofany.com 的 beta 渠道，Docker 不打 `latest`。
 4. **发布**：点「Publish release」。之后自动进行：
    - publish-xiaofany.yml：下载 Release 的全部文件并校验 `SHA256SUMS.txt`，生成发布清单（每个文件的 platform、arch、format、kind、签名和 GitHub 备用地址），上传到 xiaofany.com 并发布；然后核对 `https://xiaofany.com/api/v1/products/lubobao/latest` 的版本号，以及 Tauri 升级接口对旧版本（Windows、macOS 两种芯片、Linux）都返回这个版本和签名。
-   - publish-xiaofany.yml 的另一个 job（不需要 `RELEASE_TOKEN`）：把正文里分隔注释以上的更新说明写进 Release 上的 `latest.json`（`notes`，`pub_date` 改为当时），重新上传。占位句没换掉时失败，`latest.json` 保持没有更新说明，仍然可用。
+   - publish-xiaofany.yml 的另一个 job（不需要 `RELEASE_TOKEN`）：把正文里分隔注释以上的更新说明写进 Release 上的 `latest.json`（`notes`，`pub_date` 改为当时），重新上传。正文里还是旧式占位句时失败（手动建的 Release 才会这样），`latest.json` 保持没有更新说明，仍然可用。
    - docker-latest.yml：把 `<版本>` 镜像加上 `latest`。
 5. **确认**：Actions 里两个 workflow 都成功；官网下载按钮拿到新版本；装着旧版本的录播宝在 设置 → 关于 →「检查更新」能看到新版本。
 

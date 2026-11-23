@@ -76,6 +76,18 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         run: node scripts/check-version.mjs "$GITHUB_REF_NAME"
 
+      # 草稿 Release 的「更新内容」直接取 docs/release-notes/<版本>.md（见 release job）。标签构建一开始
+      # 就核对它存在且有内容，免得打包完才发现没写说明。
+      - name: Check release notes
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          notes="docs/release-notes/${GITHUB_REF_NAME#v}.md"
+          if [[ ! -f "$notes" ]] || ! grep -q '[^[:space:]]' "$notes"; then
+            echo "::error::缺少更新说明 ${notes}：写好本版本的更新说明，和版本号一起提交，再重新打标签。"
+            exit 1
+          fi
+
       - run: npm ci
 
       # 应用内更新的签名，只在推送 v* 标签时进行：需要 release 环境里的签名私钥，以及 tauri.conf.json
@@ -236,14 +248,11 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
+        # 正文：「## 更新内容」+ docs/release-notes/<版本>.md + 分隔注释 + 安装说明。分隔注释以上的部分在
+        # 发布时由 publish-xiaofany.yml 传到 xiaofany.com 并写进 latest.json；发布前仍可在草稿里修改。
         run: |
-          cat > notes.md <<'EOF'
-          ## 更新内容
-
-          - （发布前把这里换成本版本的变化。这条分隔线以上的内容会作为应用内更新说明，发布到 xiaofany.com 时如果还是这句话会失败。）
-
-          <!-- 以上为应用内更新说明 -->
-
+          version="${GITHUB_REF_NAME#v}"
+          cat > install-notes.md <<'EOF'
           ## 下载
 
           | 系统 | 文件 |
@@ -291,8 +300,16 @@ jobs:
 
           systemd 服务、compose 示例和全部子命令见 [docs/cli.md](https://github.com/seansongx/lubobao/blob/main/docs/cli.md)。国内拉取 GHCR 较慢时可使用镜像加速。
           EOF
-          version="${GITHUB_REF_NAME#v}"
-          sed -i "s/VERSION/$version/g" notes.md
+          sed -i "s/VERSION/$version/g" install-notes.md
+          {
+            echo "## 更新内容"
+            echo
+            cat "docs/release-notes/$version.md"
+            echo
+            echo "<!-- 以上为应用内更新说明 -->"
+            echo
+            cat install-notes.md
+          } > notes.md
           gh release create "$GITHUB_REF_NAME" installers/* \
             --draft \
             --title "录播宝 $GITHUB_REF_NAME" \
