@@ -18,6 +18,7 @@ pub mod bilibili;
 pub mod douyin;
 #[cfg(feature = "e2e")]
 pub mod e2e;
+pub mod huya;
 pub mod kuaishou;
 mod sign;
 
@@ -33,6 +34,7 @@ pub enum Platform {
     Douyin,
     Kuaishou,
     Bilibili,
+    Huya,
     /// 端到端测试用的本地直播间（feature `e2e`），发布版没有。
     #[cfg(feature = "e2e")]
     E2e,
@@ -45,6 +47,7 @@ impl Platform {
             Platform::Douyin => "douyin",
             Platform::Kuaishou => "kuaishou",
             Platform::Bilibili => "bilibili",
+            Platform::Huya => "huya",
             #[cfg(feature = "e2e")]
             Platform::E2e => "e2e",
         }
@@ -56,6 +59,7 @@ impl Platform {
             Platform::Douyin => "抖音",
             Platform::Kuaishou => "快手直播",
             Platform::Bilibili => "哔哩哔哩",
+            Platform::Huya => "虎牙直播",
             #[cfg(feature = "e2e")]
             Platform::E2e => "测试直播间",
         }
@@ -351,6 +355,7 @@ pub fn adapters() -> Vec<Box<dyn PlatformAdapter>> {
         Box::new(douyin::DouyinAdapter::new()),
         Box::new(kuaishou::KuaishouAdapter::new()),
         Box::new(bilibili::BilibiliAdapter::new()),
+        Box::new(huya::HuyaAdapter::new()),
     ];
     #[cfg(feature = "e2e")]
     list.push(Box::new(e2e::E2eAdapter));

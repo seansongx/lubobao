@@ -1,0 +1,24 @@
+{
+ "status": 200,
+ "message": "",
+ "data": {
+  "liveStatus": "OFF",
+  "profileInfo": {
+   "uid": "100000003",
+   "nick": "离线主播",
+   "privateHost": "200000003",
+   "profileRoom": "10003"
+  },
+  "liveData": {
+   "uid": "100000003",
+   "nick": "离线主播",
+   "gameFullName": "王者荣耀",
+   "gameHostName": 2336,
+   "introduction": "上次的标题",
+   "profileRoom": "10003",
+   "bitRate": 2000,
+   "codecType": 0
+  },
+  "realLiveStatus": "OFF"
+ }
+}

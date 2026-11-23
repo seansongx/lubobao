@@ -1,0 +1,66 @@
+{
+ "status": 200,
+ "message": "",
+ "data": {
+  "liveStatus": "ON",
+  "profileInfo": {
+   "uid": 100000002,
+   "nick": "联盟主播",
+   "privateHost": "200000002",
+   "profileRoom": 10002
+  },
+  "liveData": {
+   "uid": 100000002,
+   "nick": "联盟主播",
+   "gameFullName": "英雄联盟",
+   "gameHostName": "lol",
+   "introduction": "联盟测试标题",
+   "profileRoom": 10002,
+   "bitRate": 20000,
+   "bitRateInfo": "[{\"sDisplayName\":\"蓝光20M\",\"iBitRate\":0,\"iCodecType\":0,\"iCompatibleFlag\":0,\"iHEVCBitRate\":-1},{\"sDisplayName\":\"蓝光8M\",\"iBitRate\":8000,\"iCodecType\":0,\"iCompatibleFlag\":0,\"iHEVCBitRate\":-1},{\"sDisplayName\":\"蓝光4M\",\"iBitRate\":4000,\"iCodecType\":0,\"iCompatibleFlag\":0,\"iHEVCBitRate\":4000},{\"sDisplayName\":\"超清\",\"iBitRate\":2000,\"iCodecType\":0,\"iCompatibleFlag\":0,\"iHEVCBitRate\":2000},{\"sDisplayName\":\"流畅\",\"iBitRate\":500,\"iCodecType\":0,\"iCompatibleFlag\":0,\"iHEVCBitRate\":500}]",
+   "codecType": 0,
+   "mStreamRatioWeb": "{\"TX\":0,\"HUYA\":-1,\"AL\":-1,\"HS\":100}"
+  },
+  "realLiveStatus": "ON",
+  "stream": {
+   "baseSteamInfoList": [
+    {
+     "sCdnType": "AL",
+     "sStreamName": "100000002-100000002-1000000000000000002-200000004-10057-A-0-1-imgplus",
+     "sFlvUrl": "http://al.flv.huya.com/src",
+     "sFlvUrlSuffix": "flv",
+     "sFlvAntiCode": "wsSecret=d209b443a5ed760ea5fc30e45b255e49&wsTime=6b061bbf&fm=RFdxOEJjSjNoNkRKdDZUWV8kMF8kMV8kMl8kMw%3D%3D&ctype=tars_mp&fs=bgct&t=102",
+     "sHlsUrl": "http://al.hls.huya.com/src",
+     "sHlsUrlSuffix": "m3u8",
+     "sHlsAntiCode": "wsSecret=d209b443a5ed760ea5fc30e45b255e49&wsTime=6b061bbf&fm=RFdxOEJjSjNoNkRKdDZUWV8kMF8kMV8kMl8kMw%3D%3D&ctype=tars_mp&fs=bgct&t=102",
+     "iLineIndex": 3,
+     "iWebPriorityRate": -1
+    },
+    {
+     "sCdnType": "TX",
+     "sStreamName": "100000002-100000002-1000000000000000002-200000004-10057-A-0-1-imgplus",
+     "sFlvUrl": "http://tx.flv.huya.com/src",
+     "sFlvUrlSuffix": "flv",
+     "sFlvAntiCode": "wsSecret=d209b443a5ed760ea5fc30e45b255e49&wsTime=6b061bbf&fm=RFdxOEJjSjNoNkRKdDZUWV8kMF8kMV8kMl8kMw%3D%3D&ctype=tars_mp&fs=bgct&t=102",
+     "sHlsUrl": "http://tx.hls.huya.com/src",
+     "sHlsUrlSuffix": "m3u8",
+     "sHlsAntiCode": "wsSecret=d209b443a5ed760ea5fc30e45b255e49&wsTime=6b061bbf&fm=RFdxOEJjSjNoNkRKdDZUWV8kMF8kMV8kMl8kMw%3D%3D&ctype=tars_mp&fs=bgct&t=102",
+     "iLineIndex": 5,
+     "iWebPriorityRate": 0
+    },
+    {
+     "sCdnType": "HS",
+     "sStreamName": "100000002-100000002-1000000000000000002-200000004-10057-A-0-1-imgplus",
+     "sFlvUrl": "http://hs.flv.huya.com/src",
+     "sFlvUrlSuffix": "flv",
+     "sFlvAntiCode": "wsSecret=d209b443a5ed760ea5fc30e45b255e49&wsTime=6b061bbf&fm=RFdxOEJjSjNoNkRKdDZUWV8kMF8kMV8kMl8kMw%3D%3D&ctype=tars_mp&fs=bgct&t=102",
+     "sHlsUrl": "http://hs.hls.huya.com/src",
+     "sHlsUrlSuffix": "m3u8",
+     "sHlsAntiCode": "wsSecret=d209b443a5ed760ea5fc30e45b255e49&wsTime=6b061bbf&fm=RFdxOEJjSjNoNkRKdDZUWV8kMF8kMV8kMl8kMw%3D%3D&ctype=tars_mp&fs=bgct&t=102",
+     "iLineIndex": 14,
+     "iWebPriorityRate": 100
+    }
+   ]
+  }
+ }
+}

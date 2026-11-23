@@ -26,6 +26,7 @@
 //   www.douyin.com/user/{sec_uid}      主页链接
 //   live.kuaishou.com/u/{id}           快手直播间
 //   live.bilibili.com/{房间号}          B站直播间
+//   www.huya.com/{房间号或字母标识}       虎牙直播间（字母标识演示为房间号 660000）
 //   路径含 login / timeout / busy / parse  分别返回 auth_required / network / rate_limited / parse
 //   其他域名                            unsupported_platform；无法解析的文本为 invalid_url
 //
@@ -168,6 +169,7 @@ const mockPlatforms: Record<Platform, { name: string; roomUrl: (roomId: string) 
   douyin: { name: "抖音", roomUrl: (roomId) => `https://live.douyin.com/${roomId}` },
   kuaishou: { name: "快手直播", roomUrl: (roomId) => `https://live.kuaishou.com/u/${roomId}` },
   bilibili: { name: "哔哩哔哩", roomUrl: (roomId) => `https://live.bilibili.com/${roomId}` },
+  huya: { name: "虎牙直播", roomUrl: (roomId) => `https://www.huya.com/${roomId}` },
 };
 
 function snapshot(id: TaskId, seed: MockSeed, createdAt: number): TaskSnapshot {
@@ -279,6 +281,7 @@ function seedTasks(now: number): TaskSnapshot[] {
     {
       anchorName: "老王说车",
       roomId: "992817",
+      platform: "huya",
       monitoring: "enabled",
       live: {
         state: "checkFailed",
@@ -336,6 +339,7 @@ function seedTasks(now: number): TaskSnapshot[] {
     {
       anchorName: "街头篮球",
       roomId: "110293",
+      platform: "huya",
       monitoring: "paused",
       live: { state: "unknown" },
       record: { state: "idle" },
@@ -663,7 +667,7 @@ function normalizeUrl(url: string): string {
 const DEMO_ROOM = "745964462470";
 const DEMO_ANCHOR = `MS4wLjABAAAA-mock-anchor-${DEMO_ROOM}`;
 
-/** 模拟 platforms::resolve：认抖音、快手和 B站，按链接内容返回各类错误。 */
+/** 模拟 platforms::resolve：认抖音、快手和B站、虎牙，按链接内容返回各类错误。 */
 function resolveMock(input: string, tasks: TaskSnapshot[]): ResolvedRoom | CommandError {
   const url = input.trim();
   if (!url) return { kind: "invalid_input", message: "请输入直播间链接" };
@@ -682,6 +686,8 @@ function resolveMock(input: string, tasks: TaskSnapshot[]): ResolvedRoom | Comma
       ? "kuaishou"
       : host === "live.bilibili.com"
         ? "bilibili"
+      : host === "huya.com" || host.endsWith(".huya.com")
+        ? "huya"
         : null;
   if (!platform) return { kind: "unsupported_platform", message: `暂不支持 ${host} 的直播间` };
   if (/login/i.test(path)) return { kind: "auth_required", message: "该直播间需要登录后观看，请填写 Cookie" };
@@ -692,6 +698,19 @@ function resolveMock(input: string, tasks: TaskSnapshot[]): ResolvedRoom | Comma
   const base = { url, platform, platformName: mockPlatforms[platform].name, isLive: false, title: null };
   const known = (roomId: string) => tasks.find((task) => task.platform === platform && task.roomId === roomId);
 
+  if (platform === "huya") {
+    const match = /^\/([\w-]+)\/?$/.exec(path);
+    if (!match) return { kind: "invalid_url", message: `不是可识别的虎牙直播链接: ${url}` };
+    const roomId = /^\d+$/.test(match[1]) ? match[1] : "660000";
+    const task = known(roomId);
+    return {
+      ...base,
+      roomId,
+      anchorId: task?.anchorId ?? `huya-${roomId}`,
+      anchorName: task?.anchorName ?? `虎牙主播 ${roomId}`,
+      liveUrl: mockPlatforms.huya.roomUrl(roomId),
+    };
+  }
   if (platform === "kuaishou") {
     const match = /^\/u\/([\w.-]+)\/?$/.exec(path);
     if (!match) return { kind: "invalid_url", message: `无法从链接中找到快手直播间：${url}` };
