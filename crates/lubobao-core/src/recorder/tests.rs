@@ -393,12 +393,14 @@ async fn manual_stop_leaves_playable_file() {
     wait_for_duration(&handle, 4.0).await;
     let stop_requested = Instant::now();
     let outcome = handle.stop_and_wait().await;
+    eprintln!("正常停止耗时 {:?}", stop_requested.elapsed());
 
     assert!(
         stop_requested.elapsed() < Duration::from_secs(5),
         "graceful stop was slow"
     );
     assert_eq!(outcome.reason, EndReason::UserStopped);
+    // 退出码 0 说明是读到 `q` 正常收尾，而不是被强制结束。
     assert_eq!(outcome.exit_code, Some(0));
     assert_eq!(outcome.files.len(), 1);
     assert!(outcome.bytes_written > 0);
@@ -427,6 +429,66 @@ async fn manual_stop_leaves_playable_file() {
     let json = serde_json::to_value(events.last().unwrap()).unwrap();
     assert_eq!(json["type"], "finished");
     assert_eq!(json["outcome"]["reason"], "userStopped");
+}
+
+/// 等推流卡住超过 [`STOP_IDLE_THRESHOLD`]：先录到 `secs` 秒，再等进度停住。
+async fn wait_for_stall(handle: &RecordingHandle, secs: f64) {
+    wait_for_duration(handle, secs).await;
+    let idle = STOP_IDLE_THRESHOLD + Duration::from_secs(2);
+    let duration = |handle: &RecordingHandle| {
+        handle
+            .snapshot()
+            .progress
+            .and_then(|progress| progress.duration_secs)
+    };
+    let mut last = duration(handle);
+    let mut since = Instant::now();
+    timeout(Duration::from_secs(30), async {
+        while since.elapsed() < idle {
+            sleep(Duration::from_millis(200)).await;
+            let current = duration(handle);
+            if current != last {
+                last = current;
+                since = Instant::now();
+            }
+        }
+    })
+    .await
+    .expect("stream did not stall");
+    assert!(!handle.is_finished());
+}
+
+#[tokio::test]
+async fn stop_during_stall_kills_ffmpeg_quickly() {
+    let Some(ffmpeg) = test_ffmpeg() else { return };
+    let temp = tempfile::tempdir().unwrap();
+    let sample = make_sample(&ffmpeg, temp.path());
+    let server = start_server(&sample, ServeMode::StallAfter(4)).await;
+    let (listener, events) = recording_listener();
+
+    // 默认选项：强制结束要等 15 秒，看门狗要 90 秒。
+    let handle = start(
+        request(&ffmpeg, &server.url, temp.path(), unsegmented()),
+        listener,
+    )
+    .await;
+    wait_for_stall(&handle, 3.0).await;
+    let stop_requested = Instant::now();
+    let outcome = handle.stop_and_wait().await;
+    let elapsed = stop_requested.elapsed();
+    eprintln!("断流时停止耗时 {elapsed:?}");
+
+    assert!(elapsed < Duration::from_secs(2), "took {elapsed:?}");
+    assert_eq!(outcome.reason, EndReason::UserStopped, "{outcome:?}");
+    assert_eq!(outcome.files.len(), 1);
+    assert_playable(&ffmpeg, &outcome.files[0]);
+    assert!(media_duration(&ffmpeg, &outcome.files[0]) >= 3.0);
+    assert!(events.lock().unwrap().iter().any(|event| matches!(
+        event,
+        RecorderEvent::Stopping {
+            cause: StopCause::User
+        }
+    )));
 }
 
 #[tokio::test]
@@ -715,6 +777,24 @@ async fn subprocess_helper() {
             assert!(first.is_finished() && second.is_finished());
             println!("STOP_ALL_OK");
         }
+        "stop_all_stalled" => {
+            let handle = start(
+                request(&ffmpeg, &url, &root, unsegmented()),
+                quiet_listener(),
+            )
+            .await;
+            wait_for_stall(&handle, 3.0).await;
+            let stop_requested = Instant::now();
+            let outcomes = stop_all().await;
+            let elapsed = stop_requested.elapsed();
+            eprintln!("退出时断流录制收尾耗时 {elapsed:?}");
+            assert!(elapsed < Duration::from_secs(2), "took {elapsed:?}");
+            assert_eq!(outcomes.len(), 1);
+            assert_eq!(outcomes[0].reason, EndReason::UserStopped, "{outcomes:?}");
+            assert_playable(&ffmpeg, &outcomes[0].files[0]);
+            assert_eq!(active_recordings(), 0);
+            println!("STOP_ALL_OK");
+        }
         other => panic!("unknown helper mode {other}"),
     }
 }
@@ -849,6 +929,29 @@ async fn stop_all_stops_every_recording() {
     assert!(
         output.status.success() && stdout.contains("STOP_ALL_OK"),
         "stdout: {stdout}\nstderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[tokio::test]
+async fn stop_all_finishes_stalled_recordings_quickly() {
+    let Some(ffmpeg) = test_ffmpeg() else { return };
+    let temp = tempfile::tempdir().unwrap();
+    let sample = make_sample(&ffmpeg, temp.path());
+    let server = start_server(&sample, ServeMode::StallAfter(4)).await;
+
+    let output = timeout(
+        Duration::from_secs(90),
+        helper_command("stop_all_stalled", &server.url, temp.path()).output(),
+    )
+    .await
+    .expect("helper timed out")
+    .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success() && stdout.contains("STOP_ALL_OK"),
+        "stdout: {stdout}
+stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 }
