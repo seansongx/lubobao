@@ -1,0 +1,947 @@
+<!doctype html>
+<html lang="zh-CN" data-platform="windows" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>录播宝 · 原生界面原型</title>
+<!--
+  原生界面原型：Windows 11 Fluent / macOS / Linux（Adwaita 风格）× 浅色 / 深色。
+  说明见 docs/design/native-ui.md。参数：?platform=windows|macos|linux&theme=light|dark&page=rooms|library|settings&dialog=add&ui=0
+  Mica 与毛玻璃无法在网页里真实绘制，这里用模糊渐变近似；窗口外框、标题栏和红绿灯为示意，真实应用由系统绘制。
+-->
+<style>
+/* ================= 平台与主题 token ================= */
+:root {
+  /* 共用：品牌与状态色（AGENTS.md） */
+  --primary: #0f766e; --primary-hover: #115e59; --primary-fg: #fff;
+  --primary-soft: rgb(15 118 110 / .10);
+  --status-recording: #dc2626; --status-waiting: #94a3b8; --status-checking: #2563eb;
+  --status-retrying: #b45309; --status-notify: var(--primary);
+  --status-recording-soft: rgb(220 38 38 / .07);
+  --task-row-height: 44px;
+  --ease: cubic-bezier(0, 0, 0, 1); --dur: 200ms;
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --primary: #2dd4bf; --primary-hover: #5eead4; --primary-fg: #042f2e;
+  --primary-soft: rgb(45 212 191 / .13);
+  --status-recording: #f87171; --status-waiting: #64748b; --status-checking: #60a5fa;
+  --status-retrying: #fbbf24; --status-recording-soft: rgb(248 113 113 / .10);
+}
+
+/* ---------- Windows 11 Fluent ---------- */
+[data-platform="windows"] {
+  --font: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI", sans-serif;
+  --fs: 14px; --fs-table: 13px; --fs-small: 12px; --fs-title: 20px; --fw-title: 600;
+  --ctl-h: 32px; --nav-h: 36px; --pad: 24px; --sidebar-w: 216px;
+  --r-ctl: 4px; --r-card: 8px; --r-dialog: 8px; --r-menu: 8px; --r-sel: 4px;
+  --menu-item-h: 32px;
+  --wallpaper: radial-gradient(60% 80% at 15% 10%, #c7d6e8 0, transparent 70%), radial-gradient(70% 70% at 90% 80%, #d9e4dc 0, transparent 70%), #e6e9ee;
+  --window-tint: rgb(243 243 243 / .80);
+  --sidebar-bg: transparent;
+  --content-bg: rgb(255 255 255 / .50); --content-border: rgb(0 0 0 / .06);
+  --fg: rgb(0 0 0 / .896); --fg2: rgb(0 0 0 / .606); --fg3: rgb(0 0 0 / .45);
+  --divider: rgb(0 0 0 / .08);
+  --hover: rgb(0 0 0 / .037); --pressed: rgb(0 0 0 / .024);
+  --card-bg: rgb(255 255 255 / .70); --card-border: rgb(0 0 0 / .06);
+  --ctl-bg: rgb(255 255 255 / .70); --ctl-border: rgb(0 0 0 / .06); --ctl-border-bottom: rgb(0 0 0 / .16);
+  --ctl-hover: rgb(249 249 249 / .5);
+  --input-bg: rgb(255 255 255 / .70); --input-border-bottom: rgb(0 0 0 / .45);
+  --popover-bg: #f9f9f9; --popover-border: rgb(0 0 0 / .08);
+  --shadow-popover: 0 8px 16px rgb(0 0 0 / .14);
+  --shadow-dialog: 0 32px 64px rgb(0 0 0 / .19), 0 2px 21px rgb(0 0 0 / .15);
+  --scrim: rgb(0 0 0 / .30);
+  --sel-bg: var(--primary-soft);
+  --statusbar-bg: transparent;
+  --dialog-footer-bg: #f3f3f3;
+  --ease: cubic-bezier(0, 0, 0, 1); --dur: 167ms;
+}
+[data-platform="windows"][data-theme="dark"] {
+  --wallpaper: radial-gradient(60% 80% at 15% 10%, #26324a 0, transparent 70%), radial-gradient(70% 70% at 90% 80%, #1f3330 0, transparent 70%), #1b1d22;
+  --window-tint: rgb(32 32 32 / .82);
+  --content-bg: rgb(58 58 58 / .30); --content-border: rgb(255 255 255 / .06);
+  --fg: #fff; --fg2: rgb(255 255 255 / .786); --fg3: rgb(255 255 255 / .55);
+  --divider: rgb(255 255 255 / .08);
+  --hover: rgb(255 255 255 / .06); --pressed: rgb(255 255 255 / .04);
+  --card-bg: rgb(255 255 255 / .05); --card-border: rgb(0 0 0 / .10);
+  --ctl-bg: rgb(255 255 255 / .06); --ctl-border: rgb(255 255 255 / .07); --ctl-border-bottom: rgb(255 255 255 / .03);
+  --ctl-hover: rgb(255 255 255 / .084);
+  --input-bg: rgb(255 255 255 / .06); --input-border-bottom: rgb(255 255 255 / .54);
+  --popover-bg: #2c2c2c; --popover-border: rgb(0 0 0 / .2);
+  --shadow-popover: 0 8px 16px rgb(0 0 0 / .26);
+  --scrim: rgb(0 0 0 / .30);
+  --dialog-footer-bg: #202020;
+}
+
+/* ---------- macOS ---------- */
+[data-platform="macos"] {
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue", "Microsoft YaHei UI", sans-serif;
+  --fs: 13px; --fs-table: 13px; --fs-small: 11px; --fs-title: 15px; --fw-title: 700;
+  --ctl-h: 24px; --nav-h: 28px; --pad: 20px; --sidebar-w: 208px;
+  --r-ctl: 6px; --r-card: 10px; --r-dialog: 12px; --r-menu: 7px; --r-sel: 6px;
+  --menu-item-h: 22px;
+  --wallpaper: radial-gradient(60% 80% at 10% 20%, #b9cfe6 0, transparent 70%), radial-gradient(60% 70% at 30% 90%, #d6c9e2 0, transparent 70%), #dfe3ea;
+  --window-tint: transparent;
+  --sidebar-bg: rgb(232 232 237 / .62);
+  --content-bg: #ffffff; --content-border: rgb(0 0 0 / .10);
+  --fg: rgb(0 0 0 / .85); --fg2: rgb(0 0 0 / .50); --fg3: rgb(0 0 0 / .26);
+  --divider: rgb(0 0 0 / .09);
+  --hover: rgb(0 0 0 / .05); --pressed: rgb(0 0 0 / .08);
+  --card-bg: rgb(0 0 0 / .025); --card-border: rgb(0 0 0 / .07);
+  --ctl-bg: #fff; --ctl-border: rgb(0 0 0 / .12); --ctl-border-bottom: rgb(0 0 0 / .20);
+  --ctl-hover: #fff;
+  --input-bg: #fff; --input-border-bottom: rgb(0 0 0 / .14);
+  --popover-bg: rgb(246 246 246 / .92); --popover-border: rgb(0 0 0 / .14);
+  --shadow-popover: 0 10px 30px rgb(0 0 0 / .18);
+  --shadow-dialog: 0 0 0 .5px rgb(0 0 0 / .2), 0 22px 60px rgb(0 0 0 / .30);
+  --scrim: rgb(0 0 0 / .10);
+  --sel-bg: var(--primary-soft);
+  --statusbar-bg: #f6f6f6;
+  --dialog-footer-bg: transparent;
+  --ease: ease-out; --dur: 200ms;
+}
+[data-platform="macos"][data-theme="dark"] {
+  --wallpaper: radial-gradient(60% 80% at 10% 20%, #23344d 0, transparent 70%), radial-gradient(60% 70% at 30% 90%, #3a2c48 0, transparent 70%), #17191d;
+  --sidebar-bg: rgb(44 44 48 / .58);
+  --content-bg: #1e1e1e; --content-border: rgb(0 0 0 / .6);
+  --fg: rgb(255 255 255 / .85); --fg2: rgb(255 255 255 / .55); --fg3: rgb(255 255 255 / .25);
+  --divider: rgb(255 255 255 / .10);
+  --hover: rgb(255 255 255 / .06); --pressed: rgb(255 255 255 / .1);
+  --card-bg: rgb(255 255 255 / .04); --card-border: rgb(255 255 255 / .07);
+  --ctl-bg: rgb(255 255 255 / .14); --ctl-border: rgb(255 255 255 / .06); --ctl-border-bottom: rgb(255 255 255 / .02);
+  --ctl-hover: rgb(255 255 255 / .18);
+  --input-bg: rgb(255 255 255 / .06); --input-border-bottom: rgb(255 255 255 / .12);
+  --popover-bg: rgb(40 40 42 / .94); --popover-border: rgb(255 255 255 / .12);
+  --shadow-popover: 0 10px 30px rgb(0 0 0 / .45);
+  --shadow-dialog: 0 0 0 .5px rgb(255 255 255 / .12), 0 22px 60px rgb(0 0 0 / .55);
+  --statusbar-bg: #252525;
+  --scrim: rgb(0 0 0 / .2);
+}
+
+/* ---------- Linux（Adwaita 风格） ---------- */
+[data-platform="linux"] {
+  --font: "Adwaita Sans", Cantarell, "Noto Sans CJK SC", "Ubuntu", "Microsoft YaHei UI", system-ui, sans-serif;
+  --fs: 14px; --fs-table: 13px; --fs-small: 12px; --fs-title: 18px; --fw-title: 700;
+  --ctl-h: 34px; --nav-h: 38px; --pad: 18px; --sidebar-w: 216px;
+  --r-ctl: 6px; --r-card: 12px; --r-dialog: 14px; --r-menu: 12px; --r-sel: 6px;
+  --menu-item-h: 32px;
+  --wallpaper: #fafafb;
+  --window-tint: #fafafb;
+  --sidebar-bg: #ebebed;
+  --content-bg: #fafafb; --content-border: rgb(0 0 6 / .07);
+  --fg: rgb(0 0 6 / .8); --fg2: rgb(0 0 6 / .55); --fg3: rgb(0 0 6 / .35);
+  --divider: rgb(0 0 6 / .07);
+  --hover: rgb(0 0 6 / .05); --pressed: rgb(0 0 6 / .10);
+  --card-bg: #ffffff; --card-border: rgb(0 0 6 / .07);
+  --ctl-bg: rgb(0 0 6 / .07); --ctl-border: transparent; --ctl-border-bottom: transparent;
+  --ctl-hover: rgb(0 0 6 / .11);
+  --input-bg: rgb(0 0 6 / .05); --input-border-bottom: transparent;
+  --popover-bg: #ffffff; --popover-border: rgb(0 0 6 / .1);
+  --shadow-popover: 0 1px 5px 1px rgb(0 0 0 / .09), 0 2px 14px 3px rgb(0 0 0 / .05);
+  --shadow-dialog: 0 1px 5px 1px rgb(0 0 0 / .09), 0 4px 30px 6px rgb(0 0 0 / .12);
+  --scrim: rgb(0 0 0 / .2);
+  --sel-bg: var(--primary-soft);
+  --statusbar-bg: #ebebed;
+  --dialog-footer-bg: transparent;
+  --ease: ease-out; --dur: 200ms;
+}
+[data-platform="linux"][data-theme="dark"] {
+  --wallpaper: #222226; --window-tint: #222226;
+  --sidebar-bg: #2e2e32;
+  --content-bg: #222226; --content-border: rgb(0 0 0 / .36);
+  --fg: #fff; --fg2: rgb(255 255 255 / .6); --fg3: rgb(255 255 255 / .35);
+  --divider: rgb(255 255 255 / .07);
+  --hover: rgb(255 255 255 / .06); --pressed: rgb(255 255 255 / .1);
+  --card-bg: rgb(255 255 255 / .08); --card-border: rgb(0 0 6 / .36);
+  --ctl-bg: rgb(255 255 255 / .1); --ctl-hover: rgb(255 255 255 / .15);
+  --input-bg: rgb(255 255 255 / .08);
+  --popover-bg: #36363a; --popover-border: rgb(0 0 0 / .3);
+  --statusbar-bg: #2e2e32;
+}
+
+/* ================= 基础与去网页感 ================= */
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  font: var(--fs)/1.43 var(--font);
+  color: var(--fg);
+  background: var(--wallpaper);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+  user-select: none; -webkit-user-select: none;   /* 界面框架不可选中 */
+  cursor: default;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+}
+.selectable, input, textarea { user-select: text; -webkit-user-select: text; cursor: text; }
+.selectable { cursor: auto; }
+img, a { -webkit-user-drag: none; }
+button, input, select { font: inherit; color: inherit; }
+button { cursor: default; }
+a.link { color: var(--primary); text-decoration: none; cursor: pointer; }
+a.link:hover { text-decoration: underline; }
+:focus { outline: none; }
+.num { font-variant-numeric: tabular-nums; }
+.fg2 { color: var(--fg2); }
+svg.i { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+[data-platform="macos"] svg.i { width: 15px; height: 15px; stroke-width: 1.7; }
+
+/* 焦点环：只在键盘操作时显示 */
+[data-platform="windows"] :focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+[data-platform="macos"] :focus-visible { outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 50%, transparent) !important; }
+[data-platform="linux"] :focus-visible { outline: 2px solid color-mix(in srgb, var(--primary) 55%, transparent); outline-offset: -2px; }
+
+/* 滚动条 */
+[data-platform="windows"] ::-webkit-scrollbar { width: 12px; height: 12px; }
+[data-platform="windows"] ::-webkit-scrollbar-track { background: transparent; }
+[data-platform="windows"] ::-webkit-scrollbar-thumb { background: var(--fg3); border-radius: 6px; border: 5px solid transparent; background-clip: content-box; }
+[data-platform="windows"] .scroll:hover::-webkit-scrollbar-thumb { border-width: 3px; }
+[data-platform="linux"] ::-webkit-scrollbar { width: 12px; height: 12px; }
+[data-platform="linux"] ::-webkit-scrollbar-thumb { background: var(--fg3); border-radius: 6px; border: 4px solid transparent; background-clip: content-box; }
+[data-platform="linux"] .scroll:hover::-webkit-scrollbar-thumb { border-width: 2px; }
+[data-platform="macos"] ::-webkit-scrollbar { width: 10px; }
+[data-platform="macos"] ::-webkit-scrollbar-thumb { background: transparent; border-radius: 5px; border: 2px solid transparent; background-clip: content-box; }
+[data-platform="macos"] .scroll:hover::-webkit-scrollbar-thumb { background-color: rgb(127 127 127 / .5); }
+
+@media (prefers-reduced-motion: reduce) { * { animation-duration: 0s !important; transition-duration: 0s !important; } }
+
+/* ================= 窗口 ================= */
+.window { position: fixed; inset: 0; display: flex; flex-direction: column; background: var(--window-tint); overflow: hidden; }
+.titlebar { display: none; }
+[data-platform="windows"] .titlebar { display: flex; height: 32px; align-items: center; padding-left: 12px; gap: 10px; font-size: 12px; }
+[data-platform="windows"] .titlebar .appicon { width: 16px; height: 16px; border-radius: 4px; background: var(--primary); display: grid; place-items: center; }
+[data-platform="windows"] .titlebar .appicon::after { content: ""; width: 6px; height: 6px; border-radius: 50%; border: 1.5px solid var(--primary-fg); }
+[data-platform="windows"] .titlebar .caps { margin-left: auto; display: flex; height: 100%; }
+[data-platform="windows"] .titlebar .caps span { width: 46px; display: grid; place-items: center; color: var(--fg); }
+[data-platform="windows"] .titlebar .caps span:hover { background: var(--hover); }
+[data-platform="windows"] .titlebar .caps span.close:hover { background: #c42b1c; color: #fff; }
+[data-platform="windows"] .titlebar .caps svg { width: 10px; height: 10px; stroke-width: 1; }
+[data-platform="linux"] .titlebar { display: flex; height: 46px; align-items: center; justify-content: center; position: relative; background: var(--sidebar-bg); border-bottom: 1px solid var(--divider); font-weight: 700; font-size: 14px; }
+[data-platform="linux"][data-theme="light"] .titlebar { background: #ffffff; }
+[data-platform="linux"][data-theme="dark"] .titlebar { background: #303030; }
+[data-platform="linux"] .titlebar .caps { position: absolute; right: 10px; display: flex; gap: 12px; }
+[data-platform="linux"] .titlebar .caps span { width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; background: var(--ctl-bg); }
+[data-platform="linux"] .titlebar .caps span:not(.close) { display: none; }
+[data-platform="linux"] .titlebar .caps svg { width: 10px; height: 10px; stroke-width: 1.8; }
+[data-platform="linux"] .titlebar .appicon, [data-platform="linux"] .titlebar .apptitle-left { display: none; }
+[data-platform="linux"] .titlebar .apptitle-center { display: inline !important; }
+
+.shell { flex: 1; display: grid; grid-template-columns: var(--sidebar-w) 1fr; min-height: 0; }
+.sidebar { background: var(--sidebar-bg); display: flex; flex-direction: column; padding: 4px 8px 8px; gap: 2px; min-height: 0; }
+[data-platform="macos"] .sidebar { padding: 52px 10px 10px; backdrop-filter: blur(30px) saturate(1.6); -webkit-backdrop-filter: blur(30px) saturate(1.6); border-right: 1px solid var(--divider); position: relative; }
+[data-platform="linux"] .sidebar { padding: 8px; border-right: 1px solid var(--divider); }
+.traffic { display: none; }
+[data-platform="macos"] .traffic { display: flex; gap: 8px; position: absolute; left: 18px; top: 18px; }
+.traffic i { width: 12px; height: 12px; border-radius: 50%; display: block; box-shadow: inset 0 0 0 .5px rgb(0 0 0 / .15); }
+.traffic i:nth-child(1) { background: #ff5f57; } .traffic i:nth-child(2) { background: #febc2e; } .traffic i:nth-child(3) { background: #28c840; }
+
+.nav { position: relative; display: flex; align-items: center; gap: 12px; height: var(--nav-h); padding: 0 12px; border: 0; border-radius: var(--r-ctl); background: transparent; text-align: left; color: var(--fg); }
+.nav:hover { background: var(--hover); }
+.nav.on { background: var(--hover); }
+[data-platform="windows"] .nav.on { background: var(--card-bg); box-shadow: none; }
+[data-platform="windows"][data-theme="light"] .nav.on { background: rgb(0 0 0 / .045); }
+[data-platform="windows"] .nav.on::before { content: ""; position: absolute; left: 0; top: 50%; width: 3px; height: 16px; margin-top: -8px; border-radius: 2px; background: var(--primary); }
+[data-platform="macos"] .nav { gap: 8px; padding: 0 8px; font-size: 13px; }
+[data-platform="macos"] .nav .ic { color: var(--primary); }
+[data-platform="macos"] .nav.on { background: rgb(0 0 0 / .08); }
+[data-platform="macos"][data-theme="dark"] .nav.on { background: rgb(255 255 255 / .1); }
+[data-platform="macos"] .nav-head { font-size: 11px; font-weight: 600; color: var(--fg3); padding: 0 8px 4px; }
+[data-platform="linux"] .nav.on { background: rgb(0 0 6 / .1); font-weight: 600; }
+[data-platform="linux"][data-theme="dark"] .nav.on { background: rgb(255 255 255 / .1); }
+.nav-head { display: none; }
+[data-platform="macos"] .nav-head { display: block; }
+.nav .count { margin-left: auto; font-size: var(--fs-small); color: var(--fg2); }
+.nav .count.rec { color: var(--status-recording); display: inline-flex; align-items: center; gap: 5px; }
+.nav .count.rec::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+.main { display: grid; grid-template-rows: 1fr auto; min-width: 0; min-height: 0; }
+.layer { background: var(--content-bg); min-width: 0; min-height: 0; display: flex; }
+[data-platform="windows"] .layer { border-top: 1px solid var(--content-border); border-left: 1px solid var(--content-border); border-top-left-radius: 8px; }
+.page { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+
+/* 页头 / 工具栏 */
+.head { display: flex; align-items: center; gap: 8px; padding: 18px var(--pad) 0; }
+.head h1 { margin: 0; font-size: var(--fs-title); font-weight: var(--fw-title); }
+.head .sub { color: var(--fg2); font-size: var(--fs-small); margin-left: 6px; }
+.head .spacer { flex: 1; }
+[data-platform="windows"] .head { padding-top: 20px; }
+[data-platform="macos"] .head { height: 52px; padding: 0 14px 0 var(--pad); border-bottom: 1px solid var(--divider); }
+[data-platform="macos"] .head .sub { font-size: 11px; display: block; margin: 0; }
+[data-platform="linux"] .head { padding-top: 16px; }
+
+.cmdbar { display: flex; align-items: center; gap: 8px; padding: 14px var(--pad) 10px; flex-wrap: wrap; }
+[data-platform="macos"] .cmdbar { padding: 10px var(--pad) 8px; }
+
+/* 按钮 */
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: var(--ctl-h); padding: 0 12px; border-radius: var(--r-ctl); white-space: nowrap; border: 1px solid var(--ctl-border); border-bottom-color: var(--ctl-border-bottom); background: var(--ctl-bg); color: var(--fg); transition: background var(--dur) var(--ease); }
+.btn:hover { background: var(--ctl-hover); }
+.btn:active { background: var(--pressed); color: var(--fg2); }
+.btn.primary { background: var(--primary); border-color: rgb(255 255 255 / .08); border-bottom-color: rgb(0 0 0 / .4); color: var(--primary-fg); }
+[data-theme="dark"] .btn.primary { border-color: transparent; border-bottom-color: rgb(0 0 0 / .14); }
+.btn.primary:hover { background: color-mix(in srgb, var(--primary) 90%, var(--content-bg)); }
+.btn.subtle { background: transparent; border-color: transparent; }
+.btn.subtle:hover { background: var(--hover); }
+.btn.subtle:disabled { color: var(--fg3); background: transparent; }
+.btn .danger { color: var(--status-recording); }
+.btn.icon { width: var(--ctl-h); padding: 0; }
+[data-platform="macos"] .btn { padding: 0 10px; box-shadow: 0 .5px 1.5px rgb(0 0 0 / .12); border: .5px solid var(--ctl-border); }
+[data-platform="macos"] .btn.primary { box-shadow: inset 0 .5px 0 rgb(255 255 255 / .25), 0 .5px 1.5px rgb(0 0 0 / .2); background: linear-gradient(var(--primary-hover), var(--primary)); border-color: transparent; }
+[data-platform="macos"][data-theme="dark"] .btn.primary { background: var(--primary); }
+[data-platform="macos"] .btn.subtle, [data-platform="macos"] .btn.tb { box-shadow: none; border-color: transparent; background: transparent; height: 28px; }
+[data-platform="macos"] .btn.tb { color: var(--fg2); padding: 0 6px; }
+[data-platform="macos"] .btn.tb svg.i { width: 17px; height: 17px; }
+[data-platform="macos"] .btn.tb:hover, [data-platform="macos"] .btn.subtle:hover { background: var(--hover); }
+[data-platform="linux"] .btn { font-weight: 600; padding: 0 14px; }
+[data-platform="linux"] .btn.subtle { font-weight: 400; }
+.btn.tb { display: none; }
+[data-platform="macos"] .btn.tb { display: inline-flex; }
+[data-platform="macos"] .head .btn.add-primary { display: none; }
+
+/* 输入 */
+.field { display: inline-flex; align-items: center; gap: 6px; height: var(--ctl-h); padding: 0 10px; border-radius: var(--r-ctl); background: var(--input-bg); border: 1px solid var(--ctl-border); border-bottom-color: var(--input-border-bottom); color: var(--fg2); min-width: 0; }
+.field input { border: 0; outline: 0; background: transparent; min-width: 0; flex: 1; color: var(--fg); padding: 0; }
+.field input:focus-visible { outline: none; box-shadow: none !important; }
+.field input::placeholder { color: var(--fg2); }
+.field:focus-within { border-bottom: 2px solid var(--primary); }
+[data-platform="macos"] .field { border: .5px solid var(--ctl-border); box-shadow: inset 0 .5px 1px rgb(0 0 0 / .06); }
+[data-platform="macos"] .field:focus-within { border-bottom: .5px solid var(--ctl-border); box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 45%, transparent); }
+[data-platform="macos"] .field.search { border-radius: 7px; height: 28px; background: rgb(0 0 0 / .05); border-color: transparent; box-shadow: none; }
+[data-platform="macos"][data-theme="dark"] .field.search { background: rgb(255 255 255 / .08); }
+[data-platform="linux"] .field { border: 0; }
+[data-platform="linux"] .field:focus-within { box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 55%, transparent); border: 0; }
+.search { width: 220px; }
+.select { justify-content: space-between; color: var(--fg); min-width: 96px; }
+.select svg { color: var(--fg2); width: 12px; height: 12px; }
+
+/* 分段筛选 */
+.seg { display: inline-flex; gap: 2px; padding: 0; }
+.seg button { display: inline-flex; align-items: center; gap: 6px; height: calc(var(--ctl-h) - 2px); padding: 0 10px; border: 0; border-radius: var(--r-ctl); background: transparent; color: var(--fg2); white-space: nowrap; position: relative; }
+.seg button b { font-weight: 600; color: var(--fg); font-variant-numeric: tabular-nums; }
+.seg button:hover { background: var(--hover); }
+.seg button.on { color: var(--fg); background: var(--hover); }
+[data-platform="windows"] .seg button.on { background: transparent; }
+[data-platform="windows"] .seg button.on::after { content: ""; position: absolute; left: 50%; bottom: 0; width: 16px; margin-left: -8px; height: 3px; border-radius: 2px; background: var(--primary); }
+[data-platform="macos"] .seg { background: rgb(0 0 0 / .06); border-radius: 7px; padding: 2px; }
+[data-platform="macos"][data-theme="dark"] .seg { background: rgb(255 255 255 / .07); }
+[data-platform="macos"] .seg button { height: 20px; padding: 0 9px; border-radius: 5px; font-size: 12px; }
+[data-platform="macos"] .seg button.on { background: var(--ctl-bg); box-shadow: 0 .5px 2px rgb(0 0 0 / .18); }
+[data-platform="macos"][data-theme="dark"] .seg button.on { background: rgb(255 255 255 / .2); }
+[data-platform="linux"] .seg { background: var(--ctl-bg); border-radius: var(--r-ctl); padding: 2px; }
+[data-platform="linux"] .seg button { height: 30px; }
+[data-platform="linux"] .seg button.on { background: var(--card-bg); box-shadow: 0 1px 2px rgb(0 0 0 / .12); }
+.seg .sdot { width: 7px; height: 7px; border-radius: 50%; }
+.cmdbar .count-label { margin-left: auto; color: var(--fg2); font-size: var(--fs-small); }
+
+/* ================= 任务表 ================= */
+.rooms { flex: 1; display: flex; min-height: 0; min-width: 0; }
+.rooms-main { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.tablewrap { flex: 1; overflow: auto; min-height: 0; padding: 0 calc(var(--pad) - 12px) 8px; }
+[data-platform="linux"] .tablewrap { padding: 0 var(--pad) 12px; }
+[data-platform="linux"] .tablebox { background: var(--card-bg); border-radius: var(--r-card); box-shadow: 0 0 0 1px var(--card-border), 0 1px 3px rgb(0 0 0 / .05); overflow: hidden; }
+table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: var(--fs-table); }
+th { position: sticky; top: 0; z-index: 1; text-align: left; font-weight: 400; color: var(--fg2); font-size: var(--fs-small); height: 32px; padding: 0 10px; white-space: nowrap; border-bottom: 1px solid var(--divider); background: var(--th-bg, transparent); }
+[data-platform="windows"] th { --th-bg: color-mix(in srgb, var(--window-tint) 100%, transparent); backdrop-filter: blur(20px); }
+[data-platform="macos"] th { --th-bg: var(--content-bg); font-weight: 500; height: 28px; font-size: 12px; }
+[data-platform="linux"] th { --th-bg: var(--card-bg); font-weight: 600; }
+th .sort { opacity: .6; margin-left: 2px; width: 11px; height: 11px; vertical-align: -1px; }
+td { height: var(--task-row-height); padding: 0 10px; white-space: nowrap; }
+tbody td:first-child { border-radius: var(--r-sel) 0 0 var(--r-sel); }
+tbody td:last-child { border-radius: 0 var(--r-sel) var(--r-sel) 0; }
+[data-platform="linux"] tbody td { border-bottom: 1px solid var(--divider); border-radius: 0 !important; }
+[data-platform="linux"] tbody tr:last-child td { border-bottom: 0; }
+[data-platform="windows"] tbody tr + tr td { box-shadow: inset 0 1px 0 var(--divider); }
+[data-platform="windows"] tbody tr:hover td, [data-platform="windows"] tbody tr.sel td, [data-platform="windows"] tbody tr.sel + tr td, [data-platform="windows"] tbody tr:hover + tr td { box-shadow: none; }
+tbody tr:hover td { background: var(--hover); }
+tbody tr.err td { background: var(--status-recording-soft); }
+tbody tr.sel td { background: var(--sel-bg); }
+tbody tr.sel td:first-child { position: relative; }
+[data-platform="windows"] tbody tr.sel td:first-child::before { content: ""; position: absolute; left: 0; top: 50%; width: 3px; height: 16px; margin-top: -8px; border-radius: 2px; background: var(--primary); }
+tbody tr.paused td:not(:first-child) { opacity: .5; }
+.cb { appearance: none; width: 16px; height: 16px; margin: 0; border-radius: 4px; border: 1px solid var(--fg3); background: var(--input-bg); display: grid; place-items: center; vertical-align: middle; }
+.cb:checked { background: var(--primary); border-color: var(--primary); }
+.cb:checked::after { content: ""; width: 8px; height: 4px; border: 1.6px solid var(--primary-fg); border-top: 0; border-right: 0; transform: rotate(-45deg) translate(1px, -1px); }
+[data-platform="macos"] .cb { width: 14px; height: 14px; border-radius: 3.5px; border: .5px solid rgb(0 0 0 / .25); box-shadow: 0 .5px 1px rgb(0 0 0 / .1); }
+[data-platform="linux"] .cb { border: 2px solid var(--fg3); background: transparent; border-radius: 5px; }
+.who { display: flex; align-items: center; gap: 10px; }
+.avatar { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 600; flex: none; color: var(--fg); background: var(--hover); box-shadow: inset 0 0 0 1px var(--divider); }
+.who .name { line-height: 1.25; }
+.who .meta { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--fg2); line-height: 1.3; }
+.tag { font-size: 10.5px; padding: 0 4px; border-radius: 3px; box-shadow: inset 0 0 0 1px var(--divider); color: var(--fg2); }
+.col-opt { }
+@media (max-width: 1200px) { .col-opt { display: none; } .search { width: 170px; } }
+
+/* 状态 */
+.st { display: inline-flex; align-items: center; gap: 7px; }
+.st .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+.st.recording { color: var(--status-recording); font-weight: 600; }
+.st.recording .dot { background: var(--status-recording); animation: pulse 1.6s ease-in-out infinite; }
+.st.waiting { color: var(--fg2); }
+.st.waiting .dot { border: 2px solid var(--status-waiting); }
+.st.checking { color: var(--status-checking); }
+.st.checking .dot { border: 2px solid var(--status-checking); border-right-color: transparent; animation: spin .9s linear infinite; }
+.st.retrying { color: var(--status-retrying); }
+.st.retrying .dot { background: var(--status-retrying); }
+.st.error { color: var(--status-recording); font-weight: 600; }
+.st.notify { color: var(--status-notify); }
+.st.paused { color: var(--fg2); }
+.st.paused .dot { background: var(--status-waiting); border-radius: 2px; width: 8px; height: 8px; }
+.st svg.i { width: 14px; height: 14px; }
+@keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--status-recording) 55%, transparent); } 50% { box-shadow: 0 0 0 5px transparent; } }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ================= 详情面板 ================= */
+.inspector { width: 320px; flex: none; display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--divider); }
+[data-platform="linux"] .inspector { background: var(--sidebar-bg); }
+[data-platform="linux"][data-theme="light"] .inspector { background: #f2f2f4; }
+.insp-head { display: flex; align-items: center; gap: 10px; padding: 16px 12px 12px 16px; }
+[data-platform="macos"] .insp-head { padding-top: 14px; }
+.insp-head .avatar { width: 36px; height: 36px; font-size: 14px; }
+.insp-head .name { font-weight: 600; font-size: calc(var(--fs) + 1px); }
+.insp-head .spacer { flex: 1; }
+.insp-body { flex: 1; overflow: auto; padding: 0 16px 12px; display: flex; flex-direction: column; gap: 16px; font-size: var(--fs-table); }
+.sec-title { font-size: var(--fs-small); font-weight: 600; color: var(--fg2); margin: 0 0 6px; }
+[data-platform="windows"] .sec-title { font-size: 13px; color: var(--fg); }
+.tri { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.tri div { border-radius: var(--r-ctl); padding: 7px 9px; background: var(--card-bg); box-shadow: inset 0 0 0 1px var(--card-border); }
+[data-platform="linux"] .tri div { background: var(--card-bg); border-radius: 8px; }
+.tri small { display: block; color: var(--fg2); font-size: 11px; }
+.kv { display: grid; grid-template-columns: 64px 1fr; row-gap: 5px; margin: 0; }
+.kv dt { color: var(--fg2); }
+.kv dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.timeline { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.timeline li { display: grid; grid-template-columns: 40px 10px 1fr; gap: 6px; align-items: center; }
+.timeline time { color: var(--fg2); font-size: 11.5px; }
+.timeline .td { width: 7px; height: 7px; border-radius: 50%; background: var(--status-waiting); }
+.insp-foot { padding: 12px 16px; border-top: 1px solid var(--divider); display: flex; gap: 6px; align-items: center; }
+.insp-foot .btn:first-child { flex: 1; }
+
+/* ================= 状态栏 ================= */
+.statusbar { display: flex; align-items: center; gap: 18px; height: 28px; padding: 0 14px; font-size: var(--fs-small); color: var(--fg2); background: var(--statusbar-bg); }
+[data-platform="macos"] .statusbar { height: 24px; border-top: 1px solid var(--divider); font-size: 11px; }
+[data-platform="linux"] .statusbar { border-top: 1px solid var(--divider); }
+.statusbar span { display: inline-flex; align-items: center; gap: 6px; }
+.statusbar svg.i { width: 13px; height: 13px; }
+.statusbar .right { margin-left: auto; }
+.statusbar .rdot { width: 6px; height: 6px; border-radius: 50%; background: var(--status-recording); }
+
+/* ================= 录像库 ================= */
+.crumbs { display: flex; align-items: center; gap: 2px; padding: 12px var(--pad) 8px; color: var(--fg2); flex-wrap: wrap; }
+.crumbs .btn { height: 28px; padding: 0 8px; }
+.crumbs .cur { color: var(--fg); }
+.crumbs svg.chev { width: 12px; height: 12px; }
+.lib td { height: 36px; }
+.lib tr.group td { color: var(--fg2); font-size: var(--fs-small); height: 30px; }
+.lib .fname { display: flex; align-items: center; gap: 8px; }
+.lib .fname svg { color: var(--fg2); }
+.lib tr.child .fname { padding-left: 22px; }
+.lib .seg-badge { font-size: 11px; color: var(--fg2); box-shadow: inset 0 0 0 1px var(--divider); border-radius: 3px; padding: 0 5px; }
+.lib td.r, .lib th.r { text-align: right; }
+
+/* ================= 设置 ================= */
+.settings { flex: 1; display: flex; min-height: 0; }
+.set-nav { width: 168px; flex: none; padding: 12px 8px 12px var(--pad); display: flex; flex-direction: column; gap: 2px; }
+[data-platform="macos"] .set-nav { padding-left: 12px; }
+.set-nav .nav { height: calc(var(--nav-h) - 4px); }
+.set-body { flex: 1; overflow: auto; padding: 12px var(--pad) 24px 8px; min-width: 0; }
+.set-group { max-width: 760px; }
+.set-group h2 { font-size: calc(var(--fs) + 0px); font-weight: 600; margin: 4px 0 8px; display: flex; align-items: center; }
+.set-group h2 .btn { margin-left: auto; font-weight: 400; }
+.rows { display: flex; flex-direction: column; }
+.row { display: flex; align-items: center; gap: 16px; min-height: 64px; padding: 12px 16px; }
+.row .txt { flex: 1; min-width: 0; }
+.row .txt small { display: block; color: var(--fg2); font-size: var(--fs-small); }
+.row .path { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+.row.stack { flex-direction: column; align-items: stretch; gap: 0; }
+[data-platform="windows"] .rows { gap: 3px; }
+[data-platform="windows"] .row { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 4px; padding: 14px 16px; min-height: 68px; }
+[data-platform="windows"] .row .rowicon { color: var(--fg); }
+[data-platform="macos"] .rows { background: var(--card-bg); border-radius: var(--r-card); box-shadow: inset 0 0 0 1px var(--card-border); padding: 0 12px; }
+[data-platform="macos"] .row { min-height: 0; padding: 9px 0; }
+[data-platform="macos"] .row + .row { border-top: 1px solid var(--divider); }
+[data-platform="macos"] .rowicon { display: none; }
+[data-platform="linux"] .rows { background: var(--card-bg); border-radius: var(--r-card); box-shadow: 0 0 0 1px var(--card-border), 0 1px 3px rgb(0 0 0 / .05); overflow: hidden; }
+[data-platform="linux"] .row { min-height: 56px; padding: 8px 14px; }
+[data-platform="linux"] .row + .row { border-top: 1px solid var(--divider); }
+[data-platform="linux"] .rowicon { display: none; }
+[data-platform="windows"] .set-group h2 { font-weight: 600; font-size: 14px; }
+[data-platform="macos"] .set-group h2 { font-size: 13px; font-weight: 700; }
+[data-platform="linux"] .set-group h2 { font-size: 14px; font-weight: 700; }
+
+/* 开关 */
+.sw { position: relative; width: 40px; height: 20px; border-radius: 10px; border: 1px solid var(--fg2); background: transparent; flex: none; }
+.sw::after { content: ""; position: absolute; top: 3px; left: 3px; width: 12px; height: 12px; border-radius: 50%; background: var(--fg2); transition: left var(--dur) var(--ease); }
+.sw.on { background: var(--primary); border-color: var(--primary); }
+.sw.on::after { left: 23px; background: var(--primary-fg); }
+.sw-wrap { display: inline-flex; align-items: center; gap: 10px; color: var(--fg2); font-size: 13px; }
+[data-platform="macos"] .sw { width: 32px; height: 18px; border: 0; background: rgb(0 0 0 / .1); box-shadow: inset 0 0 0 .5px rgb(0 0 0 / .08); }
+[data-platform="macos"][data-theme="dark"] .sw { background: rgb(255 255 255 / .15); }
+[data-platform="macos"] .sw::after { top: 1px; left: 1px; width: 16px; height: 16px; background: #fff; box-shadow: 0 1px 2px rgb(0 0 0 / .3); }
+[data-platform="macos"] .sw.on { background: var(--primary); }
+[data-platform="macos"] .sw.on::after { left: 15px; background: #fff; }
+[data-platform="macos"] .sw-wrap span { display: none; }
+[data-platform="linux"] .sw { width: 46px; height: 26px; border-radius: 13px; border: 0; background: var(--ctl-bg); }
+[data-platform="linux"] .sw::after { top: 3px; left: 3px; width: 20px; height: 20px; background: #fff; box-shadow: 0 1px 3px rgb(0 0 0 / .25); }
+[data-platform="linux"] .sw.on::after { left: 23px; background: #fff; }
+[data-platform="linux"] .sw-wrap span { display: none; }
+
+/* ================= 对话框 ================= */
+.scrim { position: fixed; inset: 0; background: var(--scrim); display: none; place-items: center; z-index: 20; }
+.scrim.open { display: grid; }
+[data-platform="windows"] .scrim { top: 32px; }
+[data-platform="linux"] .scrim { top: 46px; }
+.dialog { width: 480px; max-width: calc(100vw - 32px); background: var(--popover-bg); border-radius: var(--r-dialog); box-shadow: var(--shadow-dialog); border: 1px solid var(--popover-border); overflow: hidden; animation: dlg-in var(--dur) var(--ease); }
+@keyframes dlg-in { from { opacity: 0; transform: scale(1.05); } }
+[data-platform="macos"] .scrim { place-items: start center; padding-top: 0; }
+[data-platform="macos"] .dialog { margin-top: 52px; animation-name: sheet-in; background: var(--popover-bg); backdrop-filter: blur(30px); }
+@keyframes sheet-in { from { opacity: 0; transform: translateY(-16px); } }
+[data-platform="linux"] .dialog { animation-name: dlg-in-l; }
+@keyframes dlg-in-l { from { opacity: 0; transform: scale(.95); } }
+.dlg-body { padding: 24px; display: flex; flex-direction: column; gap: 16px; }
+.dlg-body h3 { margin: 0; font-size: 20px; font-weight: 600; }
+.dlg-body p.desc { margin: -8px 0 0; color: var(--fg2); font-size: 13px; }
+[data-platform="macos"] .dlg-body { padding: 20px 20px 16px; gap: 12px; }
+[data-platform="macos"] .dlg-body h3 { font-size: 13px; font-weight: 700; }
+[data-platform="macos"] .dlg-body p.desc { margin-top: -6px; font-size: 12px; }
+[data-platform="linux"] .dlg-body h3 { font-size: 18px; font-weight: 700; text-align: center; }
+[data-platform="linux"] .dlg-body p.desc { text-align: center; }
+.fgrid { display: grid; grid-template-columns: 1fr; gap: 6px; }
+.fgrid label { font-size: 13px; }
+.fgrid .field { width: 100%; }
+.frow { display: flex; gap: 16px; align-items: flex-end; }
+.frow > div { display: flex; flex-direction: column; gap: 6px; }
+[data-platform="macos"] .fgrid { grid-template-columns: 72px 1fr; align-items: center; gap: 10px 10px; }
+[data-platform="macos"] .fgrid label { text-align: right; font-size: 13px; }
+[data-platform="macos"] .frow { display: contents; }
+[data-platform="macos"] .frow > div { display: contents; }
+.checkline { display: inline-flex; gap: 8px; align-items: center; height: var(--ctl-h); font-size: 13px; }
+.hint { font-size: 12px; color: var(--fg2); }
+.dlg-foot { display: flex; gap: 8px; padding: 0 24px 24px; justify-content: flex-end; }
+/* Windows：灰色按钮带，按钮等宽铺满，主按钮在左 */
+[data-platform="windows"] .dlg-foot { background: var(--dialog-footer-bg); border-top: 1px solid var(--divider); padding: 24px; }
+[data-platform="windows"] .dlg-foot .btn { flex: 1; }
+[data-platform="windows"] .dlg-foot .btn.primary { order: -1; }
+/* macOS / Linux：右对齐，主按钮在最右（DOM 中取消在前） */
+[data-platform="macos"] .dlg-foot { padding: 4px 20px 20px; }
+[data-platform="macos"] .dlg-foot .btn { min-width: 76px; }
+[data-platform="linux"] .dlg-foot { padding: 0 24px 24px; }
+[data-platform="linux"] .dlg-foot .btn { min-width: 96px; }
+
+/* ================= 右键菜单 ================= */
+.ctx { position: fixed; z-index: 40; min-width: 200px; padding: 4px; background: var(--popover-bg); border: 1px solid var(--popover-border); border-radius: var(--r-menu); box-shadow: var(--shadow-popover); display: none; font-size: 13px; }
+.ctx.open { display: block; animation: dlg-in var(--dur) var(--ease); }
+[data-platform="macos"] .ctx { backdrop-filter: blur(30px); padding: 5px; min-width: 210px; }
+.ctx button { width: 100%; display: flex; align-items: center; gap: 10px; height: var(--menu-item-h); padding: 0 10px; border: 0; background: transparent; border-radius: var(--r-ctl); text-align: left; }
+.ctx button:hover { background: var(--hover); }
+[data-platform="macos"] .ctx button { border-radius: 4px; padding: 0 8px; }
+[data-platform="macos"] .ctx button:hover { background: var(--primary); color: var(--primary-fg); }
+[data-platform="macos"] .ctx button:hover .kbd, [data-platform="macos"] .ctx button:hover svg { color: var(--primary-fg); }
+[data-platform="macos"] .ctx svg { display: none; }
+.ctx .kbd { margin-left: auto; color: var(--fg2); font-size: 12px; }
+.ctx hr { border: 0; border-top: 1px solid var(--divider); margin: 4px 2px; }
+.ctx .danger { color: var(--status-recording); }
+
+/* 提示 */
+.tip { position: fixed; z-index: 50; padding: 5px 8px; font-size: 12px; background: var(--popover-bg); border: 1px solid var(--popover-border); border-radius: var(--r-ctl); box-shadow: var(--shadow-popover); display: none; pointer-events: none; }
+.tip.open { display: block; }
+
+/* ================= 原型控制面板（不属于设计） ================= */
+.proto { position: fixed; right: 12px; bottom: 40px; z-index: 100; display: flex; flex-direction: column; gap: 6px; padding: 10px; border-radius: 10px; background: #111827ee; color: #e5e7eb; font: 12px/1.4 system-ui, sans-serif; box-shadow: 0 8px 30px rgb(0 0 0 / .35); }
+.proto .g { display: flex; gap: 4px; align-items: center; }
+.proto .g > span { width: 34px; color: #9ca3af; }
+.proto button { font: inherit; color: inherit; border: 1px solid #374151; background: transparent; border-radius: 5px; padding: 2px 8px; cursor: pointer; }
+.proto button.on { background: #0f766e; border-color: #0f766e; color: #fff; }
+.no-ui .proto { display: none; }
+</style>
+<script>
+  // 平台检测：真实应用按 UA 判断；原型允许 ?platform= 覆盖
+  (function () {
+    const q = new URLSearchParams(location.search);
+    const ua = navigator.userAgent;
+    const guess = /Macintosh/.test(ua) ? "macos" : /Linux/.test(ua) ? "linux" : "windows";
+    const theme = q.get("theme") || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    document.documentElement.dataset.platform = q.get("platform") || guess;
+    document.documentElement.dataset.theme = theme;
+  })();
+</script>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <symbol id="i-radio" viewBox="0 0 24 24"><path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9"/><path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5"/><circle cx="12" cy="12" r="2"/><path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5"/><path d="M19.1 4.9C23 8.8 23 15.1 19.1 19"/></symbol>
+    <symbol id="i-film" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 3v18M17 3v18M3 8h4M3 16h4M17 8h4M17 16h4"/></symbol>
+    <symbol id="i-activity" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+    <symbol id="i-min" viewBox="0 0 24 24"><path d="M3 12h18"/></symbol>
+    <symbol id="i-max" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/></symbol>
+    <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1.5"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4v16l13-8z"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><path d="M9 5v14M15 5v14"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></symbol>
+    <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.9 1.9 0 0 0 3.4 0"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0zM12 9v4M12 17h.01"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="i-right" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+    <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></symbol>
+    <symbol id="i-updown" viewBox="0 0 24 24"><path d="m7 15 5 5 5-5M7 9l5-5 5 5"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M10 12l5 3-5 3z"/></symbol>
+    <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 2 10 5-10 5L2 7z"/><path d="m2 17 10 5 10-5M2 12l10 5 10-5"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5"/></symbol>
+    <symbol id="i-cpu" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="2"/><path d="M9 9h6v6H9zM9 1v4M15 1v4M9 19v4M15 19v4M1 9h4M1 15h4M19 9h4M19 15h4"/></symbol>
+    <symbol id="i-wifi" viewBox="0 0 24 24"><path d="M5 12.6a10 10 0 0 1 14 0M8.5 16.1a5 5 0 0 1 7 0M2 8.8a15 15 0 0 1 20 0M12 20h.01"/></symbol>
+    <symbol id="i-disk" viewBox="0 0 24 24"><path d="M22 12H2M5.5 5h13L22 12v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-6zM6 16h.01M10 16h.01"/></symbol>
+    <symbol id="i-timer" viewBox="0 0 24 24"><circle cx="12" cy="14" r="8"/><path d="M12 10v4l2 2M9 2h6"/></symbol>
+    <symbol id="i-external" viewBox="0 0 24 24"><path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></symbol>
+    <symbol id="i-restart" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5"/></symbol>
+  </defs>
+</svg>
+
+<div class="window" id="win">
+  <div class="titlebar">
+    <span class="appicon"></span><span class="apptitle-left">录播宝</span>
+    <span class="apptitle-center" style="display:none">录播宝</span>
+    <div class="caps"><span><svg class="i"><use href="#i-min"/></svg></span><span><svg class="i"><use href="#i-max"/></svg></span><span class="close"><svg class="i"><use href="#i-x"/></svg></span></div>
+  </div>
+  <div class="shell">
+    <nav class="sidebar" data-tauri-drag-region>
+      <div class="traffic"><i></i><i></i><i></i></div>
+      <div class="nav-head">录播宝</div>
+      <button class="nav" data-page="rooms"><svg class="i ic"><use href="#i-radio"/></svg>直播间<span class="count rec">2</span></button>
+      <button class="nav" data-page="library"><svg class="i ic"><use href="#i-film"/></svg>录像库</button>
+      <button class="nav" data-page="activity"><svg class="i ic"><use href="#i-activity"/></svg>动态</button>
+      <button class="nav" data-page="settings"><svg class="i ic"><use href="#i-gear"/></svg>设置</button>
+    </nav>
+    <div class="main">
+      <div class="layer" id="layer"></div>
+      <footer class="statusbar">
+        <span><svg class="i"><use href="#i-cpu"/></svg>FFmpeg 9.0.2</span>
+        <span><i class="rdot"></i>录制中 2</span>
+        <span><svg class="i"><use href="#i-wifi"/></svg>14.9 Mbps</span>
+        <span><svg class="i"><use href="#i-disk"/></svg>磁盘余量 186 GB</span>
+        <span class="right"><svg class="i"><use href="#i-timer"/></svg>下次检测 00:39</span>
+      </footer>
+    </div>
+  </div>
+</div>
+
+<div class="scrim" id="scrim"></div>
+<div class="ctx" id="ctx"></div>
+<div class="tip" id="tip"></div>
+
+<div class="proto">
+  <div class="g"><span>平台</span><button data-set="platform" data-v="windows">Windows</button><button data-set="platform" data-v="macos">macOS</button><button data-set="platform" data-v="linux">Linux</button></div>
+  <div class="g"><span>主题</span><button data-set="theme" data-v="light">浅色</button><button data-set="theme" data-v="dark">深色</button></div>
+  <div class="g"><span>页面</span><button data-set="page" data-v="rooms">直播间</button><button data-set="page" data-v="library">录像库</button><button data-set="page" data-v="settings">设置</button></div>
+  <div class="g"><span></span><button id="open-add">添加对话框</button><span style="width:auto;color:#9ca3af">· 右键任务行看菜单</span></div>
+</div>
+
+<script>
+const $ = (s, el = document) => el.querySelector(s);
+const ic = (id, cls = "") => `<svg class="i ${cls}"><use href="#i-${id}"/></svg>`;
+const q = new URLSearchParams(location.search);
+const state = { page: q.get("page") || "rooms", selected: 2, filter: "all" };
+if (q.get("ui") === "0") document.body.classList.add("no-ui");
+const isMac = () => document.documentElement.dataset.platform === "macos";
+const kbd = (k) => isMac() ? "⌘" + k : "Ctrl+" + k;
+
+const tasks = [
+  { n: "阿星游戏", p: "抖音", id: "5521", s: "error", q: "原画", t: "1 分钟前检测", z: "—" },
+  { n: "私密直播间", p: "抖音", id: "44021", s: "error", q: "原画", t: "3 分钟前失败", z: "—" },
+  { n: "一只小羊驼", p: "抖音", id: "7381920045", s: "recording", q: "原画", t: "01:23:03", z: "3.41 GB · 6.5 Mbps" },
+  { n: "峡谷练习生", p: "快手直播", id: "canyon_trainee", s: "recording", q: "原画", t: "00:26:03", z: "1.52 GB · 8.4 Mbps" },
+  { n: "老王说车", p: "抖音", id: "992817", s: "retrying", q: "原画", t: "15 秒后重试", z: "—" },
+  { n: "晚八点读书会", p: "抖音", id: "883021", s: "notify", q: "超清", t: "33 秒前检测", z: "—" },
+  { n: "山野徒步", p: "抖音", id: "21993840", s: "checking", q: "高清", t: "检测中…", z: "—" },
+  { n: "乡村厨房", p: "快手直播", id: "3xcountrykitchen", s: "waiting", q: "高清", t: "3 分钟前检测", z: "—" },
+  { n: "甜品研究所", p: "抖音", id: "7210334511", s: "waiting", q: "原画", t: "2 分钟前检测", z: "—" },
+  { n: "街头篮球", p: "抖音", id: "110293", s: "paused", q: "原画", t: "—", z: "—" },
+];
+const statusHtml = {
+  recording: `<span class="st recording"><i class="dot"></i>录制中</span>`,
+  error: `<span class="st error">${ic("alert")}需处理</span>`,
+  retrying: `<span class="st retrying"><i class="dot"></i>重试中 · 第 2 次</span>`,
+  notify: `<span class="st notify">${ic("bell")}已开播 · 仅通知</span>`,
+  checking: `<span class="st checking"><i class="dot"></i>检测中</span>`,
+  waiting: `<span class="st waiting"><i class="dot"></i>等待开播</span>`,
+  paused: `<span class="st paused"><i class="dot"></i>已暂停</span>`,
+};
+const filters = [
+  ["all", "全部", 10], ["recording", "录制中", 2, "var(--status-recording)"], ["watching", "监控中", 4],
+  ["attention", "需关注", 3], ["paused", "已暂停", 1],
+];
+
+function roomsPage() {
+  const t = tasks[state.selected];
+  return `
+  <div class="rooms">
+    <div class="rooms-main">
+      <div class="head" data-tauri-drag-region>
+        <div><h1>直播间</h1>${isMac() ? `<span class="sub">10 个直播间 · 2 个录制中</span>` : ""}</div>
+        <div class="spacer"></div>
+        <label class="field search" data-tip="搜索|F">${ic("search")}<input id="search" placeholder="搜索主播或房间号" spellcheck="false" autocomplete="off"></label>
+        <button class="btn tb" data-tip="添加直播间|N">${ic("plus")}</button>
+        <button class="btn primary add-primary" data-tip="添加直播间|N" data-act="add">${ic("plus")}添加直播间</button>
+      </div>
+      <div class="cmdbar">
+        <div class="seg">${filters.map(([k, l, c, col]) => `<button class="${state.filter === k ? "on" : ""}" data-filter="${k}">${col ? `<i class="sdot" style="background:${col}"></i>` : ""}${l} <b>${c}</b></button>`).join("")}</div>
+        <div style="flex:1"></div>
+        <button class="btn field select" style="min-width:104px">全部平台${ic("down")}</button>
+      </div>
+      <div class="tablewrap scroll"><div class="tablebox">
+        <table class="tasks">
+          <thead><tr><th style="width:36px"><input type="checkbox" class="cb"></th><th>主播 ${ic("updown", "sort")}</th><th>状态 ${ic("up", "sort")}</th><th class="col-opt">画质</th><th>时长 / 检测</th><th class="col-opt">大小 / 码率</th></tr></thead>
+          <tbody>${tasks.map((r, i) => `
+            <tr data-i="${i}" class="${i === state.selected ? "sel" : ""} ${r.s === "error" ? "err" : ""} ${r.s === "paused" ? "paused" : ""}">
+              <td><input type="checkbox" class="cb"></td>
+              <td><div class="who"><span class="avatar">${r.n[0]}</span><div><div class="name">${r.n}</div><div class="meta"><span class="tag">${r.p}</span>${r.id}</div></div></div></td>
+              <td>${statusHtml[r.s]}</td>
+              <td class="col-opt">${r.q}</td>
+              <td class="num">${r.t}</td>
+              <td class="num col-opt">${r.z}</td>
+            </tr>`).join("")}
+          </tbody>
+        </table>
+      </div></div>
+    </div>
+    ${t ? inspector(t) : ""}
+  </div>`;
+}
+
+function inspector(t) {
+  const rec = t.s === "recording";
+  return `
+  <aside class="inspector">
+    <div class="insp-head">
+      <span class="avatar">${t.n[0]}</span>
+      <div><div class="name">${t.n}</div><div class="who"><div class="meta"><span class="tag">${t.p}</span>${t.id}</div></div></div>
+      <div class="spacer"></div>
+      <button class="btn subtle icon" data-tip="在浏览器中打开直播间">${ic("external")}</button>
+      <button class="btn subtle icon" data-tip="关闭详情|Esc" data-act="close-insp">${ic("x")}</button>
+    </div>
+    <div class="insp-body scroll">
+      <div>${statusHtml[t.s]}</div>
+      <div><p class="sec-title">状态</p>
+        <div class="tri"><div><small>监控</small>已启用</div><div><small>直播</small>${rec ? "已开播" : "未开播"}</div><div><small>录制</small>${rec ? "写入中" : "—"}</div></div></div>
+      ${rec ? `<div><p class="sec-title">当前录制</p>
+        <dl class="kv">
+          <dt>文件</dt><dd class="selectable">${t.n}_2026-11-22_20-14-03.ts</dd>
+          <dt>位置</dt><dd class="selectable" title="D:\\Records\\抖音\\${t.n}">D:\\Records\\抖音\\${t.n}\\</dd>
+          <dt>已录</dt><dd class="num">${t.t}</dd>
+          <dt>大小</dt><dd class="num">3.41 GB</dd>
+          <dt>码率</dt><dd class="num">6.5 Mbps</dd>
+        </dl></div>` : ""}
+      <div><p class="sec-title">任务设置</p>
+        <dl class="kv"><dt>画质</dt><dd>${t.q}</dd><dt>录制方式</dt><dd>开播自动录制</dd>
+        <dt>链接</dt><dd class="selectable"><a class="link">https://live.douyin.com/${t.id}</a></dd><dt>添加于</dt><dd class="num">2026/11/12 19:10</dd></dl></div>
+      <div><p class="sec-title">最近动态</p>
+        <ul class="timeline selectable">
+          <li><time>17:47</time><i class="td" style="background:var(--status-recording)"></i>开始录制</li>
+          <li><time>17:46</time><i class="td" style="background:var(--primary)"></i>检测到开播</li>
+          <li><time>11/21</time><i class="td" style="background:var(--primary)"></i>已转为 MP4</li>
+          <li><time>11/21</time><i class="td"></i>直播结束，停止录制</li>
+        </ul></div>
+    </div>
+    <div class="insp-foot">
+      <button class="btn">${rec ? `${ic("stop", "danger")}停止录制` : `${ic("play")}开始录制`}</button>
+      <button class="btn subtle icon" data-tip="暂停监控">${ic("pause")}</button>
+      <button class="btn subtle icon" data-tip="编辑">${ic("edit")}</button>
+      <button class="btn subtle icon" data-tip="打开文件夹">${ic("folder")}</button>
+      <button class="btn subtle icon" data-tip="删除|Del">${ic("trash")}</button>
+    </div>
+  </aside>`;
+}
+
+function libraryPage() {
+  const g = (name, n, size, time) => `<tr class="group"><td><span class="fname">${ic("layers")}${name} · ${n} 段</span></td><td class="r num">${size}</td><td class="num">${time}</td></tr>`;
+  const f = (name, seg, size, time, child = true) => `<tr class="${child ? "child" : ""}" data-file><td><span class="fname">${ic("file")}${name}${seg ? `<span class="seg-badge">第 ${seg} 段</span>` : ""}</span></td><td class="r num">${size}</td><td class="num">${time}</td></tr>`;
+  return `
+  <div class="page">
+    <div class="head" data-tauri-drag-region>
+      <div><h1>录像库</h1>${isMac() ? `<span class="sub">已占用 985 GB · 815 个录像</span>` : ""}</div>
+      ${isMac() ? "" : `<span class="sub">已占用 985 GB · 815 个录像 · 磁盘剩余 186 GB / 932 GB</span>`}
+      <div class="spacer"></div>
+      <button class="btn subtle icon" data-tip="刷新">${ic("refresh")}</button>
+      <button class="btn">${ic("folder")}打开目录</button>
+    </div>
+    <div class="crumbs">
+      <button class="btn subtle icon" data-tip="上一级">${ic("up")}</button>
+      <button class="btn subtle">C:\\Users\\me\\Videos\\录播宝</button>${ic("right", "chev")}
+      <button class="btn subtle">抖音</button>${ic("right", "chev")}
+      <span class="cur" style="padding:0 8px">一只小羊驼</span>
+    </div>
+    <div class="tablewrap scroll"><div class="tablebox">
+      <table class="lib">
+        <thead><tr><th>名称</th><th class="r" style="width:110px">大小</th><th style="width:130px">修改时间</th></tr></thead>
+        <tbody>
+          ${g("一只小羊驼_2026-11-22_20-14-03", 3, "3.90 GB", "11-22 18:47")}
+          ${f("一只小羊驼_2026-11-22_20-14-03_000.ts", 1, "1.30 GB", "11-22 17:47")}
+          ${f("一只小羊驼_2026-11-22_20-14-03_001.ts", 2, "1.30 GB", "11-22 18:17")}
+          ${f("一只小羊驼_2026-11-22_20-14-03_002.ts", 3, "1.30 GB", "11-22 18:47")}
+          ${g("一只小羊驼_2026-11-21_20-01-47", 5, "7.00 GB", "11-21 20:10")}
+          ${f("一只小羊驼_2026-11-21_20-01-47_000.ts", 1, "1.40 GB", "11-21 18:10")}
+          ${f("一只小羊驼_2026-11-21_20-01-47_001.ts", 2, "1.40 GB", "11-21 18:40")}
+          ${f("一只小羊驼_2026-11-21_20-01-47_002.ts", 3, "1.40 GB", "11-21 19:10")}
+          ${f("一只小羊驼_2026-11-21_20-01-47_003.ts", 4, "1.40 GB", "11-21 19:40")}
+          ${f("一只小羊驼_2026-11-21_20-01-47_004.ts", 5, "1.40 GB", "11-21 20:10")}
+          ${f("一只小羊驼_2026-11-20_19-58-12.mp4", 0, "5.62 GB", "11-20 18:50", false)}
+        </tbody>
+      </table>
+    </div></div>
+  </div>`;
+}
+
+function settingsPage() {
+  const sw = (on) => `<span class="sw-wrap"><span>${on ? "开" : "关"}</span><button class="sw ${on ? "on" : ""}" role="switch" aria-checked="${on}"></button></span>`;
+  const sel = (v, w = 150) => `<button class="btn field select" style="min-width:${w}px">${v}${ic("down")}</button>`;
+  const num = (v, unit) => `<span style="display:inline-flex;gap:8px;align-items:center"><label class="field" style="width:84px"><input value="${v}" style="text-align:right" class="num"></label><span class="fg2">${unit}</span></span>`;
+  const row = (icon, title, desc, ctl) => `<div class="row">${ic(icon, "rowicon")}<div class="txt">${title}<small>${desc}</small></div>${ctl}</div>`;
+  return `
+  <div class="page">
+    <div class="head" data-tauri-drag-region><div><h1>设置</h1>${isMac() ? `<span class="sub">修改后自动保存</span>` : ""}</div>${isMac() ? "" : `<span class="sub">修改后自动保存</span>`}</div>
+    <div class="settings">
+      <div class="set-nav">${["录制", "检测", "网络", "平台账号", "托盘与通知", "组件", "关于"].map((s, i) => `<button class="nav ${i === 0 ? "on" : ""}">${s}</button>`).join("")}</div>
+      <div class="set-body scroll"><div class="set-group">
+        <h2>录制<button class="btn subtle">${ic("restart")}恢复默认值</button></h2>
+        <div class="rows">
+          <div class="row stack"><div style="display:flex;gap:16px;align-items:center">${ic("folder", "rowicon")}<div class="txt">保存目录<small>录像文件保存的位置</small></div></div>
+            <div class="path"><label class="field" style="flex:1"><input class="selectable" value="C:\\Users\\me\\Videos\\录播宝" spellcheck="false"></label><button class="btn">选择文件夹…</button><button class="btn subtle">${ic("external")}打开</button></div></div>
+          ${row("film", "默认画质", "新添加直播间的默认画质，直播间没有该画质时自动降一级", sel("原画"))}
+          ${row("file", "录制格式", "目前只支持 TS，其他格式即将支持", sel("TS（推荐，断流不损坏）", 200))}
+          ${row("layers", "分段录制", "按时长切分文件，单个文件损坏时影响更小", sw(true))}
+          ${row("timer", "分段时长", "每段 30 分钟", num(1800, "秒"))}
+          ${row("disk", "磁盘空间阈值", "保存目录所在磁盘的剩余空间低于该值时停止录制", num(5, "GB"))}
+          ${row("refresh", "录制完成后转为 MP4", "录制结束后逐个转成同名 MP4，只换封装不重新编码；转换失败时保留 TS 原文件", sw(true))}
+          ${row("trash", "转换后删除原文件", "只在转换成功后删除 TS 原文件", sw(false))}
+          ${row("folder", "按平台建子目录", "例如 录播宝/抖音/…", sw(true))}
+          ${row("folder", "按主播建子目录", "每个主播的录像放在单独的文件夹", sw(true))}
+        </div>
+      </div></div>
+    </div>
+  </div>`;
+}
+
+function activityPage() {
+  return `<div class="page"><div class="head" data-tauri-drag-region><h1>动态</h1></div><p class="fg2" style="padding:16px var(--pad)">（原型未覆盖动态页，沿用录像库的列表样式。）</p></div>`;
+}
+
+function addDialog() {
+  return `
+  <div class="dialog" role="dialog" aria-modal="true">
+    <div class="dlg-body">
+      <h3>添加直播间</h3>
+      <p class="desc">粘贴直播间链接、主播主页或分享短链，录播宝会先识别主播再添加。</p>
+      <div class="fgrid">
+        <label for="url">链接</label>
+        <label class="field"><input id="url" placeholder="https://live.douyin.com/…" spellcheck="false" autocomplete="off" value="https://live.douyin.com/745964462470"></label>
+        <div class="frow">
+          <div><label>画质</label><button class="btn field select" style="width:140px">原画${ic("down")}</button></div>
+          <div><label class="mac-only-label" style="${isMac() ? "" : "display:none"}"></label><span class="checkline"><input type="checkbox" class="cb">仅通知，不录制</span></div>
+        </div>
+      </div>
+      <span class="hint">直播间没有所选画质时自动降一级。</span>
+    </div>
+    <div class="dlg-foot">
+      <button class="btn" data-act="close-dlg">取消</button>
+      <button class="btn primary" data-act="close-dlg">识别并添加</button>
+    </div>
+  </div>`;
+}
+
+function render() {
+  const layer = $("#layer");
+  layer.innerHTML = { rooms: roomsPage, library: libraryPage, settings: settingsPage, activity: activityPage }[state.page]();
+  document.querySelectorAll(".nav[data-page]").forEach((b) => b.classList.toggle("on", b.dataset.page === state.page));
+  document.querySelectorAll(".proto [data-set]").forEach((b) => {
+    const cur = b.dataset.set === "page" ? state.page : document.documentElement.dataset[b.dataset.set];
+    b.classList.toggle("on", cur === b.dataset.v);
+  });
+  if ($("#scrim").classList.contains("open")) $("#scrim").innerHTML = addDialog();
+}
+
+function openDialog() { const s = $("#scrim"); s.innerHTML = addDialog(); s.classList.add("open"); setTimeout(() => $("#url")?.focus(), 0); }
+function closeDialog() { $("#scrim").classList.remove("open"); }
+
+// ---------- 交互 ----------
+document.addEventListener("click", (e) => {
+  hideCtx();
+  const nav = e.target.closest(".nav[data-page]"); if (nav) { state.page = nav.dataset.page; render(); return; }
+  const set = e.target.closest(".proto [data-set]");
+  if (set) { if (set.dataset.set === "page") state.page = set.dataset.v; else document.documentElement.dataset[set.dataset.set] = set.dataset.v; render(); return; }
+  if (e.target.closest("#open-add") || e.target.closest("[data-act=add]") || e.target.closest(".btn.tb")) { openDialog(); return; }
+  if (e.target.closest("[data-act=close-dlg]") || e.target === $("#scrim")) { closeDialog(); return; }
+  if (e.target.closest("[data-act=close-insp]")) { state.selected = -1; render(); return; }
+  const f = e.target.closest("[data-filter]"); if (f) { state.filter = f.dataset.filter; render(); return; }
+  const tr = e.target.closest("table.tasks tbody tr"); if (tr && !e.target.closest(".cb")) { state.selected = +tr.dataset.i; render(); return; }
+  const sw = e.target.closest(".sw"); if (sw) { sw.classList.toggle("on"); return; }
+});
+
+// 屏蔽浏览器右键菜单；输入框保留；任务行和录像条目显示应用菜单；可选文字有选区时只给「复制」
+const ctx = $("#ctx");
+function showCtx(x, y, html) { ctx.innerHTML = html; ctx.classList.add("open"); const r = ctx.getBoundingClientRect(); ctx.style.left = Math.min(x, innerWidth - r.width - 8) + "px"; ctx.style.top = Math.min(y, innerHeight - r.height - 8) + "px"; }
+function hideCtx() { ctx.classList.remove("open"); }
+const item = (icon, label, k = "", cls = "") => `<button class="${cls}">${ic(icon)}${label}${k ? `<span class="kbd">${k}</span>` : ""}</button>`;
+document.addEventListener("contextmenu", (e) => {
+  if (e.target.closest("input, textarea")) return;
+  e.preventDefault();
+  const tr = e.target.closest("table.tasks tbody tr");
+  if (tr) {
+    state.selected = +tr.dataset.i; render();
+    const t = tasks[state.selected]; const rec = t.s === "recording";
+    showCtx(e.clientX, e.clientY, [
+      rec ? item("stop", "停止录制") : item("play", "开始录制"),
+      rec ? item("restart", "重新录制") : "",
+      t.s === "paused" ? item("play", "恢复监控") : item("pause", "暂停监控"),
+      "<hr>", item("edit", "编辑…"), item("folder", "打开文件夹"), item("copy", "复制直播间链接"),
+      "<hr>", item("trash", "删除…", isMac() ? "⌘⌫" : "Del", "danger"),
+    ].join(""));
+    return;
+  }
+  if (e.target.closest(".lib tr[data-file]")) {
+    showCtx(e.clientX, e.clientY, [item("play", "打开"), item("folder", "在文件夹中显示"), item("copy", "复制路径"), "<hr>", item("trash", "删除…", isMac() ? "⌘⌫" : "Del", "danger")].join(""));
+    return;
+  }
+  if (e.target.closest(".selectable") && String(getSelection())) { showCtx(e.clientX, e.clientY, item("copy", "复制", kbd("C"))); return; }
+  hideCtx();
+});
+
+// 快捷键：应用快捷键 + 屏蔽浏览器快捷键
+document.addEventListener("keydown", (e) => {
+  const mod = isMac() ? e.metaKey : e.ctrlKey;
+  const k = e.key.toLowerCase();
+  if (e.key === "Escape") { if (ctx.classList.contains("open")) hideCtx(); else if ($("#scrim").classList.contains("open")) closeDialog(); else if (state.page === "rooms" && state.selected >= 0) { state.selected = -1; render(); } return; }
+  if (mod && k === "n") { e.preventDefault(); openDialog(); return; }
+  if (mod && k === "f") { e.preventDefault(); if (state.page !== "rooms") { state.page = "rooms"; render(); } $("#search")?.focus(); return; }
+  if (isMac() && e.metaKey && e.key === ",") { e.preventDefault(); state.page = "settings"; render(); return; }
+  const blocked = e.key === "F5" || e.key === "F3" || e.key === "F7" || (mod && ["r", "p", "u", "s", "g", "j", "h", "=", "+", "-", "0"].includes(k)) || (e.altKey && (e.key === "ArrowLeft" || e.key === "ArrowRight"));
+  if (blocked) e.preventDefault();
+});
+addEventListener("wheel", (e) => { if (e.ctrlKey) e.preventDefault(); }, { passive: false });
+addEventListener("dragstart", (e) => { if (!e.target.closest?.("[draggable=true]")) e.preventDefault(); });
+
+// 悬停提示（含快捷键）
+const tip = $("#tip"); let tipTimer;
+document.addEventListener("mouseover", (e) => {
+  const el = e.target.closest("[data-tip]"); clearTimeout(tipTimer); tip.classList.remove("open");
+  if (!el) return;
+  tipTimer = setTimeout(() => {
+    const [label, key] = el.dataset.tip.split("|");
+    tip.textContent = key ? (isMac() ? `${label} ${key === "Del" ? "⌘⌫" : key === "Esc" ? "⎋" : "⌘" + key}` : `${label}（${key === "Del" || key === "Esc" ? key : "Ctrl+" + key}）`) : label;
+    const r = el.getBoundingClientRect(); tip.classList.add("open");
+    const w = tip.offsetWidth; tip.style.left = Math.max(8, Math.min(r.left + r.width / 2 - w / 2, innerWidth - w - 8)) + "px"; tip.style.top = r.bottom + 6 + "px";
+  }, 500);
+});
+
+render();
+if (q.get("dialog") === "add") openDialog();
+if (q.get("menu") === "1") setTimeout(() => {
+  const tr = document.querySelector('table.tasks tbody tr[data-i="2"]'); const r = tr.getBoundingClientRect();
+  tr.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: r.left + 260, clientY: r.top + 30 }));
+}, 50);
+</script>
+</body>
+</html>
