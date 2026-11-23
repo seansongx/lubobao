@@ -6,7 +6,7 @@
 /*
  * Tailwind 主题映射到 src/tokens.css 中的变量，不另设颜色。
  * dark: 变体沿用 Tailwind v4 默认的 prefers-color-scheme，与 tokens.css 一致。
- * win: / mac: / linux: 变体按根节点 data-platform 选择平台，用于组件里少量的平台差异。
+ * win: / mac: / linux: 变体按根节点 data-platform 选择平台，只用于页面布局（src/components/ui/ 里不用）。
  */
 @custom-variant win (&:where([data-platform="windows"] *));
 @custom-variant mac (&:where([data-platform="macos"] *));
@@ -14,6 +14,9 @@
 
 @theme inline {
   --font-sans: var(--font-ui);
+  /* 字号随平台：text-sm 为正文（Windows、Linux 14px，macOS 13px），text-xs 为说明文字 */
+  --text-sm: var(--text-ui);
+  --text-xs: var(--text-small);
 
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -37,16 +40,7 @@
   --color-window: var(--window);
   --color-content: var(--content);
   --color-content-border: var(--content-border);
-  --color-dialog: var(--dialog);
-  --color-dialog-footer: var(--dialog-footer);
   --color-selection: var(--selection);
-  --color-control: var(--control);
-  --color-control-hover: var(--control-hover);
-  --color-control-pressed: var(--control-pressed);
-  --color-control-border: var(--control-border);
-  --color-control-border-strong: var(--control-border-strong);
-  --color-field: var(--field);
-  --color-field-underline: var(--field-underline);
   --color-statusbar: var(--statusbar);
 
   --color-sidebar: var(--sidebar);
@@ -65,12 +59,11 @@
   --color-status-notify: var(--status-notify);
   --color-status-recording-soft: var(--status-recording-soft);
 
-  /* 控件圆角随平台：rounded-md / rounded-lg 为控件，rounded-xl 为卡片，rounded-2xl 为对话框 */
-  --radius-sm: calc(var(--radius) - 2px);
-  --radius-md: var(--radius);
+  /* 与 shadcn/ui 约定一致：rounded-lg 即 --radius，随平台变化（Windows 4px、macOS 6px、Linux 8px） */
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
-  --radius-xl: var(--radius-card);
-  --radius-2xl: var(--radius-dialog);
+  --radius-xl: calc(var(--radius) + 4px);
 
   --spacing-task-row: var(--task-row-height);
 }
@@ -179,14 +172,12 @@
 
 /* ================= 平台结构差异 ================= */
 /*
- * 对话框按钮：组件里一律按「取消 … 主操作」书写。Windows 反转为 WinUI 的「主操作、次要、关闭」，
- * 按钮等宽铺满；macOS 和 Linux 右对齐，主按钮在最右。
+ * 对话框按钮顺序：组件里一律按「取消 … 主操作」书写（Nova 默认右对齐，主按钮在右，macOS 和 Linux 照用）。
+ * Windows 反转为 WinUI 的「主操作、次要、关闭」，主按钮在左。只改顺序，不改按钮样式。
  */
 :root[data-platform="windows"] :is([data-slot="dialog-footer"], [data-slot="alert-dialog-footer"]) {
   flex-direction: row-reverse;
-}
-:root[data-platform="windows"] :is([data-slot="dialog-footer"], [data-slot="alert-dialog-footer"]) > * {
-  flex: 1 1 0;
+  justify-content: flex-start;
 }
 
 /* 选中文字的颜色用 Teal */

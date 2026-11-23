@@ -31,7 +31,7 @@ export function SettingsCard({ title, description, onReset, children }: Settings
   const headingId = useId();
   return (
     <section aria-labelledby={headingId} className="mb-6 max-w-[760px] text-card-foreground">
-      <header className="flex min-h-(--control-h) items-center gap-3 pb-2 pl-1">
+      <header className="flex min-h-8 items-center gap-3 pb-2 pl-1">
         <div className="min-w-0 flex-1">
           <h2 id={headingId} className="m-0 text-(length:--text-ui) font-semibold mac:font-bold linux:font-bold">
             {title}
@@ -96,7 +96,7 @@ export function FieldRow({ label, description, htmlFor, error, errorId, disabled
   return (
     <div
       className={cn(
-        "px-4 py-3.5 win:flex win:min-h-[68px] win:flex-col win:justify-center win:rounded-md win:border win:border-black/5 win:bg-card win:dark:border-black/15 mac:px-3 mac:py-2.5 linux:px-3.5 linux:py-3",
+        "px-4 py-3.5 win:flex win:min-h-[68px] win:flex-col win:justify-center win:rounded-lg win:border win:border-black/5 win:bg-card win:dark:border-black/15 mac:px-3 mac:py-2.5 linux:px-3.5 linux:py-3",
         disabled && "opacity-60",
       )}
     >

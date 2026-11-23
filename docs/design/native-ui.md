@@ -1,6 +1,8 @@
 # 原生界面设计说明
 
-录播宝 0.1.0 起界面跟随系统：Windows 用 Windows 11 Fluent 风格，macOS 用原生 AppKit 风格，Linux 用接近 GNOME/Adwaita 的朴素风格。三个平台的布局、页面、功能和快捷键含义一致，差异只在材质、字体、尺寸、控件外形和对话框按钮顺序。交互原型见 `docs/prototypes/native.html`。
+录播宝 0.1.0 起界面跟随系统：Windows 用 Windows 11 Fluent 风格，macOS 用原生 AppKit 风格，Linux 用接近 GNOME/Adwaita 的朴素风格。三个平台的布局、页面、功能和快捷键含义一致，差异只在窗口材质和标题栏、字体与字号、圆角和配色、页面布局和对话框按钮顺序。交互原型见 `docs/prototypes/native.html`。
+
+> **控件样式决定（2026-11-23）**：按钮、输入框、下拉、开关、复选框、对话框、菜单、表格、提示等控件一律用 shadcn/ui Nova 默认实现，`src/components/ui/` 不做修改，新增组件用 `npx shadcn@latest add`。原生感只通过组件以外的部分体现：平台 token（`src/tokens.css` 按 `data-platform` 改 shadcn 的语义变量 `--radius`、`--background`、`--card`、`--popover`、`--muted`、`--border`、`--input`、`--sidebar` 等，以及字体和字号，组件自动跟着变）、页面布局（macOS 红绿灯与侧栏一体、顶部工具栏，Windows 对话框主按钮在左，带数字的筛选按钮，去掉侧栏标志等）、窗口外壳（Mica、vibrancy、窗口状态）和行为（右键菜单、快捷键、浏览器行为屏蔽、选区复制）。下表和原型里「按钮层级」「对话框」「焦点环」等控件外形的描述保留为当初的设计记录，实际以 Nova 默认样式为准；圆角为 Windows 4px、macOS 6px、Linux 8px。
 
 不变的部分：
 
@@ -105,14 +107,15 @@ macOS 用 Cmd，其他平台用 Ctrl：
 ## 实现方式
 
 - 根节点 `data-platform` 选择平台主题，`data-material` 决定窗口底是否透明。
-- `src/tokens.css` 按平台分组定义 token：颜色（含深色）、字体、字号、控件高度、圆角、导航项高度、内容边距、对话框与菜单圆角、动效时长和曲线。shadcn/ui 组件只读这些变量，按需调整类名，不另起组件库。
-- 对话框按钮顺序用 `DialogFooter` 的 CSS（`flex-direction` 随平台）控制，组件里按「取消、主操作」的语义顺序书写。
+- `src/tokens.css` 按平台分组定义 token：shadcn 语义颜色（含深色）、`--radius`、字体、字号，以及页面布局用的窗口底、内容层、选中行、导航项高度、内容边距、侧栏宽度和工具栏高度。`index.css` 把 `text-sm`、`text-xs` 映射到平台字号，圆角刻度从 `--radius` 推出。shadcn/ui 组件保持 Nova 默认实现，不改类名。
+- 对话框按钮顺序：组件里按「取消、主操作」的语义顺序书写，Nova 默认右对齐、主按钮在右；`index.css` 只在 Windows 上把 `DialogFooter` 反转（`flex-direction: row-reverse`），不改按钮样式。
 - 高对比度（Windows 强制颜色）下，窗口、内容层、侧栏和状态栏改用系统 `Canvas`，不会因透明底变黑。
 
 ## 已知限制
 
 - **多显示器**：窗口位置按上次关闭时恢复。如果那块显示器已经断开或分辨率变小，窗口可能只露出一角（窗口状态插件不做越界校正）。
 - **vibrancy 是否生效无法校验**：macOS 的材质在建窗时由 Tauri 应用，不返回结果，`get_window_material` 一律报 `vibrancy`。
+- **控件外形不随平台**：按钮、开关、复选框等用 Nova 默认外形，三个平台只有圆角、字号和配色不同，不模仿 Fluent、AppKit 或 Adwaita 的控件。
 - **Windows 对话框的 Tab 顺序**：按钮视觉顺序由 CSS 反转，Tab 键仍按 DOM 顺序（先取消后主操作），与视觉顺序相反。
 
 ## 已确定的取舍（2026-11-23）

@@ -112,7 +112,7 @@ export function SettingsPage() {
               aria-current={group === item.id ? "page" : undefined}
               onClick={() => setGroup(item.id)}
               className={cn(
-                "relative h-[calc(var(--nav-item-h)-4px)] rounded-md px-3 text-left text-(length:--text-ui) outline-none transition-colors duration-(--duration) hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring mac:px-2",
+                "relative h-[calc(var(--nav-item-h)-4px)] rounded-md px-3 text-left text-(length:--text-ui) outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring mac:px-2",
                 group === item.id &&
                   "bg-accent linux:font-semibold win:before:absolute win:before:top-1/2 win:before:left-0 win:before:h-4 win:before:w-[3px] win:before:-translate-y-1/2 win:before:rounded-full win:before:bg-primary",
               )}

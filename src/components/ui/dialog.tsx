@@ -37,7 +37,7 @@ function DialogOverlay({
     <DialogPrimitive.Overlay
       data-slot="dialog-overlay"
       className={cn(
-        "fixed inset-0 isolate z-50 bg-(--scrim) duration-(--duration) data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
+        "fixed inset-0 isolate z-50 bg-black/10 duration-100 supports-backdrop-filter:backdrop-blur-xs data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
         className
       )}
       {...props}
@@ -59,7 +59,7 @@ function DialogContent({
       <DialogPrimitive.Content
         data-slot="dialog-content"
         className={cn(
-          "fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-4 overflow-hidden rounded-2xl border border-black/5 bg-dialog p-6 text-(length:--text-ui) text-popover-foreground shadow-(--shadow-dialog) duration-(--duration) outline-none dark:border-white/8 mac:top-[52px] mac:translate-y-0 mac:p-5 sm:max-w-sm data-open:animate-in data-open:fade-in-0 data-open:zoom-in-105 mac:data-open:zoom-in-100 mac:data-open:slide-in-from-top-4 linux:data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0",
+          "fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-4 rounded-xl bg-popover p-4 text-sm text-popover-foreground ring-1 ring-foreground/10 duration-100 outline-none sm:max-w-sm data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
           className
         )}
         {...props}
@@ -69,7 +69,7 @@ function DialogContent({
           <DialogPrimitive.Close data-slot="dialog-close" asChild>
             <Button
               variant="ghost"
-              className="absolute top-3 right-3 mac:hidden"
+              className="absolute top-2 right-2"
               size="icon-sm"
             >
               <XIcon
@@ -105,7 +105,7 @@ function DialogFooter({
     <div
       data-slot="dialog-footer"
       className={cn(
-        "-mx-6 -mb-6 flex flex-row justify-end gap-2 bg-dialog-footer px-6 pt-0 pb-6 win:mt-2 win:border-t win:pt-6 mac:-mx-5 mac:-mb-5 mac:px-5 mac:pb-5 mac:[&>[data-slot=button]]:min-w-[76px] linux:[&>[data-slot=button]]:min-w-[96px]",
+        "-mx-4 -mb-4 flex flex-col-reverse gap-2 rounded-b-xl border-t bg-muted/50 p-4 sm:flex-row sm:justify-end",
         className
       )}
       {...props}
@@ -128,7 +128,7 @@ function DialogTitle({
     <DialogPrimitive.Title
       data-slot="dialog-title"
       className={cn(
-        "text-xl leading-tight font-semibold mac:text-[13px] mac:font-bold linux:text-lg linux:font-bold",
+        "text-base leading-none font-medium",
         className
       )}
       {...props}
@@ -144,7 +144,7 @@ function DialogDescription({
     <DialogPrimitive.Description
       data-slot="dialog-description"
       className={cn(
-        "text-[13px] text-muted-foreground mac:text-xs *:[a]:underline *:[a]:underline-offset-3 *:[a]:hover:text-foreground",
+        "text-sm text-muted-foreground *:[a]:underline *:[a]:underline-offset-3 *:[a]:hover:text-foreground",
         className
       )}
       {...props}

@@ -1,12 +1,15 @@
 /*
- * 录播宝桌面主题：跟随系统的三套平台主题，说明见 docs/design/native-ui.md，原型见 docs/prototypes/native.html。
+ * 录播宝桌面主题。说明见 docs/design/native-ui.md。
  *
- * - 根节点 data-platform 选择平台：windows（Windows 11 Fluent，默认）、macos、linux（Adwaita 风格）。
+ * 控件一律用 shadcn/ui Nova 默认实现（src/components/ui/ 不改），平台差异只写在这里：
+ * - 根节点 data-platform 选择平台：windows（Windows 11，默认）、macos、linux（GNOME/Adwaita 风格）。
+ *   平台改的是 shadcn 语义变量（--radius、--background、--card、--popover、--muted、--border、--input、
+ *   --sidebar 等）和字体、字号；组件跟着变。
  * - 根节点 data-material 表示窗口材质是否生效：mica（Windows 11）、vibrancy（macOS）、none。
  *   材质生效时窗口底和侧栏透明，露出系统材质；none 时一律画不透明底色（Windows 10、Linux、浏览器预览）。
- * - 浅色/深色跟随 prefers-color-scheme。
- * - 主色固定为 Teal（浅色 teal-700、深色 teal-400），状态色三个平台相同。
- * 变量名沿用 shadcn/ui 语义名称，另加窗口、内容层、控件和尺寸变量；index.css 把它们映射进 Tailwind。
+ * - 另有少量页面布局用的变量：--window（窗口底）、--content（内容层）、--selection（选中行）、
+ *   --statusbar，以及字号、导航项高度、内容边距、侧栏宽度、工具栏高度。
+ * - 浅色/深色跟随 prefers-color-scheme。主色固定为 Teal（浅色 teal-700、深色 teal-400），状态色三个平台相同。
  */
 
 /* ================= Windows 11（默认） ================= */
@@ -14,36 +17,29 @@
   color-scheme: light;
 
   --font-ui: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI", sans-serif;
-  --text-ui: 14px; /* 导航、设置、对话框 */
+  --text-ui: 14px; /* 正文、导航、设置、对话框（Tailwind text-sm） */
   --text-dense: 13px; /* 任务表、详情、录像库、动态 */
-  --text-small: 12px;
+  --text-small: 12px; /* 说明文字（Tailwind text-xs） */
   --text-title: 20px;
   --weight-title: 600;
-  --control-h: 32px;
-  --control-h-sm: 28px;
   --nav-item-h: 36px;
   --page-pad: 24px;
   --sidebar-width: 216px;
   --header-h: auto;
-  --menu-item-h: 32px;
-  --radius: 4px; /* 控件 */
-  --radius-card: 8px; /* 卡片、内容层 */
-  --radius-dialog: 8px;
-  --radius-menu: 8px;
-  --ease: cubic-bezier(0, 0, 0, 1);
-  --duration: 167ms;
+  --radius: 4px;
 
   --window: #f3f3f3;
   --content: #f9f9f9;
   --content-border: rgb(0 0 0 / 0.06);
-  --background: var(--content);
+  --statusbar: var(--window);
+  --selection: rgb(15 118 110 / 0.1); /* 选中行 */
+
+  --background: #fdfdfd; /* 控件内部（次级按钮、开关滑块）用，保持不透明 */
   --foreground: rgb(0 0 0 / 0.896);
   --card: rgb(255 255 255 / 0.7);
   --card-foreground: var(--foreground);
   --popover: #f9f9f9;
   --popover-foreground: var(--foreground);
-  --dialog: #ffffff;
-  --dialog-footer: #f3f3f3;
 
   --primary: #0f766e; /* teal-700 */
   --primary-foreground: #ffffff;
@@ -53,21 +49,11 @@
   --muted-foreground: rgb(0 0 0 / 0.606);
   --accent: rgb(0 0 0 / 0.037); /* 悬停 */
   --accent-foreground: var(--foreground);
-  --selection: rgb(15 118 110 / 0.1); /* 选中行 */
   --destructive: #c42b1c;
 
   --border: rgb(0 0 0 / 0.08);
-  --input: rgb(0 0 0 / 0.08);
+  --input: rgb(0 0 0 / 0.16);
   --ring: var(--primary);
-
-  --control: rgb(255 255 255 / 0.7);
-  --control-hover: rgb(249 249 249 / 0.5);
-  --control-pressed: rgb(249 249 249 / 0.3);
-  --control-border: rgb(0 0 0 / 0.06);
-  --control-border-strong: rgb(0 0 0 / 0.16); /* Fluent 控件下边缘 */
-  --control-shadow: none;
-  --field: rgb(255 255 255 / 0.7);
-  --field-underline: rgb(0 0 0 / 0.45);
 
   --sidebar: var(--window);
   --sidebar-foreground: var(--foreground);
@@ -77,11 +63,6 @@
   --sidebar-accent-foreground: var(--foreground);
   --sidebar-border: transparent;
   --sidebar-ring: var(--primary);
-  --statusbar: var(--window);
-
-  --shadow-popover: 0 8px 16px rgb(0 0 0 / 0.14);
-  --shadow-dialog: 0 32px 64px rgb(0 0 0 / 0.19), 0 2px 21px rgb(0 0 0 / 0.15);
-  --scrim: rgb(0 0 0 / 0.3);
 
   /* 任务状态：颜色之外必须同时显示文字或图标 */
   --status-recording: #dc2626; /* red-600，实心红点 */
@@ -108,53 +89,32 @@
   --text-small: 11px;
   --text-title: 15px;
   --weight-title: 700;
-  --control-h: 24px;
-  --control-h-sm: 22px;
   --nav-item-h: 28px;
   --page-pad: 20px;
   --sidebar-width: 208px;
   --header-h: 52px; /* 统一工具栏，红绿灯与之垂直居中 */
-  --menu-item-h: 22px;
   --radius: 6px;
-  --radius-card: 10px;
-  --radius-dialog: 12px;
-  --radius-menu: 7px;
-  --ease: ease-out;
-  --duration: 200ms;
 
   --window: #ececec;
   --content: #ffffff;
   --content-border: rgb(0 0 0 / 0.1);
+  --statusbar: #f6f6f6;
+
+  --background: #ffffff;
   --foreground: rgb(0 0 0 / 0.85);
   --card: rgb(0 0 0 / 0.025);
   --popover: rgb(246 246 246 / 0.97);
-  --dialog: #ececec;
-  --dialog-footer: transparent;
   --secondary: rgb(0 0 0 / 0.05);
   --muted: rgb(0 0 0 / 0.05);
   --muted-foreground: rgb(0 0 0 / 0.5);
   --accent: rgb(0 0 0 / 0.05);
   --destructive: #dc2626;
   --border: rgb(0 0 0 / 0.1);
-  --input: rgb(0 0 0 / 0.12);
-
-  --control: #ffffff;
-  --control-hover: #ffffff;
-  --control-pressed: #f0f0f0;
-  --control-border: rgb(0 0 0 / 0.12);
-  --control-border-strong: rgb(0 0 0 / 0.2);
-  --control-shadow: 0 0.5px 1.5px rgb(0 0 0 / 0.12);
-  --field: #ffffff;
-  --field-underline: rgb(0 0 0 / 0.14);
+  --input: rgb(0 0 0 / 0.15);
 
   --sidebar: #e8e8eb;
   --sidebar-accent: rgb(0 0 0 / 0.08);
   --sidebar-border: rgb(0 0 0 / 0.1);
-  --statusbar: #f6f6f6;
-
-  --shadow-popover: 0 0 0 0.5px rgb(0 0 0 / 0.15), 0 10px 30px rgb(0 0 0 / 0.18);
-  --shadow-dialog: 0 0 0 0.5px rgb(0 0 0 / 0.2), 0 22px 60px rgb(0 0 0 / 0.3);
-  --scrim: rgb(0 0 0 / 0.1);
 }
 
 :root[data-platform="macos"][data-material="vibrancy"] {
@@ -170,55 +130,37 @@
   --text-small: 12px;
   --text-title: 18px;
   --weight-title: 700;
-  --control-h: 34px;
-  --control-h-sm: 28px;
   --nav-item-h: 38px;
   --page-pad: 18px;
   --sidebar-width: 216px;
-  --menu-item-h: 32px;
-  --radius: 6px;
-  --radius-card: 12px;
-  --radius-dialog: 14px;
-  --radius-menu: 12px;
-  --ease: ease-out;
-  --duration: 200ms;
+  --radius: 8px;
 
   --window: #fafafb;
   --content: #fafafb;
   --content-border: rgb(0 0 6 / 0.07);
+  --statusbar: #ebebed;
+
+  --background: #ffffff;
   --foreground: rgb(0 0 6 / 0.8);
   --card: #ffffff;
   --popover: #ffffff;
-  --dialog: #ffffff;
-  --dialog-footer: transparent;
   --secondary: rgb(0 0 6 / 0.08);
   --muted: rgb(0 0 6 / 0.05);
   --muted-foreground: rgb(0 0 6 / 0.55);
   --accent: rgb(0 0 6 / 0.05);
   --destructive: #c01c28;
   --border: rgb(0 0 6 / 0.1);
-  --input: rgb(0 0 6 / 0.1);
-
-  --control: rgb(0 0 6 / 0.08);
-  --control-hover: rgb(0 0 6 / 0.12);
-  --control-pressed: rgb(0 0 6 / 0.16);
-  --control-border: transparent;
-  --control-border-strong: transparent;
-  --control-shadow: none;
-  --field: rgb(0 0 6 / 0.05);
-  --field-underline: transparent;
+  --input: rgb(0 0 6 / 0.15);
 
   --sidebar: #ebebed;
   --sidebar-accent: rgb(0 0 6 / 0.1);
   --sidebar-border: rgb(0 0 6 / 0.07);
-  --statusbar: #ebebed;
-
-  --shadow-popover: 0 1px 5px 1px rgb(0 0 0 / 0.09), 0 2px 14px 3px rgb(0 0 0 / 0.05);
-  --shadow-dialog: 0 1px 5px 1px rgb(0 0 0 / 0.09), 0 4px 30px 6px rgb(0 0 0 / 0.12);
-  --scrim: rgb(0 0 0 / 0.2);
 }
 
-/* ================= 深色 ================= */
+/*
+ * ================= 深色 =================
+ * 浅色的平台块选择器更具体，所以各平台的深色块要把浅色块里设过的颜色全部重写一遍。
+ */
 @media (prefers-color-scheme: dark) {
   :root {
     color-scheme: dark;
@@ -226,11 +168,12 @@
     --window: #202020;
     --content: #272727;
     --content-border: rgb(255 255 255 / 0.06);
+    --selection: rgb(45 212 191 / 0.13);
+
+    --background: #2d2d2d;
     --foreground: #ffffff;
     --card: rgb(255 255 255 / 0.05);
     --popover: #2c2c2c;
-    --dialog: #2b2b2b;
-    --dialog-footer: #202020;
 
     --primary: #2dd4bf; /* teal-400 */
     --primary-foreground: #042f2e; /* teal-950 */
@@ -238,24 +181,12 @@
     --muted: rgb(255 255 255 / 0.06);
     --muted-foreground: rgb(255 255 255 / 0.786);
     --accent: rgb(255 255 255 / 0.06);
-    --selection: rgb(45 212 191 / 0.13);
     --destructive: #ff99a4;
 
     --border: rgb(255 255 255 / 0.08);
-    --input: rgb(255 255 255 / 0.08);
-
-    --control: rgb(255 255 255 / 0.06);
-    --control-hover: rgb(255 255 255 / 0.084);
-    --control-pressed: rgb(255 255 255 / 0.04);
-    --control-border: rgb(255 255 255 / 0.07);
-    --control-border-strong: rgb(255 255 255 / 0.03);
-    --field: rgb(255 255 255 / 0.06);
-    --field-underline: rgb(255 255 255 / 0.54);
+    --input: rgb(255 255 255 / 0.14);
 
     --sidebar-accent: rgb(255 255 255 / 0.06);
-
-    --shadow-popover: 0 8px 16px rgb(0 0 0 / 0.26);
-    --shadow-dialog: 0 32px 64px rgb(0 0 0 / 0.37), 0 2px 21px rgb(0 0 0 / 0.37);
 
     --status-recording: #f87171; /* red-400 */
     --status-waiting: #64748b; /* slate-500 */
@@ -273,33 +204,21 @@
     --window: #2b2b2d;
     --content: #1e1e1e;
     --content-border: rgb(0 0 0 / 0.6);
+    --statusbar: #252525;
+    --background: #1e1e1e;
     --foreground: rgb(255 255 255 / 0.85);
     --card: rgb(255 255 255 / 0.04);
     --popover: rgb(40 40 42 / 0.97);
-    --dialog: #2b2b2d;
-    --dialog-footer: transparent;
     --secondary: rgb(255 255 255 / 0.08);
     --muted: rgb(255 255 255 / 0.08);
-    --accent: rgb(255 255 255 / 0.06);
     --muted-foreground: rgb(255 255 255 / 0.55);
+    --accent: rgb(255 255 255 / 0.06);
     --destructive: #f87171;
     --border: rgb(255 255 255 / 0.1);
-    --input: rgb(255 255 255 / 0.12);
-    --control: rgb(255 255 255 / 0.14);
-    --control-hover: rgb(255 255 255 / 0.18);
-    --control-pressed: rgb(255 255 255 / 0.22);
-    --control-border: rgb(255 255 255 / 0.06);
-    --control-border-strong: rgb(255 255 255 / 0.02);
-    --control-shadow: 0 0.5px 1.5px rgb(0 0 0 / 0.3);
-    --field: rgb(255 255 255 / 0.06);
-    --field-underline: rgb(255 255 255 / 0.12);
+    --input: rgb(255 255 255 / 0.16);
     --sidebar: #2a2a2d;
     --sidebar-accent: rgb(255 255 255 / 0.1);
     --sidebar-border: rgb(0 0 0 / 0.5);
-    --statusbar: #252525;
-    --shadow-popover: 0 0 0 0.5px rgb(255 255 255 / 0.12), 0 10px 30px rgb(0 0 0 / 0.45);
-    --shadow-dialog: 0 0 0 0.5px rgb(255 255 255 / 0.12), 0 22px 60px rgb(0 0 0 / 0.55);
-    --scrim: rgb(0 0 0 / 0.2);
   }
 
   :root[data-platform="macos"][data-material="vibrancy"] {
@@ -311,30 +230,21 @@
     --window: #222226;
     --content: #222226;
     --content-border: rgb(0 0 0 / 0.36);
+    --statusbar: #2e2e32;
+    --background: #2a2a2e;
     --foreground: #ffffff;
     --card: #2a2a2e;
     --popover: #36363a;
-    --dialog: #36363a;
-    --dialog-footer: transparent;
     --secondary: rgb(255 255 255 / 0.1);
     --muted: rgb(255 255 255 / 0.06);
-    --accent: rgb(255 255 255 / 0.06);
     --muted-foreground: rgb(255 255 255 / 0.6);
+    --accent: rgb(255 255 255 / 0.06);
     --destructive: #ff7b63;
     --border: rgb(255 255 255 / 0.1);
-    --input: rgb(255 255 255 / 0.1);
-    --control: rgb(255 255 255 / 0.1);
-    --control-hover: rgb(255 255 255 / 0.15);
-    --control-pressed: rgb(255 255 255 / 0.2);
-    --control-border: transparent;
-    --control-border-strong: transparent;
-    --field: rgb(255 255 255 / 0.08);
-    --field-underline: transparent;
+    --input: rgb(255 255 255 / 0.16);
     --sidebar: #2e2e32;
     --sidebar-accent: rgb(255 255 255 / 0.1);
     --sidebar-border: rgb(0 0 0 / 0.36);
-    --statusbar: #2e2e32;
-    --scrim: rgb(0 0 0 / 0.4);
   }
 }
 

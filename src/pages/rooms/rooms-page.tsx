@@ -359,7 +359,7 @@ export function RoomsPage({ taskList, view, onViewChange, focusTask }: RoomsPage
                   <div
                     role="toolbar"
                     aria-label="批量操作"
-                    className="pointer-events-auto flex items-center gap-1 rounded-xl border border-black/5 bg-popover py-1 pr-1 pl-3.5 text-popover-foreground shadow-(--shadow-popover) dark:border-black/20"
+                    className="pointer-events-auto flex items-center gap-1 rounded-xl bg-popover py-1 pr-1 pl-3.5 text-popover-foreground shadow-lg ring-1 ring-foreground/10"
                   >
                     <span className="mr-1.5 text-[13px] whitespace-nowrap tabular-nums">已选 {selected.length} 项</span>
                     <Button variant="ghost" size="sm" onClick={() => void batchMonitoring(true)} disabled={batchBusy}>
@@ -509,7 +509,7 @@ function SearchBox({
         title={withShortcut("搜索", "F")}
         spellCheck={false}
         autoComplete="off"
-        className="pr-7 pl-8 mac:h-7 mac:rounded-[7px] mac:border-transparent mac:bg-muted mac:shadow-none"
+        className="pr-7 pl-8"
       />
       {value && (
         <button
@@ -542,7 +542,7 @@ function StatusFilter({
     <div
       role="group"
       aria-label="按状态筛选"
-      className="flex min-w-0 flex-wrap items-center gap-0.5 mac:rounded-[7px] mac:bg-muted mac:p-0.5 linux:rounded-md linux:bg-control linux:p-0.5"
+      className="flex min-w-0 flex-wrap items-center gap-0.5 mac:rounded-lg mac:bg-muted mac:p-0.5 linux:rounded-lg linux:bg-muted linux:p-0.5"
     >
       {statusGroups.map((group) => {
         const on = value === group.id;
@@ -554,14 +554,14 @@ function StatusFilter({
             aria-pressed={on}
             onClick={() => onChange(group.id)}
             className={cn(
-              "relative inline-flex h-(--control-h) items-center gap-1.5 rounded-md px-2 whitespace-nowrap text-muted-foreground outline-none transition-colors duration-(--duration)",
+              "relative inline-flex h-8 items-center gap-1.5 rounded-md px-2 whitespace-nowrap text-muted-foreground outline-none transition-colors",
               "hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
-              "mac:h-[22px] mac:rounded-[5px] mac:px-2 mac:text-xs mac:hover:bg-transparent",
-              "linux:h-[30px]",
+              "mac:h-7 mac:px-2 mac:hover:bg-transparent",
+              "linux:h-7",
               on && "text-foreground",
               on &&
                 "win:after:absolute win:after:bottom-0 win:after:left-1/2 win:after:h-[3px] win:after:w-4 win:after:-translate-x-1/2 win:after:rounded-full win:after:bg-primary",
-              on && "mac:bg-control mac:shadow-(--control-shadow) mac:hover:bg-control linux:bg-card linux:shadow-xs linux:hover:bg-card",
+              on && "mac:bg-background mac:shadow-xs mac:hover:bg-background linux:bg-background linux:shadow-xs linux:hover:bg-background",
             )}
           >
             {mark && <StatusMark status={mark} />}

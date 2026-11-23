@@ -8,6 +8,10 @@
   原生界面原型：Windows 11 Fluent / macOS / Linux（Adwaita 风格）× 浅色 / 深色。
   说明见 docs/design/native-ui.md。参数：?platform=windows|macos|linux&theme=light|dark&page=rooms|library|settings&dialog=add&ui=0
   Mica 与毛玻璃无法在网页里真实绘制，这里用模糊渐变近似；窗口外框、标题栏和红绿灯为示意，真实应用由系统绘制。
+
+  2026-11-23 决定：控件（按钮、输入框、开关、复选框、对话框、菜单等）改用 shadcn/ui Nova 默认样式，平台差异只通过
+  token（圆角、字体、字号、配色）和页面布局体现。本原型里的控件外形是当初的探索，以应用实际效果为准；
+  布局、材质、标题栏、对话框按钮顺序和右键菜单内容仍然有效。
 -->
 <style>
 /* ================= 平台与主题 token ================= */
@@ -638,6 +642,7 @@ tbody tr.paused td:not(:first-child) { opacity: .5; }
   <div class="g"><span>主题</span><button data-set="theme" data-v="light">浅色</button><button data-set="theme" data-v="dark">深色</button></div>
   <div class="g"><span>页面</span><button data-set="page" data-v="rooms">直播间</button><button data-set="page" data-v="library">录像库</button><button data-set="page" data-v="settings">设置</button></div>
   <div class="g"><span></span><button id="open-add">添加对话框</button><span style="width:auto;color:#9ca3af">· 右键任务行看菜单</span></div>
+  <div class="g" style="color:#9ca3af">控件外形以应用的 shadcn Nova 默认样式为准，见文件头注释</div>
 </div>
 
 <script>
