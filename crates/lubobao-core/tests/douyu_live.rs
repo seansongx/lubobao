@@ -203,12 +203,24 @@ async fn live_room_records_thirty_seconds() {
         .args(["-f", "null", "-"])
         .output()
         .expect("run ffmpeg check");
-    let errors = String::from_utf8_lossy(&check.stderr);
+    let stderr = String::from_utf8_lossy(&check.stderr);
+    // Some Douyu streams (e.g. rebroadcast channels) repeat a few timestamps
+    // in the source FLV itself; the null muxer reports them but every frame
+    // decodes. Anything else is a real error. Same rule as `huya_live.rs`.
+    const SOURCE_DTS: &str = "non monotonically increasing dts";
+    let repeated = stderr
+        .lines()
+        .filter(|line| line.contains(SOURCE_DTS))
+        .count();
+    let errors: Vec<&str> = stderr
+        .lines()
+        .filter(|line| !line.contains(SOURCE_DTS))
+        .collect();
     println!(
-        "check exit={:?} stderr_lines={}",
+        "check exit={:?} stderr_lines={} repeated_source_dts={repeated}",
         check.status.code(),
-        errors.lines().count()
+        stderr.lines().count()
     );
-    assert!(check.status.success(), "ffmpeg check failed: {errors}");
-    assert!(errors.trim().is_empty(), "ffmpeg reported errors: {errors}");
+    assert!(check.status.success(), "ffmpeg check failed: {stderr}");
+    assert!(errors.is_empty(), "ffmpeg reported errors: {errors:#?}");
 }
