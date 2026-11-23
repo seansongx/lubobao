@@ -236,6 +236,17 @@
   }
 }
 
+/*
+ * 隐藏的页面（PageSlot）立即消失：Nova 的按钮、徽标、开关、Tabs 等用 transition-all，visibility 也在过渡范围内，
+ * 从 visible 变 hidden 时要等过渡结束才真正隐藏，切换页面会看到上一页的控件残留一瞬间。
+ */
+[data-page-hidden],
+[data-page-hidden] *,
+[data-page-hidden] *::before,
+[data-page-hidden] *::after {
+  transition: none !important;
+}
+
 /* 选中文字的颜色用 Teal */
 ::selection {
   background: color-mix(in srgb, var(--primary) 30%, transparent);

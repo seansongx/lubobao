@@ -35,6 +35,7 @@ export function PageSlot({ active, children }: { active: boolean; children: Reac
     <PageActiveContext.Provider value={active}>
       <div
         data-page-active={active || undefined}
+        data-page-hidden={!active || undefined}
         inert={!active}
         className={cn("flex min-h-0 min-w-0 flex-1", !active && "pointer-events-none invisible absolute inset-0")}
       >
