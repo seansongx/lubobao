@@ -241,7 +241,8 @@ jobs:
             if (s.ffmpeg.state !== "external" || !s.ffmpeg.ffmpegVersion) fail("内置 FFmpeg 不可用");
           '
           docker exec lubobao lubobao-cli config set loop_time_seconds 60
-          uid="$(docker top lubobao -eo uid,comm | awk '$2 == "lubobao-cli" { print $1; exit }')"
+          # docker top 的 ps 参数里必须带 pid 列，否则 Docker 报 "Couldn't find PID field"。
+          uid="$(docker top lubobao -eo pid,uid,comm | awk '$3 == "lubobao-cli" { print $2; exit }')"
           echo "uid=$uid"
           [ -n "$uid" ] && [ "$uid" != "0" ] && [ "$uid" != "root" ] || { echo "::error::容器以 root 运行"; exit 1; }
           docker stop -t 45 lubobao
