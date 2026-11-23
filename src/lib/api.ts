@@ -359,10 +359,14 @@ export type UpdateCheck =
   | { status: "upToDate"; currentVersion: string }
   | { status: "available"; update: UpdateInfo; install: UpdateInstallMode };
 
-/** 下载进度，update-progress 事件。total 为 null 时服务器没给长度。 */
+/**
+ * 下载进度，update-progress 事件。total 为 null 时服务器没给长度。fallback 为 true 时主线路
+ * 下载失败、已改从备用线路（GitHub）下载同一版本，downloaded 从 0 重新计数。
+ */
 export interface UpdateProgress {
   downloaded: number;
   total: number | null;
+  fallback: boolean;
 }
 
 // ---- 录像库（src-tauri/src/library） ----
