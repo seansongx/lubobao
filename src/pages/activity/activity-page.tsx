@@ -401,7 +401,7 @@ function ActivityRow({ entry, task, fresh, onNavigate }: ActivityRowProps) {
     <div
       className={cn(
         "grid grid-cols-[44px_28px_minmax(0,1fr)_auto] items-center gap-2.5 border-b px-3.5 py-2.5 last:border-b-0",
-        fresh && "animate-in fade-in slide-in-from-top-1 duration-500",
+        fresh && "animate-in fade-in slide-in-from-top-1 duration-500 motion-reduce:animate-none",
       )}
     >
       <Tooltip>
