@@ -29,6 +29,12 @@ pub const PROGRESS_EVENT: &str = "update-progress";
 /// 调试构建中覆盖升级接口的环境变量。
 const ENDPOINT_ENV: &str = "LUBOBAO_UPDATER_ENDPOINT";
 const CLIENT_ID_FILE: &str = "client-id";
+const CLIENT_ID_HEADER: &str = "X-Client-Id";
+/// 检查更新的总时限。下载不设总时限（安装包可能很大），只靠 [`READ_TIMEOUT`]。
+const CHECK_TIMEOUT: Duration = Duration::from_secs(30);
+/// 连接建立后多久收不到数据就放弃（检查和下载都适用），免得一直停在「正在检查」。
+const READ_TIMEOUT: Duration = Duration::from_secs(30);
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -255,9 +261,14 @@ fn build_updater(app: &tauri::AppHandle) -> Result<tauri_plugin_updater::Updater
     }
     let mut builder = app
         .updater_builder()
-        .configure_client(|client| client.connect_timeout(Duration::from_secs(15)));
+        .timeout(CHECK_TIMEOUT)
+        .configure_client(|client| {
+            client
+                .connect_timeout(CONNECT_TIMEOUT)
+                .read_timeout(READ_TIMEOUT)
+        });
     if let Some(id) = client_id(app) {
-        builder = builder.header("X-Client-Id", id)?;
+        builder = builder.header(CLIENT_ID_HEADER, id)?;
     }
     if cfg!(debug_assertions)
         && let Ok(endpoint) = std::env::var(ENDPOINT_ENV)
@@ -308,6 +319,29 @@ fn state(app: &tauri::AppHandle) -> Result<tauri::State<'_, UpdateState>, Update
         .ok_or_else(|| UpdateError::new(UpdateErrorKind::NotReady, "更新模块还没有初始化"))
 }
 
+/// 下载地址必须是 https（调试构建为了本地测试服务器也接受 http）。
+fn download_url_allowed(url: &tauri::Url, debug: bool) -> bool {
+    url.scheme() == "https" || (debug && url.scheme() == "http")
+}
+
+/// 整理检查得到的更新，准备下载：地址必须是 https；去掉总时限（只保留读超时）；不把客户端
+/// ID 发给下载服务器（dl.xiaofany.cn），它只用于升级接口的灰度。
+fn prepare_download(mut update: Update) -> Result<Update, UpdateError> {
+    if !download_url_allowed(&update.download_url, cfg!(debug_assertions)) {
+        return Err(UpdateError::new(
+            UpdateErrorKind::Network,
+            format!(
+                "更新服务器给出的下载地址不是 https，已拒绝：{}://{}",
+                update.download_url.scheme(),
+                update.download_url.host_str().unwrap_or_default()
+            ),
+        ));
+    }
+    update.timeout = None;
+    update.headers.remove(CLIENT_ID_HEADER);
+    Ok(update)
+}
+
 /// 检查更新。发现新版本时记下，供 [`download_update`] 使用。
 #[tauri::command]
 pub async fn check_update(app: tauri::AppHandle) -> Result<UpdateCheck, UpdateError> {
@@ -317,6 +351,7 @@ pub async fn check_update(app: tauri::AppHandle) -> Result<UpdateCheck, UpdateEr
     let current_version = app.package_info().version.to_string();
     match updater.check().await? {
         Some(update) => {
+            let update = prepare_download(update)?;
             let info = info_of(&update);
             {
                 let mut downloaded = lock(&state.downloaded);
@@ -407,37 +442,63 @@ pub async fn install_update(app: tauri::AppHandle) -> Result<(), UpdateError> {
     if let Err(error) = update.verify(&bytes) {
         return Err(error.into());
     }
-    if quit::phase(&app) != quit::QuitPhase::Idle {
+    // 在主线程上判断并进入收尾，与退出入口（也都在主线程）不会交错。
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        let idle = quit::phase(&handle) == quit::QuitPhase::Idle;
+        if idle {
+            quit::begin_update(&handle);
+        }
+        let _ = sender.send(idle);
+    });
+    if !receiver.await.unwrap_or(false) {
         *lock(&state.downloaded) = Some((update.version.clone(), bytes));
         return Err(UpdateError::new(
             UpdateErrorKind::Busy,
             "正在退出录播宝，暂时不能安装更新",
         ));
     }
-    let (sender, receiver) = tokio::sync::oneshot::channel();
+    if let Some(code) = crate::scheduler::tauri_glue::finish_before_update(&app).await {
+        // 收尾期间有退出请求（注销、关机等）：放弃安装，照常退出。
+        app.exit(code);
+        return Err(UpdateError::new(
+            UpdateErrorKind::Busy,
+            "录播宝正在退出，已取消安装更新",
+        ));
+    }
+    // Windows：启动安装器后插件调用 `std::process::exit`，不会返回。
+    let installed = tauri::async_runtime::spawn_blocking(move || update.install(&bytes)).await;
+    let reason = match installed {
+        Ok(Ok(())) => {
+            app.request_restart();
+            return Ok(());
+        }
+        Ok(Err(error)) => format!("安装失败：{error}"),
+        Err(error) => format!("安装失败：{error}"),
+    };
+    // 调度已经停止、无法恢复：显示窗口，前端只给「重启录播宝」。
     let handle = app.clone();
     let _ = app.run_on_main_thread(move || {
-        quit::begin_update(&handle);
-        let _ = sender.send(());
+        quit::end_update(&handle);
+        super::show_main_window(&handle);
     });
-    let _ = receiver.await;
-    crate::scheduler::tauri_glue::finish_before_update(&app).await;
-    // Windows：启动安装器后插件调用 `std::process::exit`，不会返回。
-    match update.install(&bytes) {
-        Ok(()) => {
-            app.request_restart();
-            Ok(())
-        }
-        Err(error) => {
-            let message = format!(
-                "{}。录制已经停止，请重启录播宝",
-                UpdateError::from(error).message
-            );
-            let handle = app.clone();
-            let _ = app.run_on_main_thread(move || quit::end_update(&handle));
-            Err(UpdateError::new(UpdateErrorKind::Install, message))
-        }
+    // 前端的标题已经说明「已停止录制，重启后恢复监控」，这里只给原因。
+    Err(UpdateError::new(UpdateErrorKind::Install, reason))
+}
+
+/// 安装更新失败后重启录播宝。只在录制已经收尾（调度已停止）后允许：重启不经过退出确认和
+/// 收尾，不能拿来绕过它们。
+#[tauri::command]
+pub fn restart_after_failed_update(app: tauri::AppHandle) -> Result<(), UpdateError> {
+    if !crate::scheduler::tauri_glue::finished() {
+        return Err(UpdateError::new(
+            UpdateErrorKind::NotReady,
+            "录制还没有收尾，不能直接重启",
+        ));
     }
+    app.request_restart();
+    Ok(())
 }
 
 #[cfg(test)]
@@ -453,6 +514,17 @@ mod tests {
         assert!(pubkey_configured(Some(
             "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWdu"
         )));
+    }
+
+    #[test]
+    fn download_urls_must_use_https_outside_debug_builds() {
+        let https = tauri::Url::parse("https://dl.xiaofany.cn/a.exe").unwrap();
+        let http = tauri::Url::parse("http://dl.xiaofany.cn/a.exe").unwrap();
+        let file = tauri::Url::parse("file:///C:/a.exe").unwrap();
+        assert!(download_url_allowed(&https, false));
+        assert!(!download_url_allowed(&http, false));
+        assert!(download_url_allowed(&http, true));
+        assert!(!download_url_allowed(&file, true));
     }
 
     #[test]

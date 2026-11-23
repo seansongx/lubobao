@@ -29,6 +29,8 @@ import { Markdown } from "@/pages/settings/markdown";
 
 /** 启动后多久自动检查一次。 */
 const AUTO_CHECK_DELAY_MS = 10_000;
+/** 之后每隔多久再检查一次（常驻托盘的用户也能收到更新）。 */
+const AUTO_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 export type UpdateFlow =
   | { step: "idle" }
@@ -138,8 +140,13 @@ async function install(update: UpdateInfo) {
   }
 }
 
+/** 安装中，或安装失败（录制已停止，只能重启）时对话框不能关闭。 */
+function locked(current: UpdateFlow = flow) {
+  return current.step === "installing" || (current.step === "failed" && current.error.kind === "install");
+}
+
 function later() {
-  if (flow.step === "installing") return;
+  if (locked()) return;
   setFlow({ step: "idle" });
 }
 
@@ -154,20 +161,28 @@ function formatDate(value: string | null) {
   return Number.isNaN(date.getTime()) ? null : date.toLocaleDateString("zh-CN");
 }
 
-/** 挂在 App 上：启动约 10 秒后按设置自动检查一次，发现新版本时弹出对话框。 */
+/**
+ * 挂在 App 上：按设置在启动约 10 秒后自动检查一次，之后每 24 小时再检查一次，发现新版本时
+ * 弹出对话框。每次检查前重新读取设置，开关随时生效。
+ */
 export function UpdateDialog() {
   const current = useUpdateFlow();
 
   useEffect(() => {
-    const timer = window.setTimeout(() => {
+    const autoCheck = () => {
       api
         .getSettings()
         .then((settings) => {
           if (settings.auto_check_update) void checkForUpdates({ manual: false });
         })
         .catch(() => {});
-    }, AUTO_CHECK_DELAY_MS);
-    return () => window.clearTimeout(timer);
+    };
+    const timer = window.setTimeout(autoCheck, AUTO_CHECK_DELAY_MS);
+    const interval = window.setInterval(autoCheck, AUTO_CHECK_INTERVAL_MS);
+    return () => {
+      window.clearTimeout(timer);
+      window.clearInterval(interval);
+    };
   }, []);
 
   const open = current.step !== "idle" && current.step !== "checking";
@@ -185,18 +200,22 @@ export function UpdateDialog() {
 
 function UpdateContent({ flow: current }: { flow: Exclude<UpdateFlow, { step: "idle" } | { step: "checking" }> }) {
   const { update } = current;
-  const installing = current.step === "installing";
+  const fixed = locked(current);
+  const title =
+    current.step === "failed" && current.error.kind === "signature"
+      ? "已拒绝安装更新"
+      : current.step === "failed" && current.error.kind === "install"
+        ? "安装更新失败"
+        : `发现新版本 v${update.version}`;
   return (
     <DialogContent
-      showCloseButton={!installing}
-      onEscapeKeyDown={(event) => installing && event.preventDefault()}
+      showCloseButton={!fixed}
+      onEscapeKeyDown={(event) => fixed && event.preventDefault()}
       onInteractOutside={(event) => event.preventDefault()}
       className="sm:max-w-[520px]"
     >
       <DialogHeader>
-        <DialogTitle>
-          {current.step === "failed" && current.error.kind === "signature" ? "已拒绝安装更新" : `发现新版本 v${update.version}`}
-        </DialogTitle>
+        <DialogTitle>{title}</DialogTitle>
         <DialogDescription>
           当前版本 v{update.currentVersion}
           {formatDate(update.pubDate) ? ` · 发布于 ${formatDate(update.pubDate)}` : ""}
@@ -219,7 +238,7 @@ function UpdateContent({ flow: current }: { flow: Exclude<UpdateFlow, { step: "i
       {current.step === "available" || current.step === "downloading" ? (
         <div className="max-h-[260px] overflow-y-auto rounded-md border bg-muted/40 px-3 py-2.5">
           {update.notes ? (
-            <Markdown source={update.notes} />
+            <Markdown source={update.notes} restrictLinks />
           ) : (
             <p className="m-0 text-[13px] text-muted-foreground">这个版本没有填写更新说明。</p>
           )}
@@ -384,13 +403,22 @@ function FailedStep({ update, error }: { update: UpdateInfo; error: UpdateError 
     );
   }
   if (error.kind === "install") {
+    // 录制已经收尾、调度已停止，录播宝不再检测和录制：不能关闭，只能重启。
     return (
       <>
-        <p role="alert" className="m-0 text-[13px] text-destructive">
-          {error.message}
-        </p>
+        <div role="alert" className="space-y-1 text-[13px]">
+          <p className="m-0 font-medium text-destructive">新版本没有装上，已停止录制，重启录播宝后恢复监控。</p>
+          <p className="m-0 break-all text-xs text-muted-foreground">{error.message}</p>
+        </div>
         <DialogFooter>
-          <Button type="button" onClick={() => void api.relaunch()}>
+          <Button
+            type="button"
+            onClick={() => {
+              api.restartAfterFailedUpdate().catch((reason: unknown) => {
+                toast.error(`无法重启：${asUpdateError(reason).message}`);
+              });
+            }}
+          >
             重启录播宝
           </Button>
         </DialogFooter>

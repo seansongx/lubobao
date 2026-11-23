@@ -17,9 +17,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
-        // 应用内更新（检查、下载、安装见 desktop::update）和安装后的重启。
+        // 应用内更新（检查、下载、安装和安装失败后的重启见 desktop::update）。
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_process::init())
         // 关闭主窗口：按设置隐藏到托盘（录制继续）、退出或询问。
         .on_window_event(desktop::on_window_event)
         .setup(|app| {
@@ -53,6 +52,7 @@ pub fn run() {
             desktop::update::check_update,
             desktop::update::download_update,
             desktop::update::install_update,
+            desktop::update::restart_after_failed_update,
             library::commands::list_library,
             library::commands::get_disk_space,
             library::commands::get_library_usage,

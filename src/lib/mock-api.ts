@@ -1319,11 +1319,11 @@ export function createMockBackend(): Backend {
       await delay(2500);
       setQuit("idle");
       if (updateMode === "install") {
-        throw { kind: "install", message: "安装更新失败：拒绝访问。录制已经停止，请重启录播宝" } satisfies UpdateError;
+        throw { kind: "install", message: "安装失败：拒绝访问。 (os error 5)" } satisfies UpdateError;
       }
       console.info("[mock] 已安装更新并重启（浏览器里回到 idle）");
     },
-    relaunch: async () => window.location.reload(),
+    restartAfterFailedUpdate: async () => window.location.reload(),
     onUpdateProgress: (handler) => updateProgressChannel.subscribe(handler),
 
     getAppVersion: () => Promise.resolve("0.1.0"),

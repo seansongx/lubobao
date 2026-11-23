@@ -7,7 +7,6 @@ import { getVersion } from "@tauri-apps/api/app";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { openUrl as openerOpenUrl } from "@tauri-apps/plugin-opener";
-import { relaunch as processRelaunch } from "@tauri-apps/plugin-process";
 
 import { createMockBackend } from "@/lib/mock-api";
 
@@ -496,8 +495,8 @@ export interface Backend {
    * 有录制时调用前先确认。成功时应用随即退出；失败时以 kind "install" reject。
    */
   installUpdate(): Promise<void>;
-  /** 重启录播宝（安装失败后用）。 */
-  relaunch(): Promise<void>;
+  /** 安装失败后重启录播宝（录制已收尾时才允许，Rust 命令 restart_after_failed_update）。 */
+  restartAfterFailedUpdate(): Promise<void>;
   onUpdateProgress(handler: (progress: UpdateProgress) => void): Promise<UnlistenFn>;
 
   /** 应用版本号（tauri.conf.json 的 version）。 */
@@ -552,7 +551,7 @@ const tauriBackend: Backend = {
   checkUpdate: () => invoke("check_update"),
   downloadUpdate: () => invoke("download_update"),
   installUpdate: () => invoke("install_update"),
-  relaunch: () => processRelaunch(),
+  restartAfterFailedUpdate: () => invoke("restart_after_failed_update"),
   onUpdateProgress: (handler) => on("update-progress", handler),
 
   getAppVersion: () => getVersion(),

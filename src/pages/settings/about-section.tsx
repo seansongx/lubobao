@@ -46,7 +46,7 @@ export function AboutSection({ ctx }: { ctx: SettingsController | null }) {
         </FieldRow>
         <SwitchField
           label="自动检查更新"
-          description="启动后检查一次，有新版本时提示，不会自动安装"
+          description="启动后和之后每天检查一次，有新版本时提示，不会自动安装。检查更新时会发送一个随机设备标识，用于分批推送"
           checked={ctx?.settings.auto_check_update ?? true}
           disabled={!ctx}
           error={ctx?.errors.auto_check_update}

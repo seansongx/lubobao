@@ -123,6 +123,8 @@ lubobao-cli config set proxy_address 127.0.0.1:7890   # 代理
 lubobao-cli config set platform_cookies '{"douyin":"ttwid=…"}'
 ```
 
+`auto_check_update`（自动检查更新）只对桌面端有效：命令行不做自动更新，这个键设了也不起作用，升级请重新下载或拉取新镜像。
+
 ### 日志
 
 `run` 的日志每行一条：`时间 级别 内容`，写到 stderr。例如：

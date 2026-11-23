@@ -61,8 +61,28 @@ function resolveHref(href: string) {
   return /^https?:\/\//.test(href) ? href : REPO_BLOB + href.replace(/^\.?\//, "");
 }
 
-function Link({ href, children }: { href: string; children: ReactNode }) {
+/**
+ * 更新说明（来自服务器）里只有这些地址做成可点的链接，不能借它把用户引到别处：xiaofany.com、
+ * lubobao.xiaofany.com 和本仓库。其他链接按纯文本显示。
+ */
+export function linkAllowed(url: string) {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== "https:" || parsed.username || parsed.password || parsed.port) return false;
+  const host = parsed.hostname.toLowerCase();
+  if (host === "xiaofany.com" || host === "lubobao.xiaofany.com") return true;
+  return host === "github.com" && /^\/seansongx\/lubobao(\/|$)/i.test(parsed.pathname);
+}
+
+function Link({ href, restrict, children }: { href: string; restrict: boolean; children: ReactNode }) {
   const url = resolveHref(href);
+  if (restrict && !linkAllowed(url)) {
+    return <span>{children}</span>;
+  }
   return (
     <a
       href={url}
@@ -79,7 +99,7 @@ function Link({ href, children }: { href: string; children: ReactNode }) {
 
 const INLINE = /`([^`]+)`|\[([^\]]+)\]\(([^)\s]+)\)|(https?:\/\/[^\s)]+[^\s).,;])|\*\*([^*]+)\*\*/g;
 
-function inline(text: string): ReactNode[] {
+function inline(text: string, restrict: boolean): ReactNode[] {
   const out: ReactNode[] = [];
   let last = 0;
   for (const match of text.matchAll(INLINE)) {
@@ -94,20 +114,20 @@ function inline(text: string): ReactNode[] {
       );
     } else if (match[2] !== undefined) {
       out.push(
-        <Link key={key} href={match[3]}>
-          {inline(match[2])}
+        <Link key={key} href={match[3]} restrict={restrict}>
+          {inline(match[2], restrict)}
         </Link>,
       );
     } else if (match[4] !== undefined) {
       out.push(
-        <Link key={key} href={match[4]}>
+        <Link key={key} href={match[4]} restrict={restrict}>
           {match[4]}
         </Link>,
       );
     } else {
       out.push(
         <strong key={key} className="font-semibold text-foreground">
-          {inline(match[5])}
+          {inline(match[5], restrict)}
         </strong>,
       );
     }
@@ -117,7 +137,8 @@ function inline(text: string): ReactNode[] {
   return out;
 }
 
-export function Markdown({ source }: { source: string }) {
+/** restrictLinks：内容来自服务器（更新说明）时只放行 linkAllowed 的链接。 */
+export function Markdown({ source, restrictLinks = false }: { source: string; restrictLinks?: boolean }) {
   return (
     <div className="space-y-2.5 text-[13px] leading-relaxed">
       {parse(source).map((block, index) => {
@@ -125,24 +146,24 @@ export function Markdown({ source }: { source: string }) {
           case "heading":
             return block.level === 1 ? (
               <h3 key={index} className="m-0 text-sm font-semibold">
-                {inline(block.text)}
+                {inline(block.text, restrictLinks)}
               </h3>
             ) : (
               <h4 key={index} className="m-0 pt-1.5 text-[13px] font-semibold">
-                {inline(block.text)}
+                {inline(block.text, restrictLinks)}
               </h4>
             );
           case "paragraph":
             return (
               <p key={index} className="m-0 text-muted-foreground">
-                {inline(block.text)}
+                {inline(block.text, restrictLinks)}
               </p>
             );
           case "list":
             return (
               <ul key={index} className="m-0 list-disc space-y-1 pl-5 text-muted-foreground">
                 {block.items.map((item, itemIndex) => (
-                  <li key={itemIndex}>{inline(item)}</li>
+                  <li key={itemIndex}>{inline(item, restrictLinks)}</li>
                 ))}
               </ul>
             );

@@ -29,34 +29,52 @@ npx tauri signer generate -w "$HOME\.lubobao-keys\updater.key"
 
 **私钥要另外备份**（例如密码管理器里存私钥文件内容和密码，再加一份离线备份）。私钥或密码丢了，就再也不能给已经安装的用户推送更新：他们只能手动下载新版本，新版本还得换一对新密钥。
 
-### 2. 设置三个 Secret
+### 2. 设置 release 环境和三个 Secret
 
-在仓库目录执行（会提示粘贴值，不会留在命令历史里）：
+更新签名私钥只放在 GitHub Environment `release` 里：只有推送 `v*` 标签的构建进入这个环境、拿得到私钥；手动运行 release.yml 和 fork 一律不签名。
+
+1. 创建环境：仓库 Settings → Environments → New environment，名字填 `release`。
+2. 部署规则：在 `release` 环境的「Deployment branches and tags」选「Selected branches and tags」，只加一条 **tag** 规则 `v*`（不加任何分支）。可以不设审批人。
+3. 把两个签名 Secret 设到这个环境（在仓库目录执行，会提示粘贴值，不会留在命令历史里）：
 
 ```powershell
-Get-Content "$HOME\.lubobao-keys\updater.key" -Raw | gh secret set TAURI_SIGNING_PRIVATE_KEY --repo seansongx/lubobao
+Get-Content "$HOME\.lubobao-keys\updater.key" -Raw | gh secret set TAURI_SIGNING_PRIVATE_KEY --env release --repo seansongx/lubobao
 ```
 
 ```powershell
-gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD --repo seansongx/lubobao
+gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD --env release --repo seansongx/lubobao
 ```
+
+4. **删除仓库级的同名 Secret**（之前设在仓库级的话），否则任何能改 workflow 的分支都能读到私钥：
+
+```powershell
+gh secret delete TAURI_SIGNING_PRIVATE_KEY --repo seansongx/lubobao
+```
+
+```powershell
+gh secret delete TAURI_SIGNING_PRIVATE_KEY_PASSWORD --repo seansongx/lubobao
+```
+
+5. 发布到 xiaofany.com 的 Token 设在仓库级（publish-xiaofany.yml 在 Release 发布时运行，不经过 release 环境）：
 
 ```powershell
 gh secret set RELEASE_TOKEN --repo seansongx/lubobao
 ```
 
-| Secret | 内容 | 用在 |
-| --- | --- | --- |
-| `TAURI_SIGNING_PRIVATE_KEY` | `updater.key` 的完整内容 | release.yml 打包时签更新包 |
-| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | 生成密钥时设的密码 | 同上 |
-| `RELEASE_TOKEN` | xiaofany.com 后台「API Token」里新建的 Token，权限只勾 `release:lubobao`，建议设过期时间 | publish-xiaofany.yml |
+核对：`gh secret list --env release --repo seansongx/lubobao` 只列出两个签名 Secret；`gh secret list --repo seansongx/lubobao` 里有 `RELEASE_TOKEN`，没有签名 Secret。
+
+| Secret | 位置 | 内容 | 用在 |
+| --- | --- | --- | --- |
+| `TAURI_SIGNING_PRIVATE_KEY` | 环境 `release` | `updater.key` 的完整内容 | release.yml 推送 `v*` 标签时签更新包 |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | 环境 `release` | 生成密钥时设的密码 | 同上 |
+| `RELEASE_TOKEN` | 仓库 | xiaofany.com 后台「API Token」里新建的 Token，权限只勾 `release:lubobao`，建议设过期时间 | publish-xiaofany.yml |
 
 xiaofany.com 后台还要先建好软件：slug `lubobao`、框架 `tauri`，「同步到 GitHub Releases」保持关闭（备用线路由发布时登记的 GitHub 地址提供）。
 
-没有这些 Secret 时：
+签名规则：
 
-- 手动运行 release.yml（或在 fork 里）会给出 warning，不生成更新包，其余照常打包；
-- 推送 `v*` 标签时缺签名私钥或公钥还是占位符，构建直接失败，不会发出一个无法应用内更新的正式版；
+- 手动运行 release.yml、在 fork 里运行：不进入 release 环境，一律不签名，给出 warning，不生成更新包，其余照常打包；
+- 推送 `v*` 标签时 release 环境里缺签名私钥，或公钥还是占位符：构建直接失败，不会发出一个无法应用内更新的正式版；
 - publish-xiaofany.yml 缺 `RELEASE_TOKEN` 时给出 notice 后跳过。
 
 ## 每次发版
@@ -82,7 +100,7 @@ xiaofany.com 后台还要先建好软件：slug `lubobao`、框架 `tauri`，「
 | 已发布到 GitHub，上传 xiaofany.com 失败 | 看 publish-xiaofany.yml 的日志，修好原因（Token 过期、占位句没换等）后手动运行该 workflow |
 | 已发布的版本有严重问题 | 在 xiaofany.com 后台**撤回**该版本：下载和应用内更新接口立即回退到上一个已发布版本，还没升级的用户不会再收到它。已经装上的用户不会被降级，尽快发布更高版本号的修复版。撤回的版本号不能再用 |
 | 同时撤回 GitHub 上的版本 | 把 GitHub Release 改回草稿或删除；Docker `latest` 用 `docker buildx imagetools create --tag ghcr.io/seansongx/lubobao:latest ghcr.io/seansongx/lubobao:<上一版本>` 指回上一版 |
-| 私钥泄露 | 立即在 GitHub 删除 Secret，生成新密钥、换掉 tauri.conf.json 里的公钥，发布新版本。旧版本的应用只认旧公钥，收不到新密钥签的更新，需要提示用户手动下载一次新版本 |
+| 私钥泄露 | 立即在 GitHub 删除 release 环境里的签名 Secret，生成新密钥、换掉 tauri.conf.json 里的公钥，发布新版本。旧版本的应用只认旧公钥，收不到新密钥签的更新，需要提示用户手动下载一次新版本 |
 | `RELEASE_TOKEN` 泄露 | 在 xiaofany.com 后台吊销并重建，更新 Secret |
 
 ## 应用内更新怎么工作
@@ -91,6 +109,10 @@ xiaofany.com 后台还要先建好软件：slug `lubobao`、框架 `tauri`，「
 - 每个平台用的文件：Windows 是 NSIS 安装包本身（`-setup.exe` + `.sig`），macOS 是 `.app.tar.gz` + `.sig`，Linux 是 AppImage + `.sig`。deb 安装的用户在应用里只看到「请到官网下载新版本」。
 - 签名：下载完成后用 tauri.conf.json 里的公钥校验，还要求签名记录的版本号与接口宣布的一致（`requireSignedVersion`），不符时拒绝安装。
 - 安装前与退出一样收尾：有录制时先确认，再停止调度和全部录制、等文件收尾，然后安装并重启（Windows 由安装器装好后打开新版本）。
+- 开启「自动检查更新」（设置键 `auto_check_update`，默认开）时，启动约 10 秒后检查一次，之后每 24 小时再检查一次。这个键只对桌面端有效，命令行（`lubobao-cli`）不做自动更新，设置了也不起作用。
+- 检查更新时带一个随机设备标识（`X-Client-Id`），只发给升级接口，不发给下载服务器。下载地址必须是 https。检查请求 30 秒内没完成、或连接后 30 秒收不到数据，就报网络错误。
+- 安装失败时（只读卷、被安全软件拦下等）录制已经停止：对话框不能关闭，只能「重启录播宝」，重启后恢复监控。
+- 更新说明里只有 xiaofany.com、lubobao.xiaofany.com 和本仓库的链接可以点，其他链接显示为纯文本。
 - 调试构建可以用环境变量 `LUBOBAO_UPDATER_ENDPOINT` 指向本地测试服务器，发布构建忽略它。
 
 本地 `npm run tauri build` 默认会生成更新包，需要签名私钥；没有时加 `--config '{"bundle":{"createUpdaterArtifacts":false}}'` 跳过更新包。

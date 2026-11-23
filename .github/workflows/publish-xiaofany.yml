@@ -27,7 +27,6 @@ jobs:
     env:
       # 通过环境变量传入，不在脚本里直接展开 ${{ }}。
       TAG: ${{ github.event.release.tag_name || inputs.tag }}
-      GH_TOKEN: ${{ github.token }}
       RELEASE_API: https://xiaofany.com
       RELEASE_SLUG: lubobao
     steps:
@@ -45,6 +44,8 @@ jobs:
 
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         if: steps.token.outputs.enabled == 'true'
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         if: steps.token.outputs.enabled == 'true'
@@ -55,6 +56,8 @@ jobs:
       - name: Read release
         id: release
         if: steps.token.outputs.enabled == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           if ! printf '%s' "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
             echo "::error::tag 必须是 v<版本号>：$TAG"
@@ -71,13 +74,14 @@ jobs:
             echo "channel=stable" >> "$GITHUB_OUTPUT"
           fi
           # 更新说明：Release 正文里「<!-- 以上为应用内更新说明 -->」之前的部分（release.yml 生成的
-          # 草稿带这行）；没有这行时用整个正文。占位句没换掉时拒绝发布，免得用户看到一句提示语。
+          # 草稿带这行）。没有这行时失败：整个正文是安装说明，不能当更新说明发给应用。占位句没换掉时
+          # 也失败，免得用户看到一句提示语。
           jq -r '.body // ""' "$RUNNER_TEMP/release.json" | tr -d '\r' > "$RUNNER_TEMP/body.md"
-          if grep -q '<!-- 以上为应用内更新说明 -->' "$RUNNER_TEMP/body.md"; then
-            sed '/<!-- 以上为应用内更新说明 -->/,$d' "$RUNNER_TEMP/body.md" > "$RUNNER_TEMP/notes.md"
-          else
-            cp "$RUNNER_TEMP/body.md" "$RUNNER_TEMP/notes.md"
+          if ! grep -q '<!-- 以上为应用内更新说明 -->' "$RUNNER_TEMP/body.md"; then
+            echo "::error::Release 正文里没有「<!-- 以上为应用内更新说明 -->」这一行：在更新内容和安装说明之间加上它，再手动运行本 workflow（tag 填 $TAG）。"
+            exit 1
           fi
+          sed '/<!-- 以上为应用内更新说明 -->/,$d' "$RUNNER_TEMP/body.md" > "$RUNNER_TEMP/notes.md"
           if grep -q '发布前把这里换成本版本的变化' "$RUNNER_TEMP/notes.md"; then
             echo "::error::Release 正文里的「更新内容」还是占位句：编辑 Release 写好更新内容后，手动运行本 workflow（tag 填 $TAG）。"
             exit 1
@@ -88,11 +92,14 @@ jobs:
           if [ -n "$(tr -d '[:space:]' < "$RUNNER_TEMP/notes.md")" ]; then
             echo "has_notes=true" >> "$GITHUB_OUTPUT"
           else
+            echo "::warning::更新说明是空的，应用的更新对话框里不会显示变化内容。"
             echo "has_notes=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Download release assets
         if: steps.token.outputs.enabled == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           dist="$RUNNER_TEMP/dist"
           gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir "$dist" --pattern 'lubobao*' --pattern SHA256SUMS.txt
@@ -130,7 +137,8 @@ jobs:
             --skip-existing --force \
             --state-file "$RUNNER_TEMP/xiaofany-release-state.json"
 
-      # 发布后核对：版本接口的版本号，以及 Tauri 升级接口对旧版本返回这个版本（接口有 60 秒缓存，重试几次）。
+      # 发布后核对：版本接口的版本号；Tauri 升级接口对旧版本返回这个版本，签名与 Release 上的 .sig
+      # 一致，下载地址的文件名也对得上（接口有 60 秒缓存，重试几次）。
       - name: Verify
         if: steps.token.outputs.enabled == 'true'
         env:
@@ -143,12 +151,21 @@ jobs:
             latest="$(curl -fsS "$RELEASE_API/api/v1/products/$RELEASE_SLUG/latest$query" | jq -r .version)" || return 1
             [ "$latest" = "$version" ] || { echo "latest 接口返回 $latest，应为 $version"; return 1; }
             for target in windows/x86_64 darwin/aarch64 darwin/x86_64 linux/x86_64; do
+              case "$target" in
+                windows/x86_64) file="lubobao_${version}_windows_x64-setup.exe" ;;
+                darwin/aarch64) file="lubobao_${version}_macos_arm64.app.tar.gz" ;;
+                darwin/x86_64) file="lubobao_${version}_macos_x64.app.tar.gz" ;;
+                linux/x86_64) file="lubobao_${version}_linux_amd64.AppImage" ;;
+              esac
               body="$RUNNER_TEMP/update.json"
               status="$(curl -sS -o "$body" -w '%{http_code}' "$RELEASE_API/api/update/$RELEASE_SLUG/tauri/$target/0.0.0$query")"
               [ "$status" = "200" ] || { echo "$target 返回 HTTP $status"; return 1; }
               got="$(jq -r .version "$body")"
               [ "$got" = "$version" ] || { echo "$target 返回版本 $got，应为 $version"; return 1; }
-              [ -n "$(jq -r '.signature // empty' "$body")" ] || { echo "$target 没有签名"; return 1; }
+              expected="$(tr -d '\r\n' < "$RUNNER_TEMP/dist/$file.sig")"
+              [ "$(jq -r '.signature // empty' "$body")" = "$expected" ] || { echo "$target 的签名与 $file.sig 不一致"; return 1; }
+              name="$(jq -r '.url // empty' "$body" | sed 's/[?#].*//; s|.*/||')"
+              [ "$name" = "$file" ] || { echo "$target 的下载地址指向 $name，应为 $file"; return 1; }
               echo "✓ $target → $got"
             done
           }

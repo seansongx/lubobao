@@ -51,6 +51,7 @@ const sigLines = lines(await readFile(sigFile, "utf8"), "签名");
 const sigBytes = Buffer.from(sigLines[1], "base64");
 if (sigBytes.length !== 74) fail("签名长度不对");
 const algorithm = sigBytes.subarray(0, 2).toString();
+if (algorithm !== "ED" && algorithm !== "Ed") fail(`不认识的签名算法标记：${JSON.stringify(algorithm)}`);
 if (!keyId.equals(sigBytes.subarray(2, 10))) {
   fail(`签名的密钥 ID 与公钥不符：签名私钥和 tauri.conf.json 里的公钥不是一对（${sigFile}）`);
 }

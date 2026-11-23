@@ -39,11 +39,18 @@ jobs:
             target: x86_64-unknown-linux-gnu
             bundles: appimage,deb
     runs-on: ${{ matrix.os }}
+    # 更新签名私钥只放在 GitHub Environment「release」里，该环境的部署规则只允许 v* 标签。
+    # 只有推送 v* 标签的构建进入这个环境、拿得到私钥；手动运行和 fork 不进入，一律不签。
+    environment: ${{ startsWith(github.ref, 'refs/tags/v') && 'release' || '' }}
+    permissions:
+      contents: read
     defaults:
       run:
         shell: bash
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
@@ -71,38 +78,45 @@ jobs:
 
       - run: npm ci
 
-      # 应用内更新的签名。有签名私钥且 tauri.conf.json 里是真实公钥时生成更新包和 .sig；缺一样时：
-      # 推送 v* 标签直接失败（正式版必须能应用内更新），其他情况（fork、手动构建）关闭更新包并给出 warning。
+      # 应用内更新的签名，只在推送 v* 标签时进行：需要 release 环境里的签名私钥，以及 tauri.conf.json
+      # 里的真实公钥，缺一样就失败（正式版必须能应用内更新）。其他构建（手动运行、fork）一律不签，
+      # 关闭更新包并给出 warning。
       - name: Check updater signing
         id: signing
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           IS_TAG: ${{ startsWith(github.ref, 'refs/tags/v') }}
         run: |
+          if [ "$IS_TAG" != "true" ]; then
+            echo "::warning::不是 v* 标签的构建，不签名，不生成应用内更新包（.sig、.app.tar.gz）。"
+            echo "updater=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           pubkey="$(node -p "require('./src-tauri/tauri.conf.json').plugins.updater.pubkey")"
           missing=""
-          [ -n "$TAURI_SIGNING_PRIVATE_KEY" ] || missing="Secret TAURI_SIGNING_PRIVATE_KEY"
+          [ -n "$TAURI_SIGNING_PRIVATE_KEY" ] || missing="release 环境的 Secret TAURI_SIGNING_PRIVATE_KEY"
           if [ -z "$pubkey" ] || [ "$pubkey" = "LUBOBAO_UPDATER_PUBKEY_NOT_SET" ]; then
             missing="${missing:+$missing、}tauri.conf.json 的 plugins.updater.pubkey（仍是占位符）"
           fi
-          if [ -z "$missing" ]; then
-            echo "updater=true" >> "$GITHUB_OUTPUT"
-            echo "config=" >> "$GITHUB_OUTPUT"
-          elif [ "$IS_TAG" = "true" ]; then
+          if [ -n "$missing" ]; then
             echo "::error::正式版需要应用内更新签名，缺少：$missing。见 docs/release.md。"
             exit 1
-          else
-            echo "::warning::缺少 $missing，这次构建不生成应用内更新包（.sig、.app.tar.gz）。"
-            echo '{"bundle":{"createUpdaterArtifacts":false}}' > "$RUNNER_TEMP/no-updater.json"
-            echo "updater=false" >> "$GITHUB_OUTPUT"
-            echo "config=--config $RUNNER_TEMP/no-updater.json" >> "$GITHUB_OUTPUT"
           fi
+          echo "updater=true" >> "$GITHUB_OUTPUT"
 
+      # 不签名时用 --config 关掉更新包。参数用数组拼，不经 ${{ }} 展开（Windows 的 RUNNER_TEMP 带反斜杠）。
       - name: Build bundles
         env:
+          UPDATER: ${{ steps.signing.outputs.updater }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ steps.signing.outputs.updater == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ steps.signing.outputs.updater == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
-        run: npx tauri build --ci --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} ${{ steps.signing.outputs.config }}
+        run: |
+          args=(--ci --target "${{ matrix.target }}" --bundles "${{ matrix.bundles }}")
+          if [ "$UPDATER" != "true" ]; then
+            echo '{"bundle":{"createUpdaterArtifacts":false}}' > "$RUNNER_TEMP/no-updater.json"
+            args+=(--config "$RUNNER_TEMP/no-updater.json")
+          fi
+          npx tauri build "${args[@]}"
 
       # 打包文件名改成 ASCII，便于放到下载站和 CDN。更新包和 .sig 一起改名：签名针对文件内容，
       # 改名不影响。每个 .sig 都用 tauri.conf.json 里的公钥校验一遍，私钥和公钥不是一对时失败。

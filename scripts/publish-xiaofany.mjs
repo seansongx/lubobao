@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 //
 // ─────────────────────────────────────────────────────────────────────────────
-// 来源：xiaofany.com 仓库（私有）的 scripts/release.mjs，commit 811ae5ae0cc368bd3e8cd34602c98acdec78aa20。
+// 来源：xiaofany.com 仓库（私有）的 scripts/release.mjs，commit aa265e02438bfdada1494c4fa017bc3cf1d326c8。
 // 除这段说明外与原文件逐字相同，不要在这里修改：上游更新时整份重新拷贝，并改上面的 commit。
 // 录播宝用通用模式（--manifest），由 .github/workflows/publish-xiaofany.yml 在 Release 发布后调用，
 // 清单由 scripts/xiaofany-manifest.mjs 生成。脚本在公开仓库的 CI 中运行，日志已做脱敏（见 redact）。
@@ -17,7 +17,8 @@
 //   (--dry-run 只需要 RELEASE_SLUG)
 //
 // 用法一:Electron(默认,在软件仓库根目录执行,读取 electron-builder 产物):
-//   node scripts/release.mjs [--dir release] [--notes "..."] [--notes-file CHANGELOG.md] [--channel beta] [--force] [--dry-run]
+//   node scripts/release.mjs [--dir release] [--notes="..."] [--notes-file CHANGELOG.md] [--channel beta] [--force] [--dry-run]
+//   --notes 请用等号连接(--notes="$NOTES"):更新日志常以「- 」开头,用空格分隔会被当成另一个选项。
 //
 // 用法二:通用模式(Tauri 等非 Electron 软件,多平台)。逐个指定文件,或用清单文件:
 //   node scripts/release.mjs --version 1.2.0 \
@@ -48,24 +49,41 @@ import { open, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/pr
 import path from "node:path";
 import { parseArgs } from "node:util";
 
-const { values: args } = parseArgs({
-  options: {
-    dir: { type: "string", default: "release" },
-    notes: { type: "string" },
-    "notes-file": { type: "string" },
-    version: { type: "string" },
-    channel: { type: "string" },
-    force: { type: "boolean", default: false },
-    "dry-run": { type: "boolean", default: false },
-    concurrency: { type: "string", default: "4" },
-    // 通用模式
-    manifest: { type: "string" },
-    file: { type: "string", multiple: true },
-    "upstream-base": { type: "string" },
-    "skip-existing": { type: "boolean", default: false },
-    "state-file": { type: "string" },
-  },
-});
+let args;
+try {
+  ({ values: args } = parseArgs({
+    options: {
+      dir: { type: "string", default: "release" },
+      notes: { type: "string" },
+      "notes-file": { type: "string" },
+      version: { type: "string" },
+      channel: { type: "string" },
+      force: { type: "boolean", default: false },
+      "dry-run": { type: "boolean", default: false },
+      concurrency: { type: "string", default: "4" },
+      // 通用模式
+      manifest: { type: "string" },
+      file: { type: "string", multiple: true },
+      "upstream-base": { type: "string" },
+      "skip-existing": { type: "boolean", default: false },
+      "state-file": { type: "string" },
+    },
+  }));
+} catch (err) {
+  // 参数解析失败时给出可操作的提示,不打印 Node 的堆栈
+  if (err.code === "ERR_PARSE_ARGS_INVALID_OPTION_VALUE") {
+    const opt = err.message.match(/'(--[\w-]+)'/)?.[1] ?? "--notes";
+    console.error(
+      `\n✗ ${opt} 的值以「-」开头(例如 Markdown 列表「- 修复…」),会被当成另一个选项。\n` +
+      `  请用等号连接:${opt}="$NOTES";更新日志也可以改用 --notes-file CHANGELOG.md。`,
+    );
+  } else if (err.code === "ERR_PARSE_ARGS_UNKNOWN_OPTION" || err.code === "ERR_PARSE_ARGS_UNEXPECTED_POSITIONAL") {
+    console.error(`\n✗ ${err.message.split("\n")[0]}(用法见脚本开头的注释)`);
+  } else {
+    console.error(`\n✗ 参数无效:${err.message}`);
+  }
+  process.exit(1);
+}
 
 const API = process.env.RELEASE_API?.replace(/\/+$/, "");
 const TOKEN = process.env.RELEASE_TOKEN;
