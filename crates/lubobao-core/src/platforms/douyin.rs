@@ -916,7 +916,7 @@ mod tests {
             assert!(!DouyinAdapter::new().matches(input));
         }
         assert!(super::super::adapter_for("https://live.douyin.com/1").is_some());
-        assert!(super::super::adapter_for("https://www.huya.com/1").is_none());
+        assert!(super::super::adapter_for("https://www.example.com/1").is_none());
     }
 
     #[test]

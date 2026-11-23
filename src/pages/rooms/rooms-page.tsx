@@ -469,7 +469,7 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
         </span>
         <p className="m-0 text-sm font-medium">还没有直播间</p>
         <p className="m-0 text-muted-foreground">
-          粘贴抖音、快手的直播间链接、主播主页或分享短链。录播宝会按检测间隔查看是否开播，开播后自动录制。
+          粘贴抖音、快手、虎牙的直播间链接，或抖音的主播主页、分享短链。录播宝会按检测间隔查看是否开播，开播后自动录制。
         </p>
         <Button className="mt-2" onClick={onAdd}>
           <Plus aria-hidden />

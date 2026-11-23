@@ -7,6 +7,7 @@ LuBoBao (录播宝) is licensed under the MIT License (see [LICENSE](LICENSE)). 
 - Project: https://github.com/ihmily/streamget (v4.0.10, commit `e57e548`)
 - License: MIT
 - Used in: `crates/lubobao-core/src/platforms/sign.rs` is a Rust port of `streamget/platforms/douyin/ab_sign.py`. The Douyin adapter in `crates/lubobao-core/src/platforms/douyin.rs` follows StreamGet's request flow, headers, default cookies and quality handling. The Kuaishou adapter in `crates/lubobao-core/src/platforms/kuaishou.rs` is ported from `streamget/platforms/kuaishou/live_stream.py` (`KwaiLiveStream`): the cookie-only user-info check, page headers, reading `window.__INITIAL_STATE__` from the room page, and the bitrate-based quality mapping.
+- Also used in: the Huya adapter in `crates/lubobao-core/src/platforms/huya.rs` is ported from `streamget/platforms/huya/live_stream.py` (`HuyaLiveStream`): the letter-id lookup, the `profileRoom` API flow and CDN choice, the web-page path for 英雄联盟 rooms, and the anti-leech parameter algorithm (`get_anti_code`).
 
 ```
 MIT License
