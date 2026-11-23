@@ -1,22 +1,28 @@
-import { Disc } from "lucide-react";
-
+import { dragRegion } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import { pages, type PageId } from "@/pages/pages";
 
 interface AppSidebarProps {
   current: PageId;
   onNavigate: (page: PageId) => void;
+  /** 正在录制的任务数，显示在「直播间」旁。 */
+  recordingCount: number;
 }
 
-export function AppSidebar({ current, onNavigate }: AppSidebarProps) {
+/**
+ * 左侧导航。Windows 落在 Mica 上，选中项左侧有 Teal 竖条；macOS 透出侧栏 vibrancy，顶部留给红绿灯；
+ * Linux 是平涂灰色侧栏。三个平台都不放品牌标识（标题栏或菜单栏已经显示应用名）。
+ */
+export function AppSidebar({ current, onNavigate, recordingCount }: AppSidebarProps) {
   return (
-    <aside className="flex flex-col gap-0.5 border-r border-sidebar-border bg-sidebar px-2.5 py-3.5 text-sidebar-foreground">
-      <div className="flex items-center gap-2.5 px-2 pt-0.5 pb-4 text-sm font-semibold">
-        <span className="grid size-[26px] place-items-center rounded-[7px] bg-sidebar-primary text-sidebar-primary-foreground">
-          <Disc className="size-4" aria-hidden />
-        </span>
-        录播宝
-      </div>
+    <aside
+      {...dragRegion}
+      className={cn(
+        "flex min-h-0 flex-col gap-0.5 bg-sidebar px-1.5 pt-1 pb-2 text-sidebar-foreground",
+        "mac:border-r mac:border-sidebar-border mac:px-2.5 mac:pt-(--header-h)",
+        "linux:border-r linux:border-sidebar-border linux:px-2 linux:pt-2",
+      )}
+    >
       <nav className="flex flex-col gap-0.5" aria-label="主导航">
         {pages.map((page) => {
           const Icon = page.icon;
@@ -28,15 +34,26 @@ export function AppSidebar({ current, onNavigate }: AppSidebarProps) {
               aria-current={active ? "page" : undefined}
               onClick={() => onNavigate(page.id)}
               className={cn(
-                "flex h-[34px] items-center gap-2.5 rounded-lg px-2.5 text-left text-muted-foreground outline-none transition-colors",
-                "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-                "focus-visible:ring-2 focus-visible:ring-sidebar-ring",
+                "relative flex h-(--nav-item-h) items-center gap-3 rounded-md px-3 text-left text-(length:--text-ui) outline-none transition-colors duration-(--duration)",
+                "hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:ring-inset",
+                "mac:gap-2 mac:px-2",
+                active && "bg-sidebar-accent linux:font-semibold",
                 active &&
-                  "bg-sidebar-accent font-medium text-sidebar-accent-foreground shadow-[0_0_0_1px_var(--sidebar-border)]",
+                  "win:before:absolute win:before:top-1/2 win:before:left-0 win:before:h-4 win:before:w-[3px] win:before:-translate-y-1/2 win:before:rounded-full win:before:bg-primary",
               )}
             >
-              <Icon className={cn("size-[15px] shrink-0", active && "text-sidebar-primary")} aria-hidden />
+              <Icon className="size-4 shrink-0 mac:text-primary" aria-hidden />
               {page.label}
+              {page.id === "rooms" && recordingCount > 0 && (
+                <span
+                  className="ml-auto flex items-center gap-1.5 text-(length:--text-small) text-status-recording tabular-nums"
+                  title={`${recordingCount} 个直播间正在录制`}
+                >
+                  <span className="size-1.5 rounded-full bg-status-recording" aria-hidden />
+                  {recordingCount}
+                  <span className="sr-only">个正在录制</span>
+                </span>
+              )}
             </button>
           );
         })}

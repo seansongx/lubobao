@@ -4,7 +4,7 @@ import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { toast } from "sonner";
 
 import { api, isMockBackend, type TaskId, type TaskSnapshot } from "@/lib/api";
-import { describeError } from "@/pages/rooms/format";
+import { describeError, isRecordingActive } from "@/pages/rooms/format";
 
 function reportError(action: string, error: unknown) {
   const view = describeError(error);
@@ -86,5 +86,25 @@ export async function openInBrowser(task: TaskSnapshot): Promise<void> {
     await openUrl(url);
   } catch (error) {
     toast.error("无法打开链接", { description: String(error) });
+  }
+}
+
+/** 手动停止后保持停止、录制失败后不再自动重试：这两种情况给一个直接重新开始的入口。 */
+export function canRestartRecording(task: TaskSnapshot): boolean {
+  return (
+    !isRecordingActive(task.record) &&
+    task.monitoring !== "paused" &&
+    !task.notifyOnly &&
+    (task.recordHeld || task.record.state === "failed")
+  );
+}
+
+export async function copyRoomLink(task: TaskSnapshot): Promise<void> {
+  const url = (task.liveUrl ?? task.url).trim();
+  try {
+    await navigator.clipboard.writeText(url);
+    toast.success("已复制直播间链接", { description: url });
+  } catch (error) {
+    toast.error("复制失败", { description: String(error) });
   }
 }

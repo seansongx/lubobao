@@ -16,6 +16,7 @@ pub mod notify;
 pub mod quit;
 pub mod tray;
 pub mod update;
+pub mod window;
 
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;

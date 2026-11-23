@@ -1,9 +1,22 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-platform="windows" data-material="none">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>录播宝</title>
+    <script>
+      // 首帧前按 UA 写入平台主题（WebView2 含 Windows NT，WKWebView 含 Macintosh，WebKitGTK 含 Linux）。
+      // 浏览器假数据模式下可用 ?platform=windows|macos|linux 预览其他平台。
+      (function () {
+        var ua = navigator.userAgent;
+        var platform = /Macintosh|Mac OS X/.test(ua) ? "macos" : /Windows/.test(ua) ? "windows" : /Linux|X11/.test(ua) ? "linux" : "windows";
+        if (!window.__TAURI_INTERNALS__) {
+          var forced = new URLSearchParams(location.search).get("platform");
+          if (forced === "windows" || forced === "macos" || forced === "linux") platform = forced;
+        }
+        document.documentElement.dataset.platform = platform;
+      })();
+    </script>
   </head>
 
   <body>

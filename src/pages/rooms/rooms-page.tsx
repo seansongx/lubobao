@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from "react";
 import type { RowSelectionState, SortingState, Updater } from "@tanstack/react-table";
 import {
   AlertTriangle,
@@ -15,10 +15,14 @@ import {
 } from "lucide-react";
 
 import type { TaskFocusRequest } from "@/components/navigation";
+import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { TaskId, TaskSnapshot } from "@/lib/api";
+import { useAppCommand } from "@/lib/app-commands";
+import { isMac, withShortcut } from "@/lib/platform";
 import type { TaskList } from "@/lib/use-backend";
 import { cn } from "@/lib/utils";
 import { AddTaskDialog } from "@/pages/rooms/add-task-dialog";
@@ -32,6 +36,7 @@ import {
   type StatusGroup,
 } from "@/pages/rooms/rooms-view";
 import { setMonitoring } from "@/pages/rooms/task-actions";
+import { TaskContextMenu } from "@/pages/rooms/task-context-menu";
 import { TaskInspector } from "@/pages/rooms/task-inspector";
 import { StatusMark } from "@/pages/rooms/task-status";
 import { TaskTable } from "@/pages/rooms/task-table";
@@ -79,6 +84,7 @@ export function RoomsPage({ taskList, view, onViewChange, focusTask }: RoomsPage
   const [editing, setEditing] = useState<DialogState<TaskId | null>>({ open: false, key: 0, value: null });
   const [deleting, setDeleting] = useState<DialogState<TaskSnapshot[]>>({ open: false, key: 0, value: [] });
   const [batchBusy, setBatchBusy] = useState(false);
+  const searchRef = useRef<HTMLInputElement>(null);
 
   const patch = useCallback(
     (values: Partial<RoomsView>) => onViewChange((current) => ({ ...current, ...values })),
@@ -124,7 +130,7 @@ export function RoomsPage({ taskList, view, onViewChange, focusTask }: RoomsPage
     });
   }, [visible, taskList.tasks, onViewChange]);
 
-  // 统计卡片的数字一次遍历算完。
+  // 筛选按钮上的数字一次遍历算完。
   const counts = useMemo(() => {
     const result: Record<StatusGroup, number> = { all: 0, recording: 0, monitoring: 0, attention: 0, paused: 0 };
     for (const task of tasks) {
@@ -184,6 +190,24 @@ export function RoomsPage({ taskList, view, onViewChange, focusTask }: RoomsPage
     [onViewChange, unselect],
   );
 
+  useAppCommand("add-task", openAdd);
+  useAppCommand("focus-search", () => {
+    const input = searchRef.current;
+    if (!input) return false;
+    input.focus();
+    input.select();
+  });
+  useAppCommand("delete-selection", () => {
+    if (selected.length > 0) openDelete(selected);
+    else if (activeTask) openDelete([activeTask]);
+    else return false;
+  });
+  useAppCommand("dismiss", () => {
+    if (view.activeId !== null) closeInspector();
+    else if (selected.length > 0) clearSelection();
+    else return false;
+  });
+
   const showTask = (id: TaskId) => {
     // 定位到任务：清除会把它隐藏的筛选。
     onViewChange((current) => ({ ...current, activeId: id, group: "all", platform: "all", query: "" }));
@@ -209,14 +233,32 @@ export function RoomsPage({ taskList, view, onViewChange, focusTask }: RoomsPage
   return (
     <div className="flex min-h-0 min-w-0 flex-1">
       <section className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <header className="flex items-center gap-2.5 px-5 pt-3.5">
-          <h1 className="m-0 text-[17px] font-semibold">直播间</h1>
-          <span className="flex-1" />
-          <Button onClick={openAdd}>
-            <Plus aria-hidden />
-            添加直播间
-          </Button>
-        </header>
+        <PageHeader
+          title="直播间"
+          summary={isMac && taskList.tasks ? roomsSummary(tasks.length, counts.recording) : undefined}
+          actions={
+            <>
+              {tasks.length > 0 && (
+                <SearchBox inputRef={searchRef} value={view.query} onChange={(query) => patch({ query })} />
+              )}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  {isMac ? (
+                    <Button variant="ghost" size="icon" onClick={openAdd} aria-label="添加直播间">
+                      <Plus className="size-[17px]" aria-hidden />
+                    </Button>
+                  ) : (
+                    <Button onClick={openAdd}>
+                      <Plus aria-hidden />
+                      添加直播间
+                    </Button>
+                  )}
+                </TooltipTrigger>
+                <TooltipContent>{withShortcut("添加直播间", "N")}</TooltipContent>
+              </Tooltip>
+            </>
+          }
+        />
 
         {taskList.tasks === null ? (
           taskList.error ? (
@@ -231,162 +273,130 @@ export function RoomsPage({ taskList, view, onViewChange, focusTask }: RoomsPage
           <EmptyState onAdd={openAdd} />
         ) : (
           <>
-            <div className="grid grid-cols-5 gap-2 px-5 pt-3.5 xl:gap-2.5" role="group" aria-label="按状态筛选">
-              {statusGroups.map((group) => {
-                const count = counts[group.id];
-                const on = view.group === group.id;
-                const mark = groupMark[group.id];
-                return (
-                  <button
-                    key={group.id}
-                    type="button"
-                    aria-pressed={on}
-                    onClick={() => patch({ group: group.id })}
-                    className={cn(
-                      "flex min-w-0 flex-col gap-0.5 rounded-lg border bg-card px-3 py-2 text-left outline-none transition-colors",
-                      "hover:border-muted-foreground/40 focus-visible:ring-3 focus-visible:ring-ring/50",
-                      on && "border-primary shadow-[0_0_0_1px_var(--primary)] hover:border-primary",
-                    )}
-                  >
-                    <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-                      {mark && <StatusMark status={mark} />}
-                      <span className="truncate">{group.label}</span>
-                    </span>
-                    <span className="text-lg font-semibold tabular-nums xl:text-xl">{count}</span>
-                  </button>
-                );
-              })}
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2 px-5 py-3">
-              <div className="relative max-w-[260px] min-w-[150px] flex-1">
-                <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
-                <Input
-                  value={view.query}
-                  onChange={(event) => patch({ query: event.target.value })}
-                  placeholder="搜索主播或房间号"
-                  aria-label="搜索主播"
-                  className="pr-7 pl-8"
-                />
-                {view.query && (
-                  <button
-                    type="button"
-                    aria-label="清除搜索"
-                    onClick={() => patch({ query: "" })}
-                    className="absolute top-1/2 right-1.5 grid size-5 -translate-y-1/2 place-items-center rounded-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-                  >
-                    <X className="size-3.5" aria-hidden />
-                  </button>
-                )}
-              </div>
-              <Select value={view.platform} onValueChange={(platform) => patch({ platform })}>
-                <SelectTrigger className="w-[108px]" aria-label="按平台筛选">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">全部平台</SelectItem>
-                  {platforms.map(([id, name]) => (
-                    <SelectItem key={id} value={id}>
-                      {name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <div className="flex items-center">
-                <Select
-                  value={sort.id}
-                  onValueChange={(id) => patch({ sorting: [{ id, desc: sortOptions.find((item) => item.id === id)?.desc ?? false }] })}
-                >
-                  <SelectTrigger className="w-[116px] rounded-r-none" aria-label="排序方式">
+            <div className="flex flex-wrap items-center gap-2 px-(--page-pad) pt-3.5 pb-2.5 mac:pt-2.5 mac:pb-2">
+              <StatusFilter value={view.group} counts={counts} onChange={(group) => patch({ group })} />
+              <div className="ml-auto flex items-center gap-2">
+                <Select value={view.platform} onValueChange={(platform) => patch({ platform })}>
+                  <SelectTrigger className="w-24" aria-label="按平台筛选">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {sortOptions.map((option) => (
-                      <SelectItem key={option.id} value={option.id}>
-                        {option.label}
+                    <SelectItem value="all">全部平台</SelectItem>
+                    {platforms.map(([id, name]) => (
+                      <SelectItem key={id} value={id}>
+                        {name}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  className="-ml-px rounded-l-none"
-                  aria-label={sort.desc ? "当前降序，切换为升序" : "当前升序，切换为降序"}
-                  title={sort.desc ? "降序" : "升序"}
-                  onClick={() => patch({ sorting: [{ id: sort.id, desc: !sort.desc }] })}
-                >
-                  {sort.desc ? <ArrowDownWideNarrow aria-hidden /> : <ArrowUpNarrowWide aria-hidden />}
-                </Button>
+                <div className="flex items-center">
+                  <Select
+                    value={sort.id}
+                    onValueChange={(id) => patch({ sorting: [{ id, desc: sortOptions.find((item) => item.id === id)?.desc ?? false }] })}
+                  >
+                    <SelectTrigger className="w-24 rounded-r-none" aria-label="排序方式">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {sortOptions.map((option) => (
+                        <SelectItem key={option.id} value={option.id}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        className="-ml-px rounded-l-none"
+                        aria-label={sort.desc ? "当前降序，切换为升序" : "当前升序，切换为降序"}
+                        onClick={() => patch({ sorting: [{ id: sort.id, desc: !sort.desc }] })}
+                      >
+                        {sort.desc ? <ArrowDownWideNarrow aria-hidden /> : <ArrowUpNarrowWide aria-hidden />}
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>{sort.desc ? "降序" : "升序"}</TooltipContent>
+                  </Tooltip>
+                </div>
               </div>
-              <span className="ml-auto text-xs text-muted-foreground tabular-nums">
-                {visible.length === tasks.length ? `${tasks.length} 项` : `${visible.length} / ${tasks.length} 项`}
-              </span>
             </div>
 
-            <div className="relative mx-5 mb-4 flex min-h-0 flex-1 flex-col">
-            <div
+            <div className="relative mx-3 mb-2 flex min-h-0 flex-1 flex-col mac:mx-2.5 linux:mx-(--page-pad) linux:mb-3">
+              <div
                 className={cn(
-                  "@container min-h-0 flex-1 overflow-auto rounded-lg border bg-card",
+                  "@container min-h-0 flex-1 overflow-auto linux:rounded-xl linux:border linux:bg-card linux:shadow-xs",
                   // 批量操作条浮在表格底部，留出空间让最后一行可以滚动出来。
                   selected.length > 0 && "pb-16",
                 )}
               >
-              {visible.length > 0 ? (
-                <TaskTable
-                  tasks={visible}
-                  sorting={view.sorting}
-                  onSortingChange={onSortingChange}
-                  rowSelection={view.rowSelection}
-                  onRowSelectionChange={onRowSelectionChange}
-                  activeId={view.activeId}
-                  onActivate={onActivate}
-                />
-              ) : (
-                <div className="flex flex-col items-center gap-3 px-5 py-14 text-center text-muted-foreground">
-                  没有符合条件的直播间
-                  {filtered && (
-                    <Button variant="outline" size="sm" onClick={() => patch({ group: "all", platform: "all", query: "" })}>
-                      清除筛选
+                {visible.length > 0 ? (
+                  <TaskContextMenu tasks={visible} onActivate={onActivate} onEdit={openEdit} onDelete={openDelete}>
+                    <TaskTable
+                      tasks={visible}
+                      sorting={view.sorting}
+                      onSortingChange={onSortingChange}
+                      rowSelection={view.rowSelection}
+                      onRowSelectionChange={onRowSelectionChange}
+                      activeId={view.activeId}
+                      onActivate={onActivate}
+                    />
+                  </TaskContextMenu>
+                ) : (
+                  <div className="flex flex-col items-center gap-3 px-5 py-14 text-center text-muted-foreground">
+                    没有符合条件的直播间
+                    {filtered && (
+                      <Button variant="outline" size="sm" onClick={() => patch({ group: "all", platform: "all", query: "" })}>
+                        清除筛选
+                      </Button>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {selected.length > 0 && (
+                <div className="pointer-events-none absolute inset-x-0 bottom-3 z-10 flex justify-center px-3">
+                  <div
+                    role="toolbar"
+                    aria-label="批量操作"
+                    className="pointer-events-auto flex items-center gap-1 rounded-xl border border-black/5 bg-popover py-1 pr-1 pl-3.5 text-popover-foreground shadow-(--shadow-popover) dark:border-black/20"
+                  >
+                    <span className="mr-1.5 text-[13px] whitespace-nowrap tabular-nums">已选 {selected.length} 项</span>
+                    <Button variant="ghost" size="sm" onClick={() => void batchMonitoring(true)} disabled={batchBusy}>
+                      <Play aria-hidden />
+                      开始监控
                     </Button>
-                  )}
+                    <Button variant="ghost" size="sm" onClick={() => void batchMonitoring(false)} disabled={batchBusy}>
+                      <Pause aria-hidden />
+                      暂停
+                    </Button>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-destructive hover:text-destructive"
+                          onClick={() => openDelete(selected)}
+                          disabled={batchBusy}
+                        >
+                          <Trash2 aria-hidden />
+                          删除
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{withShortcut("删除所选", "Delete", false)}</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button variant="ghost" size="icon-sm" aria-label="取消选择" onClick={clearSelection}>
+                          <X aria-hidden />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{withShortcut("取消选择", "Escape", false)}</TooltipContent>
+                    </Tooltip>
+                  </div>
                 </div>
               )}
-            </div>
-
-            {selected.length > 0 && (
-              <div className="pointer-events-none absolute inset-x-0 bottom-3.5 z-10 flex justify-center px-3">
-                <div
-                  role="toolbar"
-                  aria-label="批量操作"
-                  className="pointer-events-auto flex items-center gap-1.5 rounded-xl bg-foreground py-1.5 pr-1.5 pl-3.5 text-background shadow-lg"
-                >
-                  <span className="mr-1 text-[13px] whitespace-nowrap tabular-nums">已选 {selected.length} 项</span>
-                  <BatchButton onClick={() => void batchMonitoring(true)} disabled={batchBusy}>
-                    <Play aria-hidden />
-                    开始监控
-                  </BatchButton>
-                  <BatchButton onClick={() => void batchMonitoring(false)} disabled={batchBusy}>
-                    <Pause aria-hidden />
-                    暂停
-                  </BatchButton>
-                  <BatchButton onClick={() => openDelete(selected)} disabled={batchBusy}>
-                    <Trash2 aria-hidden />
-                    删除
-                  </BatchButton>
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label="取消选择"
-                    title="取消选择"
-                    onClick={clearSelection}
-                    className="text-background hover:bg-background/15 hover:text-background"
-                  >
-                    <X aria-hidden />
-                  </Button>
-                </div>
-              </div>
-            )}
             </div>
           </>
         )}
@@ -427,24 +437,10 @@ export function RoomsPage({ taskList, view, onViewChange, focusTask }: RoomsPage
   );
 }
 
-function BatchButton({ className, ...props }: React.ComponentProps<typeof Button>) {
-  return (
-    <Button
-      variant="outline"
-      size="sm"
-      className={cn(
-        "border-background/25 bg-transparent text-background hover:bg-background/15 hover:text-background dark:border-background/25 dark:bg-transparent dark:hover:bg-background/15",
-        className,
-      )}
-      {...props}
-    />
-  );
-}
-
 function LoadError({ error, onRetry }: { error: unknown; onRetry: () => void }) {
   const view = describeError(error);
   return (
-    <div className="mx-5 mt-3.5 mb-4 flex flex-1 items-center justify-center rounded-xl border bg-card">
+    <div className="mx-(--page-pad) mt-3.5 mb-4 flex flex-1 items-center justify-center linux:rounded-xl linux:border linux:bg-card">
       <div className="flex max-w-sm flex-col items-center gap-2 px-6 py-14 text-center" role="alert">
         <span className="mb-1 grid size-10 place-items-center rounded-full bg-status-recording-soft text-status-recording">
           <AlertTriangle className="size-5" aria-hidden />
@@ -461,7 +457,7 @@ function LoadError({ error, onRetry }: { error: unknown; onRetry: () => void }) 
 
 function EmptyState({ onAdd }: { onAdd: () => void }) {
   return (
-    <div className="mx-5 mt-3.5 mb-4 flex flex-1 items-center justify-center rounded-xl border bg-card">
+    <div className="mx-(--page-pad) mt-3.5 mb-4 flex flex-1 items-center justify-center linux:rounded-xl linux:border linux:bg-card">
       <div className="flex max-w-sm flex-col items-center gap-2 px-6 py-14 text-center">
         <span className="mb-1 grid size-10 place-items-center rounded-full bg-muted text-muted-foreground">
           <Radio className="size-5" aria-hidden />
@@ -475,6 +471,106 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
           添加第一个直播间
         </Button>
       </div>
+    </div>
+  );
+}
+
+function roomsSummary(total: number, recording: number): string {
+  return recording > 0 ? `${total} 个直播间 · ${recording} 个录制中` : `${total} 个直播间`;
+}
+
+function SearchBox({
+  inputRef,
+  value,
+  onChange,
+}: {
+  inputRef: RefObject<HTMLInputElement | null>;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div className="relative w-[220px] min-w-[140px] shrink mac:w-[200px]">
+      <Search
+        className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground"
+        aria-hidden
+      />
+      <Input
+        ref={inputRef}
+        data-search-input
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape" && value) {
+            event.preventDefault();
+            onChange("");
+          }
+        }}
+        placeholder="搜索主播或房间号"
+        aria-label="搜索主播"
+        title={withShortcut("搜索", "F")}
+        spellCheck={false}
+        autoComplete="off"
+        className="pr-7 pl-8 mac:h-7 mac:rounded-[7px] mac:border-transparent mac:bg-muted mac:shadow-none"
+      />
+      {value && (
+        <button
+          type="button"
+          aria-label="清除搜索"
+          onClick={() => onChange("")}
+          className="absolute top-1/2 right-1.5 grid size-5 -translate-y-1/2 place-items-center rounded-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <X className="size-3.5" aria-hidden />
+        </button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * 按状态筛选：一行带数字的筛选按钮。Windows 是文字标签，选中项下方有 Teal 短条；
+ * macOS 是分段控件；Linux 是一组相连的平涂按钮。
+ */
+function StatusFilter({
+  value,
+  counts,
+  onChange,
+}: {
+  value: StatusGroup;
+  counts: Record<StatusGroup, number>;
+  onChange: (group: StatusGroup) => void;
+}) {
+  return (
+    <div
+      role="group"
+      aria-label="按状态筛选"
+      className="flex min-w-0 flex-wrap items-center gap-0.5 mac:rounded-[7px] mac:bg-muted mac:p-0.5 linux:rounded-md linux:bg-control linux:p-0.5"
+    >
+      {statusGroups.map((group) => {
+        const on = value === group.id;
+        const mark = groupMark[group.id];
+        return (
+          <button
+            key={group.id}
+            type="button"
+            aria-pressed={on}
+            onClick={() => onChange(group.id)}
+            className={cn(
+              "relative inline-flex h-(--control-h) items-center gap-1.5 rounded-md px-2 whitespace-nowrap text-muted-foreground outline-none transition-colors duration-(--duration)",
+              "hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
+              "mac:h-[22px] mac:rounded-[5px] mac:px-2 mac:text-xs mac:hover:bg-transparent",
+              "linux:h-[30px]",
+              on && "text-foreground",
+              on &&
+                "win:after:absolute win:after:bottom-0 win:after:left-1/2 win:after:h-[3px] win:after:w-4 win:after:-translate-x-1/2 win:after:rounded-full win:after:bg-primary",
+              on && "mac:bg-control mac:shadow-(--control-shadow) mac:hover:bg-control linux:bg-card linux:shadow-xs linux:hover:bg-card",
+            )}
+          >
+            {mark && <StatusMark status={mark} />}
+            {group.id === "all" ? "全部" : group.label}
+            <span className="font-semibold text-foreground tabular-nums">{counts[group.id]}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }

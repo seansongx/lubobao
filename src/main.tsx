@@ -3,6 +3,11 @@ import { createRoot } from "react-dom/client";
 
 import App from "@/App";
 import "@/index.css";
+import { installNativeBehavior } from "@/lib/native-behavior";
+import { applyWindowMaterial } from "@/lib/platform";
+
+installNativeBehavior();
+applyWindowMaterial();
 
 const rootEl = document.getElementById("root");
 if (!rootEl) {

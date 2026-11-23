@@ -18,6 +18,7 @@ import {
 
 import { dayKey, formatClock, formatDateTime, formatDay, formatDuration } from "@/components/format";
 import type { Navigate } from "@/components/navigation";
+import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -255,9 +256,8 @@ export function ActivityPage({ onNavigate }: ActivityPageProps) {
 
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <header className="flex flex-wrap items-center gap-x-3 gap-y-2 px-5 pt-3.5">
-        <h1 className="m-0 text-[17px] font-semibold">动态</h1>
-        <span className="flex-1" />
+      <PageHeader title="动态" />
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-(--page-pad) pt-3.5 mac:pt-2.5">
         <ToggleGroup
           type="single"
           size="sm"
@@ -305,11 +305,11 @@ export function ActivityPage({ onNavigate }: ActivityPageProps) {
             )}
           </SelectContent>
         </Select>
-      </header>
+      </div>
 
       <div
         ref={scrollRef}
-        className="mx-5 mt-3.5 mb-4 flex min-h-0 flex-1 flex-col overflow-y-auto rounded-xl border bg-card"
+        className="mx-3 mt-3 mb-2 flex min-h-0 flex-1 flex-col overflow-y-auto text-(length:--text-dense) mac:mx-2.5 linux:mx-(--page-pad) linux:mb-3 linux:rounded-xl linux:border linux:bg-card linux:shadow-xs"
       >
         {state === "loading" && items.length === 0 ? (
           <CenterNote>
@@ -324,7 +324,7 @@ export function ActivityPage({ onNavigate }: ActivityPageProps) {
           <>
             {days.map((group) => (
               <div key={group.key}>
-                <div className="sticky top-0 z-10 border-b bg-background px-3.5 py-2 text-xs font-semibold text-muted-foreground">
+                <div className="sticky top-0 z-10 border-b bg-content px-3.5 py-2 text-xs font-semibold text-muted-foreground backdrop-blur-xl linux:bg-card">
                   {formatDay(group.day)}
                 </div>
                 {group.entries.map((entry) => (
@@ -404,7 +404,7 @@ function ActivityRow({ entry, task, fresh, onNavigate }: ActivityRowProps) {
             <button
               type="button"
               onClick={open}
-              className="rounded-sm font-medium hover:text-primary hover:underline focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
+              className="rounded-sm font-medium hover:text-primary focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
               title="在直播间中查看"
             >
               {name}
@@ -414,9 +414,13 @@ function ActivityRow({ entry, task, fresh, onNavigate }: ActivityRowProps) {
               {name || "已删除的任务"}
             </span>
           )}{" "}
-          <span>{entry.message}</span>
+          <span className="select-text">{entry.message}</span>
         </div>
-        {description && <div className="truncate text-xs text-muted-foreground" title={description}>{description}</div>}
+        {description && (
+          <div className="truncate text-xs text-muted-foreground select-text" title={description}>
+            {description}
+          </div>
+        )}
       </div>
       {open && tone === "failure" ? (
         <Button variant="outline" size="xs" onClick={open}>

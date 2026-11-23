@@ -2,6 +2,8 @@ import { memo, useEffect, useState, type ReactNode } from "react";
 import { Circle, ExternalLink, FolderOpen, Loader2, Pause, Pencil, Play, Square, Trash2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { withShortcut } from "@/lib/platform";
 import { api, type ActivityEntry, type ActivityKind, type TaskId, type TaskSnapshot } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { AnchorAvatar, PlatformTag } from "@/pages/rooms/anchor";
@@ -17,7 +19,14 @@ import {
   qualityLabels,
 } from "@/pages/rooms/format";
 import { Notice } from "@/pages/rooms/notice";
-import { openFolder, openInBrowser, setMonitoring, startRecording, stopRecording } from "@/pages/rooms/task-actions";
+import {
+  canRestartRecording,
+  openFolder,
+  openInBrowser,
+  setMonitoring,
+  startRecording,
+  stopRecording,
+} from "@/pages/rooms/task-actions";
 import { TaskStatus } from "@/pages/rooms/task-status";
 import { useNow } from "@/pages/rooms/use-now";
 
@@ -91,7 +100,7 @@ const activityDot: Record<ActivityKind, string> = {
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section>
-      <h3 className="m-0 mb-2 text-xs font-semibold text-muted-foreground">{title}</h3>
+      <h3 className="m-0 mb-2 text-xs font-semibold text-muted-foreground win:text-[13px] win:text-foreground">{title}</h3>
       {children}
     </section>
   );
@@ -99,7 +108,7 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 
 function StateCell({ label, value, reason }: { label: string; value: string; reason: string | null }) {
   return (
-    <div className="min-w-0 rounded-md border px-2.5 py-1.5">
+    <div className="min-w-0 rounded-md border border-black/5 bg-card px-2.5 py-1.5 dark:border-white/5 linux:rounded-lg">
       <small className="block text-[11px] text-muted-foreground">{label}</small>
       <b className="block truncate text-[12.5px] font-medium">{value}</b>
       {reason && <span className="mt-0.5 block text-[11px] leading-snug break-words text-muted-foreground">{reason}</span>}
@@ -109,11 +118,11 @@ function StateCell({ label, value, reason }: { label: string; value: string; rea
 
 function KeyValues({ rows }: { rows: [string, ReactNode, string?][] }) {
   return (
-    <dl className="m-0 grid grid-cols-[64px_minmax(0,1fr)] gap-y-1.5 text-[12.5px]">
+    <dl className="m-0 grid grid-cols-[64px_minmax(0,1fr)] gap-y-1.5 text-(length:--text-dense)">
       {rows.map(([key, value, title]) => (
         <div key={key} className="contents">
           <dt className="text-muted-foreground">{key}</dt>
-          <dd className="m-0 truncate tabular-nums" title={title}>
+          <dd className="m-0 truncate tabular-nums select-text" title={title}>
             {value}
           </dd>
         </div>
@@ -135,9 +144,7 @@ export const TaskInspector = memo(function TaskInspector({ task, onClose, onEdit
   const [busy, setBusy] = useState<"stop" | "start" | "monitor" | null>(null);
   const recording = isRecordingActive(task.record);
   const paused = task.monitoring === "paused";
-  // 手动停止后保持停止，录制失败后不再自动重试：给一个直接重新开始的入口。
-  const canRestart =
-    !recording && !paused && !task.notifyOnly && (task.recordHeld || task.record.state === "failed");
+  const canRestart = canRestartRecording(task);
   const live = describeLive(task.live);
   const record = describeRecord(task);
 
@@ -152,13 +159,13 @@ export const TaskInspector = memo(function TaskInspector({ task, onClose, onEdit
 
   return (
     <aside
-      className="flex w-[300px] shrink-0 flex-col border-l bg-card xl:w-[340px]"
+      className="flex w-[300px] shrink-0 flex-col border-l text-(length:--text-dense) xl:w-[340px] linux:bg-sidebar/50"
       aria-label={`${task.anchorName} 详情`}
     >
-      <header className="flex items-center gap-2.5 border-b px-3.5 pt-3.5 pb-3">
+      <header className="flex items-center gap-2.5 px-4 pt-4 pb-3 mac:h-(--header-h) mac:border-b mac:py-0">
         <AnchorAvatar task={task} className="size-[34px] text-sm" />
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-semibold" title={task.anchorName}>
+          <div className="truncate text-(length:--text-ui) font-semibold" title={task.anchorName}>
             {task.anchorName}
           </div>
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -166,15 +173,15 @@ export const TaskInspector = memo(function TaskInspector({ task, onClose, onEdit
             <span className="truncate tabular-nums">{task.roomId}</span>
           </div>
         </div>
-        <Button variant="ghost" size="icon-sm" title="在浏览器打开直播间" aria-label="在浏览器打开直播间" onClick={() => void openInBrowser(task)}>
+        <IconAction label="在浏览器打开直播间" onClick={() => void openInBrowser(task)}>
           <ExternalLink aria-hidden />
-        </Button>
-        <Button variant="ghost" size="icon-sm" title="关闭详情" aria-label="关闭详情" onClick={onClose}>
+        </IconAction>
+        <IconAction label="关闭详情" hint={withShortcut("关闭详情", "Escape", false)} onClick={onClose}>
           <X aria-hidden />
-        </Button>
+        </IconAction>
       </header>
 
-      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-3.5">
+      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 pt-1 pb-3.5 mac:pt-3.5">
         <div className="flex items-center justify-between gap-2">
           <TaskStatus task={task} />
         </div>
@@ -235,12 +242,12 @@ export const TaskInspector = memo(function TaskInspector({ task, onClose, onEdit
           ) : (
             <ul className="m-0 flex list-none flex-col gap-2.5 p-0">
               {activity.map((entry) => (
-                <li key={entry.id} className="grid grid-cols-[40px_8px_minmax(0,1fr)] items-start gap-2 text-[12.5px]">
+                <li key={entry.id} className="grid grid-cols-[40px_8px_minmax(0,1fr)] items-start gap-2">
                   <time className="pt-px text-[11.5px] text-muted-foreground tabular-nums" title={formatDateTime(entry.at)}>
                     {formatClock(entry.at)}
                   </time>
                   <span className={cn("mt-1.5 size-2 rounded-full", activityDot[entry.kind])} aria-hidden />
-                  <span className="break-words">{entry.message}</span>
+                  <span className="break-words select-text">{entry.message}</span>
                 </li>
               ))}
             </ul>
@@ -248,45 +255,85 @@ export const TaskInspector = memo(function TaskInspector({ task, onClose, onEdit
         </Section>
       </div>
 
-      <footer className="grid grid-cols-2 gap-2 border-t px-3.5 py-3">
-        {recording && (
+      <footer className="flex items-center gap-1.5 border-t px-4 py-3">
+        {recording ? (
           <Button
             variant="destructive"
-            className="col-span-2"
+            className="flex-1"
             disabled={busy !== null || task.record.state === "finishing"}
             onClick={() => void run("stop", () => stopRecording(task))}
           >
             {task.record.state === "finishing" ? <Loader2 className="animate-spin" aria-hidden /> : <Square aria-hidden />}
             {task.record.state === "finishing" ? "正在收尾…" : "停止录制"}
           </Button>
-        )}
-        {canRestart && (
-          <Button className="col-span-2" disabled={busy !== null} onClick={() => void run("start", () => startRecording(task))}>
+        ) : canRestart ? (
+          <Button className="flex-1" disabled={busy !== null} onClick={() => void run("start", () => startRecording(task))}>
             {busy === "start" ? <Loader2 className="animate-spin" aria-hidden /> : <Circle className="fill-current" aria-hidden />}
             重新开始录制
           </Button>
+        ) : (
+          <Button
+            variant={paused ? "default" : "outline"}
+            className="flex-1"
+            disabled={busy !== null}
+            onClick={() => void run("monitor", () => setMonitoring([task.id], paused))}
+          >
+            {paused ? <Play aria-hidden /> : <Pause aria-hidden />}
+            {paused ? "恢复监控" : "暂停监控"}
+          </Button>
         )}
-        <Button
-          variant={paused ? "default" : "outline"}
-          disabled={busy !== null}
-          onClick={() => void run("monitor", () => setMonitoring([task.id], paused))}
-        >
-          {paused ? <Play aria-hidden /> : <Pause aria-hidden />}
-          {paused ? "恢复监控" : "暂停监控"}
-        </Button>
-        <Button variant="outline" onClick={() => onEdit(task.id)}>
+        {(recording || canRestart) && (
+          <IconAction
+            label={paused ? "恢复监控" : "暂停监控"}
+            disabled={busy !== null}
+            onClick={() => void run("monitor", () => setMonitoring([task.id], paused))}
+          >
+            {paused ? <Play aria-hidden /> : <Pause aria-hidden />}
+          </IconAction>
+        )}
+        <IconAction label="编辑" onClick={() => onEdit(task.id)}>
           <Pencil aria-hidden />
-          编辑
-        </Button>
-        <Button variant="outline" onClick={() => void openFolder(task)}>
+        </IconAction>
+        <IconAction label="打开文件夹" onClick={() => void openFolder(task)}>
           <FolderOpen aria-hidden />
-          打开文件夹
-        </Button>
-        <Button variant="outline" className="text-destructive hover:text-destructive" onClick={() => onDelete([task])}>
+        </IconAction>
+        <IconAction
+          label="删除"
+          hint={withShortcut("删除", "Delete", false)}
+          className="text-destructive hover:text-destructive"
+          onClick={() => onDelete([task])}
+        >
           <Trash2 aria-hidden />
-          删除
-        </Button>
+        </IconAction>
       </footer>
     </aside>
   );
 });
+
+/** 详情面板里的图标按钮：悬停提示写出名称和快捷键。 */
+function IconAction({
+  label,
+  hint,
+  className,
+  disabled,
+  onClick,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  className?: string;
+  disabled?: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button variant="ghost" size="icon" aria-label={label} className={className} disabled={disabled} onClick={onClick}>
+          {children}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{hint ?? label}</TooltipContent>
+    </Tooltip>
+  );
+}

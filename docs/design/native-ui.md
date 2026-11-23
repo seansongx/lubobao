@@ -78,15 +78,15 @@ macOS 用 Cmd，其他平台用 Ctrl：
 
 ### Windows
 
-- 窗口配置 `transparent: true`、`decorations: true`，保留系统标题栏，贴靠布局（Snap Layouts）、拖拽、双击最大化等系统行为不受影响。
-- Rust 在 `setup` 中调用 `window_vibrancy::apply_mica(&window, None)`（Tauri 已依赖该库；也可用 `window.set_effects`，但它不返回是否成功）。`apply_mica` 在 Windows 11 22H2+ 用 `DWMWA_SYSTEMBACKDROP_TYPE = DWMSBT_MAINWINDOW`，在 21H2 用未公开的 `DWMWA_MICA_EFFECT`，其他版本返回错误。
+- 主窗口在 `tauri.conf.json` 里设 `create: false`，由 `src-tauri/src/desktop/window.rs` 按配置创建并加上 `transparent(true)`，`decorations` 保持默认，保留系统标题栏，贴靠布局（Snap Layouts）、拖拽、双击最大化等系统行为不受影响。
+- Rust 在创建窗口后调用 `window_vibrancy::apply_mica(&window, None)`（Tauri 已依赖该库；也可用 `window.set_effects`，但它不返回是否成功）。`apply_mica` 在 Windows 11 22H2+ 用 `DWMWA_SYSTEMBACKDROP_TYPE = DWMSBT_MAINWINDOW`，在 21H2 用未公开的 `DWMWA_MICA_EFFECT`，其他版本返回错误。
 - **Windows 10 退化**：`apply_mica` 返回错误，`data-material=none`，前端给 `body` 画不透明的 Windows 10 底色（浅色 `#f3f3f3`，深色 `#202020`）。透明窗口被网页内容完全盖住，看起来与普通窗口相同。字体栈里 `Segoe UI Variable` 不存在，自动回落到 `Segoe UI`。窗口没有圆角，属系统行为。
 - 浏览器快捷键：正式构建里通过 `with_webview` 拿到 `ICoreWebView2Settings3`，调用 `SetAreBrowserAcceleratorKeysEnabled(false)`。浏览器不再处理 Ctrl+F、Ctrl+P、F5 等，但按键仍会传给页面，Ctrl+F 可以用作应用快捷键。前端另加一层 `keydown` 拦截兜底。缩放热键由 Tauri 的 `zoomHotkeysEnabled: false`（默认）关闭，同时也关闭了 Ctrl+滚轮缩放。
-- 透明窗口可能在调整大小时出现白边，配置 `noRedirectionBitmap` 可以缓解，第二阶段实测后决定是否开启。
+- 透明窗口可能在调整大小时出现白边，`noRedirectionBitmap` 可以缓解。目前没有开启：实机验证时窗口被其他窗口遮挡，没有观察到调整大小时的画面，留待在桌面上实际拖动窗口时确认。
 
 ### macOS
 
-- 窗口配置 `titleBarStyle: "Overlay"`、`hiddenTitle: true`、`trafficLightPosition: { x: 18, y: 22 }`、`transparent: true`，`windowEffects: { effects: ["sidebar"], state: "followsWindowActiveState" }`。Tauri 2.12 起透明背景所需的私有 API 默认启用，无需 `macOSPrivateApi`。
+- `desktop/window.rs` 在创建窗口时设 `title_bar_style(Overlay)`、`hidden_title(true)`、`traffic_light_position(18, 20)`、`transparent(true)` 和 `effects: [Sidebar]`（`FollowsWindowActiveState`）。Tauri 2.12 起透明背景所需的私有 API 默认启用，无需 `macOSPrivateApi`。
 - vibrancy 铺满整个窗口，内容区自己画不透明底色，只有侧栏透出材质，效果与 Finder、备忘录一致。
 - 内容区顶部 52px 和侧栏顶部带 `data-tauri-drag-region`，可拖动窗口、双击缩放；其中的按钮和搜索框不带该属性，照常响应点击。
 - 侧栏顶部留出红绿灯的位置（约 52px），不放品牌标识；品牌名只出现在关于页和菜单栏。
@@ -98,7 +98,7 @@ macOS 用 Cmd，其他平台用 Ctrl：
 
 ### 窗口状态
 
-用 `tauri-plugin-window-state` 记住窗口大小、位置和最大化状态。首次启动仍是 1280×800、最小 1024×680。窗口初始 `visible: false`，恢复尺寸后再显示，避免先闪出默认大小。
+用 `tauri-plugin-window-state` 记住窗口大小、位置和最大化状态。首次启动仍是 1280×800、最小 1024×680。窗口先隐藏创建，插件在创建时恢复尺寸，之后再显示，避免先闪出默认大小。插件不恢复显示状态，托盘隐藏的窗口下次启动仍正常显示。
 
 ## 实现方式
 
@@ -106,9 +106,17 @@ macOS 用 Cmd，其他平台用 Ctrl：
 - `src/tokens.css` 按平台分组定义 token：颜色（含深色）、字体、字号、控件高度、圆角、导航项高度、内容边距、对话框与菜单圆角、动效时长和曲线。shadcn/ui 组件只读这些变量，按需调整类名，不另起组件库。
 - 对话框按钮顺序用 `DialogFooter` 的 CSS（`flex-direction` 随平台）控制，组件里按「取消、主操作」的语义顺序书写。
 
-## 需要拍板的取舍
+## 已确定的取舍（2026-11-23）
 
-1. **macOS 列表选中色**：原生做法是 Teal 实心底加白字，但录制红点、检测蓝圈在 Teal 底上会看不清，只能一起变白。原型用淡 Teal 底（与非激活窗口的选中外观相近），状态色保持可读。
-2. **Windows 正文字号**：Fluent 正文是 14px，当前是 13px。原型里导航和设置页用 14px，任务表和详情保留 13px，以免 1024 宽时列被挤掉。
-3. **侧栏品牌标识**：macOS 侧栏顶部让给红绿灯，不显示品牌标识。原型在 Windows 和 Linux 上也去掉了侧栏顶部的品牌块，因为标题栏已显示应用名和图标。
-4. **统计卡片**：现在直播间页顶部的五个统计卡片是网页后台常见的样式，原型改成命令栏下方的一排分段筛选（「全部 10 · 录制中 2 · 监控中 4 · 需关注 3 · 已暂停 1」），功能不变。
+1. **macOS 列表选中色**：用淡 Teal 底，不用 Teal 实心底加白字，录制红点、检测蓝圈等状态色保持不变。三个平台的选中行都是淡 Teal 底，Windows 另在左侧画 Teal 竖条。
+2. **Windows 字号**：任务表、右侧详情、录像库和动态 13px（`--text-dense`），导航、设置、对话框等其余部分 14px（`--text-ui`）。
+3. **侧栏品牌标识**：三个平台都去掉。
+4. **统计卡片**：直播间页顶部的 5 个统计卡片改成一行带数字的筛选按钮，筛选功能不变。
+
+## 实现备注
+
+- macOS 的「添加直播间」是工具栏里的无框「+」图标按钮（悬停提示「添加直播间 ⌘N」），与系统应用的工具栏一致；Windows 和 Linux 是 Teal 实心主按钮。
+- 详情面板底部只保留一个带文字的主要操作（停止录制、重新开始录制、恢复或暂停监控），其余（暂停监控、编辑、打开文件夹、删除）是带悬停提示的图标按钮；这些操作也都在任务行的右键菜单里。
+- 设置页：Windows 每个设置项是一张 Fluent 设置卡片，macOS 是圆角分组表单，Linux 是 Adwaita 分组列表。
+- 录像库没有删除操作（后端不提供），右键菜单是「用系统播放器打开 / 进入文件夹」「在文件夹中显示」「复制路径」。
+- 浏览器预览（`npm run dev`）可用 `?platform=windows|macos|linux` 切换平台主题，`data-material` 始终为 `none`。

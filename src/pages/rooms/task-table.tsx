@@ -112,15 +112,19 @@ const TaskRow = memo(function TaskRow({ task, selected, active, onSelect, onActi
   return (
     <TableRow
       data-state={selected ? "selected" : undefined}
+      data-task-id={task.id}
       aria-current={active ? "true" : undefined}
       onClick={() => onActivate(task.id)}
       className={cn(
         "h-task-row cursor-default",
-        // 需处理行始终保留淡红底，选中和勾选都不覆盖；当前行只用左侧竖条标示。
+        // 需处理行始终保留淡红底，勾选不覆盖；当前行为淡 Teal 底（各平台一致，状态色保持可读），
+        // Windows 另在左侧画 Fluent 的 Teal 竖条。
         needsAction
           ? "bg-status-recording-soft hover:bg-status-recording-soft data-[state=selected]:bg-status-recording-soft"
-          : active && "bg-accent hover:bg-accent",
-        active && "shadow-[inset_2px_0_0_var(--primary)]",
+          : active && "bg-selection hover:bg-selection data-[state=selected]:bg-selection",
+        active &&
+          "win:[&>td:first-child]:relative win:[&>td:first-child]:before:absolute win:[&>td:first-child]:before:top-1/2 win:[&>td:first-child]:before:left-0 win:[&>td:first-child]:before:h-4 win:[&>td:first-child]:before:w-[3px] win:[&>td:first-child]:before:-translate-y-1/2 win:[&>td:first-child]:before:rounded-full win:[&>td:first-child]:before:bg-primary",
+        active && needsAction && "linux:shadow-[inset_3px_0_0_var(--primary)] mac:shadow-[inset_3px_0_0_var(--primary)]",
         task.display === "paused" && "[&>td:not(:first-child)]:opacity-55",
       )}
     >
@@ -138,7 +142,7 @@ const TaskRow = memo(function TaskRow({ task, selected, active, onSelect, onActi
           <div className="min-w-0">
             <button
               type="button"
-              className="block max-w-full truncate rounded-sm text-left font-medium outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+              className="block max-w-full truncate rounded-sm text-left font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring"
               onClick={(event) => {
                 event.stopPropagation();
                 onActivate(task.id);
@@ -237,8 +241,8 @@ export function TaskTable({
     onRowSelectionChange(() => (value ? Object.fromEntries(rows.map((row) => [row.id, true as const])) : {}));
 
   return (
-    <table className="w-full table-fixed border-collapse text-[13px]">
-      <TableHeader className="sticky top-0 z-[1] bg-card">
+    <table className="w-full table-fixed border-collapse text-(length:--text-dense)">
+      <TableHeader className="sticky top-0 z-[1] bg-content backdrop-blur-xl linux:bg-card">
         {table.getHeaderGroups().map((group) => (
           <TableRow key={group.id} className="hover:bg-transparent">
             {group.headers.map((header) => {
@@ -249,7 +253,7 @@ export function TaskTable({
               return (
                 <TableHead
                   key={header.id}
-                  className={cn("h-[34px] px-2.5 text-xs font-medium text-muted-foreground", meta?.className)}
+                  className={cn("h-8 px-2.5 text-xs font-normal text-muted-foreground mac:h-7 mac:font-medium linux:font-semibold", meta?.className)}
                   aria-sort={sorted === "asc" ? "ascending" : sorted === "desc" ? "descending" : undefined}
                 >
                   {isSelect ? (

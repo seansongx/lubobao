@@ -37,7 +37,7 @@ export function Notice({
   return (
     <div
       role={tone === "error" ? "alert" : "status"}
-      className={cn("flex gap-2.5 rounded-lg border px-3 py-2.5 text-[13px]", toneClass[tone], className)}
+      className={cn("flex gap-2.5 rounded-lg border px-3 py-2.5 text-[13px] select-text", toneClass[tone], className)}
     >
       <Icon className="mt-0.5 size-4 shrink-0" aria-hidden />
       <div className="min-w-0 flex-1">

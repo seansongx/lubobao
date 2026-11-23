@@ -24,7 +24,7 @@
 | --- | --- |
 | ![录像库：按目录浏览，分段按场次分组](docs/screenshots/library.png) | ![设置：录制选项](docs/screenshots/settings.png) |
 
-截图来自浏览器中的假数据界面，直播间均为虚构示例。
+截图来自浏览器中的假数据界面（Windows 浅色主题；macOS、Linux 上界面随系统风格），直播间均为虚构示例。
 
 ## 下载
 

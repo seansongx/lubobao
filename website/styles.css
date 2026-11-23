@@ -293,20 +293,19 @@ h1 {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 14px 10px;
+  padding: 10px 8px;
   background: var(--m-side);
   border-right: 1px solid var(--m-line);
 }
-.side-brand { display: flex; align-items: center; gap: 9px; padding: 0 8px 14px; font-weight: 600; }
-.side-brand .logo { width: 24px; height: 24px; }
 .side-item {
   display: flex;
   align-items: center;
   gap: 10px;
   height: 34px;
   padding: 0 10px;
-  border-radius: 8px;
-  color: var(--m-ink-2);
+  position: relative;
+  border-radius: 5px;
+  color: var(--m-ink);
 }
 .side-item svg, .st svg {
   width: 15px;
@@ -318,7 +317,8 @@ h1 {
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-.side-item.on { background: var(--m-bg); color: var(--m-ink); font-weight: 500; box-shadow: 0 0 0 1px var(--m-line); }
+.side-item.on { background: var(--m-line); }
+.side-item.on::before { content: ""; position: absolute; left: 0; top: 50%; width: 3px; height: 16px; margin-top: -8px; border-radius: 2px; background: var(--brand); }
 .side-item.on svg { color: var(--brand); }
 
 .pane { padding: 18px 20px; min-width: 0; }
@@ -326,14 +326,14 @@ h1 {
 .pane-title { font-size: 18px; font-weight: 700; }
 .pane-btn {
   padding: 6px 12px;
-  border-radius: 7px;
+  border-radius: 4px;
   background: var(--brand);
   color: var(--on-brand);
   font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
 }
-.rows { border: 1px solid var(--m-line); border-radius: 10px; overflow: hidden; }
+.rows { overflow: hidden; }
 .row {
   display: grid;
   grid-template-columns: minmax(0, 1.6fr) 0.6fr 0.9fr 1fr;
@@ -345,7 +345,7 @@ h1 {
   white-space: nowrap;
 }
 .row > span { overflow: hidden; text-overflow: ellipsis; }
-.row.head { height: 34px; border-top: 0; color: var(--m-ink-2); font-size: 12px; background: var(--m-side); }
+.row.head { height: 32px; border-top: 0; color: var(--m-ink-2); font-size: 12px; }
 .row.sel { background: var(--m-sel); box-shadow: inset 3px 0 0 var(--brand); }
 .row.paused { opacity: 0.5; }
 .col-plat, .col-meta { color: var(--m-ink-2); }
@@ -737,7 +737,6 @@ code { font-family: var(--mono); font-size: 0.9em; }
   .app { grid-template-columns: 52px minmax(0, 1fr); }
   .side { padding: 12px 8px; align-items: center; }
   .side-label { display: none; }
-  .side-brand { padding: 0 0 12px; }
   .side-item { justify-content: center; width: 36px; padding: 0; }
   .col-plat, .statusbar > .sb-opt { display: none; }
   .row { grid-template-columns: minmax(0, 1.4fr) 0.9fr 0.9fr; }

@@ -1,8 +1,10 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import { AppSidebar } from "@/components/app-sidebar";
+import { useAppShortcuts } from "@/components/app-shortcuts";
 import type { Navigate, TaskFocusRequest } from "@/components/navigation";
 import { DesktopDialogs } from "@/components/desktop-dialogs";
+import { SelectionMenu } from "@/components/selection-menu";
 import { StatusBar } from "@/components/status-bar";
 import { UpdateDialog } from "@/components/update-dialog";
 import { Toaster } from "@/components/ui/sonner";
@@ -12,6 +14,7 @@ import { ActivityPage } from "@/pages/activity/activity-page";
 import { LibraryPage } from "@/pages/library/library-page";
 import { PagePlaceholder } from "@/pages/page-placeholder";
 import { pages, type PageId } from "@/pages/pages";
+import { isRecordingActive } from "@/pages/rooms/format";
 import { RoomsPage } from "@/pages/rooms/rooms-page";
 import { initialRoomsView, type RoomsView } from "@/pages/rooms/rooms-view";
 import { SettingsPage } from "@/pages/settings/settings-page";
@@ -34,6 +37,13 @@ export default function App() {
     setCurrent(target);
   }, []);
 
+  useAppShortcuts(navigate, current);
+
+  const recordingCount = useMemo(
+    () => (taskList.tasks ?? []).filter((task) => isRecordingActive(task.record)).length,
+    [taskList.tasks],
+  );
+
   const content = (() => {
     switch (page.id) {
       case "rooms":
@@ -51,11 +61,17 @@ export default function App() {
 
   return (
     <TooltipProvider delayDuration={400}>
-      <div className="grid h-screen grid-cols-[200px_minmax(0,1fr)] grid-rows-[minmax(0,1fr)_auto]">
-        <AppSidebar current={current} onNavigate={navigate} />
-        <main className="flex min-h-0 min-w-0">{content}</main>
-        <StatusBar />
+      {/* 侧栏占满高度；右侧是内容层和状态栏。Windows 的内容层是 Mica 上的 Fluent Layer（左上圆角加描边）。 */}
+      <div className="grid h-screen grid-cols-[var(--sidebar-width)_minmax(0,1fr)] bg-window">
+        <AppSidebar current={current} onNavigate={navigate} recordingCount={recordingCount} />
+        <div className="flex min-h-0 min-w-0 flex-col">
+          <main className="flex min-h-0 min-w-0 flex-1 bg-content win:rounded-tl-xl win:border-t win:border-l win:border-content-border">
+            {content}
+          </main>
+          <StatusBar />
+        </div>
       </div>
+      <SelectionMenu />
       <DesktopDialogs />
       <UpdateDialog />
       {/* 顶部居中，避免遮住详情面板底部的操作按钮和批量操作条。 */}

@@ -2,6 +2,7 @@
 
 import { Component, useState, type ErrorInfo, type ReactNode } from "react";
 
+import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { AboutSection } from "@/pages/settings/about-section";
@@ -47,7 +48,7 @@ class SettingsErrorBoundary extends Component<BoundaryProps, { error: Error | nu
   render() {
     if (!this.state.error) return this.props.children;
     return (
-      <div role="alert" className="flex max-w-[760px] items-center gap-3 rounded-lg border bg-card px-4 py-3">
+      <div role="alert" className="flex max-w-[760px] items-center gap-3 rounded-lg border bg-card px-4 py-3 select-text">
         <span className="flex-1 text-destructive">这一组设置显示失败：{this.state.error.message}</span>
         {/* 重新读取成功后父组件换 key，错误边界随之重置。 */}
         <Button type="button" variant="outline" onClick={this.props.onRetry}>
@@ -101,12 +102,9 @@ export function SettingsPage() {
 
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <header className="flex items-center gap-2.5 px-5 pt-3.5">
-        <h1 className="m-0 text-[17px] font-semibold">设置</h1>
-        <span className="text-xs text-muted-foreground">修改后自动保存</span>
-      </header>
+      <PageHeader title="设置" summary="修改后自动保存" />
       <div className="flex min-h-0 flex-1">
-        <nav aria-label="设置分组" className="flex w-[160px] shrink-0 flex-col gap-0.5 py-3.5 pr-2.5 pl-5">
+        <nav aria-label="设置分组" className="flex w-[168px] shrink-0 flex-col gap-0.5 py-3.5 pr-2.5 pl-(--page-pad) mac:pl-3">
           {groups.map((item) => (
             <button
               key={item.id}
@@ -114,15 +112,16 @@ export function SettingsPage() {
               aria-current={group === item.id ? "page" : undefined}
               onClick={() => setGroup(item.id)}
               className={cn(
-                "h-8 rounded-lg px-2.5 text-left text-[13px] text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50",
-                group === item.id && "bg-card font-medium text-foreground shadow-[0_0_0_1px_var(--border)]",
+                "relative h-[calc(var(--nav-item-h)-4px)] rounded-md px-3 text-left text-(length:--text-ui) outline-none transition-colors duration-(--duration) hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring mac:px-2",
+                group === item.id &&
+                  "bg-accent linux:font-semibold win:before:absolute win:before:top-1/2 win:before:left-0 win:before:h-4 win:before:w-[3px] win:before:-translate-y-1/2 win:before:rounded-full win:before:bg-primary",
               )}
             >
               {item.label}
             </button>
           ))}
         </nav>
-        <div className="min-w-0 flex-1 overflow-y-auto py-3.5 pr-5 pl-2.5">
+        <div className="min-w-0 flex-1 overflow-y-auto py-3.5 pr-(--page-pad) pl-2.5">
           {/* 切换分组或重新读取设置后重置错误状态。 */}
           <SettingsErrorBoundary key={`${group}:${loadId}`} onRetry={reload}>
             {body}

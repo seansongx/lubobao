@@ -19,9 +19,20 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         // 应用内更新（检查、下载、安装和安装失败后的重启见 desktop::update）。
         .plugin(tauri_plugin_updater::Builder::new().build())
+        // 记住主窗口大小、位置和最大化状态；显示与否由托盘和关窗逻辑决定，不恢复。
+        .plugin(
+            tauri_plugin_window_state::Builder::new()
+                .with_state_flags(
+                    tauri_plugin_window_state::StateFlags::all()
+                        - tauri_plugin_window_state::StateFlags::VISIBLE,
+                )
+                .build(),
+        )
         // 关闭主窗口：按设置隐藏到托盘（录制继续）、退出或询问。
         .on_window_event(desktop::on_window_event)
         .setup(|app| {
+            // 主窗口在 tauri.conf.json 里不自动创建，由这里按平台加上透明、标题栏和材质。
+            desktop::window::create_main_window(app.handle())?;
             ffmpeg::tauri_glue::init(app.handle())?;
             tasks::tauri_glue::init(app.handle())?;
             scheduler::tauri_glue::init(app.handle())?;
@@ -48,6 +59,7 @@ pub fn run() {
             desktop::quit::confirm_quit,
             desktop::quit::cancel_quit,
             desktop::debug_desktop_action,
+            desktop::window::get_window_material,
             desktop::close::resolve_close,
             desktop::tray::confirm_pause_all,
             desktop::update::check_update,

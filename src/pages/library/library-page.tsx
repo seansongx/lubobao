@@ -10,12 +10,14 @@ import {
   FolderOpen,
   FolderSearch,
   Layers,
+  Copy,
   Loader2,
   Play,
   RotateCw,
   Settings,
   X,
 } from "lucide-react";
+import { toast } from "sonner";
 
 import { formatBytes, formatDateTime } from "@/components/format";
 import type { Navigate } from "@/components/navigation";
@@ -26,7 +28,15 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
+import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useDiskSpace, useLibraryUsage } from "@/components/use-library-space";
 import {
@@ -218,6 +228,19 @@ export function LibraryPage({ onNavigate }: LibraryPageProps) {
   const reveal = (target: string) => runAction(api.revealLibraryItem(target));
   const openFolder = (target: string) => runAction(api.openLibraryFolder(target));
 
+  const [menuEntry, setMenuEntry] = useState<LibraryEntry | null>(null);
+  // 整个列表共用一个右键菜单：按右键所在行（data-path）决定内容，空白处不弹。
+  const onListContextMenu = (event: React.MouseEvent) => {
+    const row = event.target instanceof Element ? event.target.closest<HTMLElement>("[data-path]") : null;
+    const entry = row ? listing?.entries.find((item) => item.path === row.dataset.path) : undefined;
+    if (!entry) {
+      event.preventDefault();
+      return;
+    }
+    setSelected(entry.path);
+    setMenuEntry(entry);
+  };
+
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key === "Backspace" && path) {
       event.preventDefault();
@@ -255,29 +278,34 @@ export function LibraryPage({ onNavigate }: LibraryPageProps) {
 
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <header className="flex items-center gap-3 px-5 pt-3.5">
-        <h1 className="m-0 text-[17px] font-semibold">录像库</h1>
-        <LibrarySummary
-          usage={usage?.rootExists ? usage : null}
-          availableBytes={space?.availableBytes ?? null}
-          totalBytes={space?.totalBytes ?? null}
-        />
-        <span className="flex-1" />
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon-sm" onClick={reload} aria-label="刷新">
-              <RotateCw className={cn(load.state === "loading" && "animate-spin")} aria-hidden />
+      <PageHeader
+        title="录像库"
+        summary={
+          <LibrarySummary
+            usage={usage?.rootExists ? usage : null}
+            availableBytes={space?.availableBytes ?? null}
+            totalBytes={space?.totalBytes ?? null}
+          />
+        }
+        actions={
+          <>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon" onClick={reload} aria-label="刷新">
+                  <RotateCw className={cn(load.state === "loading" && "animate-spin")} aria-hidden />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>刷新</TooltipContent>
+            </Tooltip>
+            <Button variant="outline" onClick={() => openFolder(path)} disabled={rootBroken}>
+              <FolderOpen aria-hidden />
+              打开目录
             </Button>
-          </TooltipTrigger>
-          <TooltipContent>刷新</TooltipContent>
-        </Tooltip>
-        <Button variant="outline" size="sm" onClick={() => openFolder(path)} disabled={rootBroken}>
-          <FolderOpen aria-hidden />
-          打开目录
-        </Button>
-      </header>
+          </>
+        }
+      />
 
-      <div className="flex min-w-0 items-center gap-1.5 px-5 pt-3 pb-2">
+      <div className="flex min-w-0 items-center gap-1.5 px-(--page-pad) pt-3 pb-2 mac:pt-2.5">
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
@@ -314,7 +342,7 @@ export function LibraryPage({ onNavigate }: LibraryPageProps) {
       {notice && (
         <div
           role="alert"
-          className="mx-5 mb-2 flex items-start gap-2 rounded-lg border border-destructive/30 bg-status-recording-soft px-3 py-2 text-[13px]"
+          className="mx-(--page-pad) mb-2 flex items-start gap-2 rounded-lg border border-destructive/30 bg-status-recording-soft px-3 py-2 text-[13px] select-text"
         >
           <AlertTriangle className="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden />
           <span className="min-w-0 flex-1 break-all">{notice}</span>
@@ -324,7 +352,7 @@ export function LibraryPage({ onNavigate }: LibraryPageProps) {
         </div>
       )}
 
-      <div className="mx-5 mb-4 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border bg-card">
+      <div className="mx-3 mb-2 flex min-h-0 flex-1 flex-col overflow-hidden text-(length:--text-dense) mac:mx-2.5 linux:mx-(--page-pad) linux:mb-3 linux:rounded-xl linux:border linux:bg-card linux:shadow-xs">
         {load.state === "error" ? (
           <LibraryErrorView
             error={load.error}
@@ -342,44 +370,67 @@ export function LibraryPage({ onNavigate }: LibraryPageProps) {
           <EmptyFolder atRoot={listing.path === ""} root={listing.root} />
         ) : (
           <>
-            <div className="grid grid-cols-[minmax(0,1fr)_88px_112px_64px] items-center gap-3 border-b px-3 py-1.5 text-xs text-muted-foreground">
+            <div className="grid h-8 grid-cols-[minmax(0,1fr)_88px_112px_64px] items-center gap-3 border-b px-3 text-xs text-muted-foreground mac:h-7 mac:font-medium linux:font-semibold">
               <span>名称</span>
               <span className="text-right">大小</span>
               <span>修改时间</span>
               <span className="sr-only">操作</span>
             </div>
-            <div
-              ref={listRef}
-              role="listbox"
-              aria-label="录像文件"
-              tabIndex={0}
-              onKeyDown={onKeyDown}
-              onScroll={(event) =>
-                setScroll({ top: event.currentTarget.scrollTop, height: event.currentTarget.clientHeight })
-              }
-              className="relative min-h-0 flex-1 overflow-y-auto outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset"
-            >
-              <div style={{ height: layout.offsets[rows.length] }}>
-                {rows.slice(visible.start, visible.end).map((row, offset) => {
-                  const index = visible.start + offset;
-                  const style = { top: layout.offsets[index] };
-                  return row.type === "group" ? (
-                    <GroupRow key={row.key} row={row} style={style} />
-                  ) : (
-                    <EntryRow
-                      key={row.entry.path}
-                      entry={row.entry}
-                      nested={row.nested}
-                      style={style}
-                      selected={selected === row.entry.path}
-                      onSelect={() => setSelected(row.entry.path)}
-                      onActivate={() => activate(row.entry)}
-                      onReveal={() => reveal(row.entry.path)}
-                    />
-                  );
-                })}
+            <ContextMenu onOpenChange={(open) => !open && setMenuEntry(null)}>
+              <ContextMenuTrigger asChild onContextMenu={onListContextMenu}>
+              <div
+                ref={listRef}
+                role="listbox"
+                aria-label="录像文件"
+                tabIndex={0}
+                onKeyDown={onKeyDown}
+                onScroll={(event) =>
+                  setScroll({ top: event.currentTarget.scrollTop, height: event.currentTarget.clientHeight })
+                }
+                className="relative min-h-0 flex-1 overflow-y-auto outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset"
+              >
+                <div style={{ height: layout.offsets[rows.length] }}>
+                  {rows.slice(visible.start, visible.end).map((row, offset) => {
+                    const index = visible.start + offset;
+                    const style = { top: layout.offsets[index] };
+                    return row.type === "group" ? (
+                      <GroupRow key={row.key} row={row} style={style} />
+                    ) : (
+                      <EntryRow
+                        key={row.entry.path}
+                        entry={row.entry}
+                        nested={row.nested}
+                        style={style}
+                        selected={selected === row.entry.path}
+                        onSelect={() => setSelected(row.entry.path)}
+                        onActivate={() => activate(row.entry)}
+                        onReveal={() => reveal(row.entry.path)}
+                      />
+                    );
+                  })}
+                </div>
               </div>
-            </div>
+              </ContextMenuTrigger>
+              <ContextMenuContent className="min-w-52">
+                {menuEntry && (
+                  <>
+                    <ContextMenuItem onSelect={() => activate(menuEntry)}>
+                      {menuEntry.kind === "dir" ? <FolderOpen aria-hidden /> : <Play aria-hidden />}
+                      {menuEntry.kind === "dir" ? "进入文件夹" : "用系统播放器打开"}
+                    </ContextMenuItem>
+                    <ContextMenuItem onSelect={() => reveal(menuEntry.path)}>
+                      <FolderSearch aria-hidden />
+                      在文件夹中显示
+                    </ContextMenuItem>
+                    <ContextMenuSeparator />
+                    <ContextMenuItem onSelect={() => void copyPath(root, menuEntry.path)}>
+                      <Copy aria-hidden />
+                      复制路径
+                    </ContextMenuItem>
+                  </>
+                )}
+              </ContextMenuContent>
+            </ContextMenu>
           </>
         )}
       </div>
@@ -467,7 +518,7 @@ function GroupRow({ row, style }: { row: Extract<Row, { type: "group" }>; style:
   return (
     <div
       style={style}
-      className="absolute inset-x-0 grid h-8 grid-cols-[minmax(0,1fr)_88px_112px_64px] items-center gap-3 border-b bg-muted/50 px-3 text-xs text-muted-foreground"
+      className="absolute inset-x-0 grid h-8 grid-cols-[minmax(0,1fr)_88px_112px_64px] items-center gap-3 border-b bg-muted/60 px-3 text-xs text-muted-foreground"
     >
       <span className="flex min-w-0 items-center gap-2">
         <Layers className="size-3.5 shrink-0" aria-hidden />
@@ -506,7 +557,7 @@ function EntryRow({ entry, nested, style, selected, onSelect, onActivate, onReve
       title={isDir ? "双击进入文件夹" : "双击用系统播放器打开"}
       className={cn(
         "group absolute inset-x-0 grid h-11 cursor-default grid-cols-[minmax(0,1fr)_88px_112px_64px] items-center gap-3 border-b px-3 select-none hover:bg-accent",
-        selected && "bg-accent",
+        selected && "bg-selection hover:bg-selection",
       )}
     >
       <span className={cn("flex min-w-0 items-center gap-2.5", nested && "pl-5")}>
@@ -652,4 +703,16 @@ function LibraryErrorView({ error, atRoot, onNavigate, onRetry, onRoot }: Librar
       </div>
     </div>
   );
+}
+
+/** 复制录像的完整路径（保存目录 + 相对路径，分隔符跟随保存目录）。 */
+async function copyPath(root: string, relative: string): Promise<void> {
+  const separator = root.includes("\\") ? "\\" : "/";
+  const full = root ? `${root.replace(/[\\/]+$/, "")}${separator}${relative.split("/").join(separator)}` : relative;
+  try {
+    await navigator.clipboard.writeText(full);
+    toast.success("已复制路径", { description: full });
+  } catch (error) {
+    toast.error("复制失败", { description: String(error) });
+  }
 }
