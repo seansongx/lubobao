@@ -78,12 +78,12 @@ jobs:
           # 也失败，免得用户看到一句提示语。
           jq -r '.body // ""' "$RUNNER_TEMP/release.json" | tr -d '\r' > "$RUNNER_TEMP/body.md"
           if ! grep -q '<!-- 以上为应用内更新说明 -->' "$RUNNER_TEMP/body.md"; then
-            echo "::error::Release 正文里没有「<!-- 以上为应用内更新说明 -->」这一行：在更新内容和安装说明之间加上它，再手动运行本 workflow（tag 填 $TAG）。"
+            echo "::error::Release 正文里没有「<!-- 以上为应用内更新说明 -->」这一行：在更新内容和安装说明之间加上它，再手动运行本 workflow（tag 填 ${TAG}）。"
             exit 1
           fi
           sed '/<!-- 以上为应用内更新说明 -->/,$d' "$RUNNER_TEMP/body.md" > "$RUNNER_TEMP/notes.md"
           if grep -q '发布前把这里换成本版本的变化' "$RUNNER_TEMP/notes.md"; then
-            echo "::error::Release 正文里的「更新内容」还是占位句：编辑 Release 写好更新内容后，手动运行本 workflow（tag 填 $TAG）。"
+            echo "::error::Release 正文里的「更新内容」还是占位句：编辑 Release 写好更新内容后，手动运行本 workflow（tag 填 ${TAG}）。"
             exit 1
           fi
           # 去掉开头的「## 更新内容」标题，应用的更新对话框里已经有标题。
@@ -149,7 +149,7 @@ jobs:
           [ "$CHANNEL" = "beta" ] && query="?channel=beta"
           check() {
             latest="$(curl -fsS "$RELEASE_API/api/v1/products/$RELEASE_SLUG/latest$query" | jq -r .version)" || return 1
-            [ "$latest" = "$version" ] || { echo "latest 接口返回 $latest，应为 $version"; return 1; }
+            [ "$latest" = "$version" ] || { echo "latest 接口返回 ${latest}，应为 $version"; return 1; }
             for target in windows/x86_64 darwin/aarch64 darwin/x86_64 linux/x86_64; do
               case "$target" in
                 windows/x86_64) file="lubobao_${version}_windows_x64-setup.exe" ;;
@@ -161,17 +161,17 @@ jobs:
               status="$(curl -sS -o "$body" -w '%{http_code}' "$RELEASE_API/api/update/$RELEASE_SLUG/tauri/$target/0.0.0$query")"
               [ "$status" = "200" ] || { echo "$target 返回 HTTP $status"; return 1; }
               got="$(jq -r .version "$body")"
-              [ "$got" = "$version" ] || { echo "$target 返回版本 $got，应为 $version"; return 1; }
+              [ "$got" = "$version" ] || { echo "$target 返回版本 ${got}，应为 $version"; return 1; }
               expected="$(tr -d '\r\n' < "$RUNNER_TEMP/dist/$file.sig")"
               [ "$(jq -r '.signature // empty' "$body")" = "$expected" ] || { echo "$target 的签名与 $file.sig 不一致"; return 1; }
               name="$(jq -r '.url // empty' "$body" | sed 's/[?#].*//; s|.*/||')"
-              [ "$name" = "$file" ] || { echo "$target 的下载地址指向 $name，应为 $file"; return 1; }
+              [ "$name" = "$file" ] || { echo "$target 的下载地址指向 ${name}，应为 $file"; return 1; }
               echo "✓ $target → $got"
             done
           }
           for attempt in 1 2 3 4 5 6; do
             if check; then
-              echo "- xiaofany.com：\`$RELEASE_SLUG $version\`（$CHANNEL），版本接口和应用内更新接口都已核对" >> "$GITHUB_STEP_SUMMARY"
+              echo "- xiaofany.com：\`$RELEASE_SLUG $version\`（${CHANNEL}），版本接口和应用内更新接口都已核对" >> "$GITHUB_STEP_SUMMARY"
               exit 0
             fi
             echo "第 $attempt 次核对未通过，30 秒后重试"
