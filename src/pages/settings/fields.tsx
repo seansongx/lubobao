@@ -159,6 +159,21 @@ interface SelectFieldProps {
   onChange: (value: string) => void;
 }
 
+/** 把连续的未分组选项合成一段，和带标题的分组一起按原顺序返回。 */
+function groupOptions(options: SelectFieldProps["options"]) {
+  const segments: ({ group: string; options: readonly SelectOption[] } | { items: SelectOption[] })[] = [];
+  for (const entry of options) {
+    if ("group" in entry) {
+      segments.push(entry);
+    } else {
+      const last = segments[segments.length - 1];
+      if (last && "items" in last) last.items.push(entry);
+      else segments.push({ items: [entry] });
+    }
+  }
+  return segments;
+}
+
 export function SelectField({ label, description, value, options, disabled, error, onChange }: SelectFieldProps) {
   const id = useId();
   const renderItem = (option: SelectOption) => (
@@ -178,14 +193,15 @@ export function SelectField({ label, description, value, options, disabled, erro
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          {options.map((entry) =>
+          {/* 按 shadcn 示例的结构：选项一律放在 SelectGroup 里，连续的未分组选项合成一组。 */}
+          {groupOptions(options).map((entry, index) =>
             "group" in entry ? (
               <SelectGroup key={entry.group}>
                 <SelectLabel>{entry.group}</SelectLabel>
                 {entry.options.map(renderItem)}
               </SelectGroup>
             ) : (
-              renderItem(entry)
+              <SelectGroup key={`items-${index}`}>{entry.items.map(renderItem)}</SelectGroup>
             ),
           )}
         </SelectContent>

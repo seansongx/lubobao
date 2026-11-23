@@ -128,6 +128,7 @@ macOS 用 Cmd，其他平台用 Ctrl：
 ## 实现备注
 
 - **页面里不手写交互控件（2026-11-23）**：状态筛选用 `Tabs`（`line` 样式），搜索框用 `InputGroup`（图标 addon 加 `InputGroupButton` 清除），表头排序用 `Button variant="ghost"`，任务表主播名、动态里的主播名和添加对话框的假数据示例用 `Button variant="link"`，录像库路径用 `BreadcrumbLink`。都用默认 variant 和 size，className 只放布局类。只有左侧导航和设置页左侧分组保留手写，键盘焦点与按钮一致（2px 实色 Teal 细环）。
+- **组件按 shadcn 官方示例的结构使用**：例如 `SelectItem` 一律放在 `SelectGroup` 里（有标题的分组再加 `SelectLabel`，分组之间用 `SelectSeparator`）。Nova 的 `SelectContent` 没有内边距，内边距在 `SelectGroup` 上；少了这一层，对齐选中项的菜单会比按钮靠右约 5px、靠下 2px，按钮边框和圆角从菜单左上边缘露出来。
 - **Select 用 shadcn 默认弹出方式**（对齐选中项），所有调用处都不传 `position` / `align`。打开时跳动的问题来自全局的减少动态效果规则，已去掉（见上文），不要用 `position="popper"` 绕开。
 
 - macOS 的「添加直播间」是工具栏里的无框「+」图标按钮（悬停提示「添加直播间 ⌘N」），与系统应用的工具栏一致；Windows 和 Linux 是 Teal 实心主按钮。

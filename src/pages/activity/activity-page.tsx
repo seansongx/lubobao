@@ -24,6 +24,7 @@ import { Button } from "@/components/ui/button";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectSeparator,
   SelectTrigger,
@@ -310,16 +311,24 @@ export function ActivityPage({ onNavigate, focusTask }: ActivityPageProps) {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">全部任务</SelectItem>
-            {taskOptions.length > 0 && <SelectSeparator />}
-            {taskOptions.map((task) => (
-              <SelectItem key={task.id} value={String(task.id)}>
-                {task.anchorName}
-              </SelectItem>
-            ))}
-            {/* 筛选中的任务被删除后仍保留选项，避免显示空白。 */}
-            {filter.taskId !== null && !taskById.has(filter.taskId) && (
-              <SelectItem value={String(filter.taskId)}>已删除的任务</SelectItem>
+            <SelectGroup>
+              <SelectItem value="all">全部任务</SelectItem>
+            </SelectGroup>
+            {(taskOptions.length > 0 || (filter.taskId !== null && !taskById.has(filter.taskId))) && (
+              <>
+                <SelectSeparator />
+                <SelectGroup>
+                  {taskOptions.map((task) => (
+                    <SelectItem key={task.id} value={String(task.id)}>
+                      {task.anchorName}
+                    </SelectItem>
+                  ))}
+                  {/* 筛选中的任务被删除后仍保留选项，避免显示空白。 */}
+                  {filter.taskId !== null && !taskById.has(filter.taskId) && (
+                    <SelectItem value={String(filter.taskId)}>已删除的任务</SelectItem>
+                  )}
+                </SelectGroup>
+              </>
             )}
           </SelectContent>
         </Select>

@@ -1,7 +1,7 @@
 import { useId } from "react";
 
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import type { Quality } from "@/lib/api";
 import { qualityLabels, qualityOrder } from "@/pages/rooms/format";
@@ -34,12 +34,14 @@ export function RecordOptions({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {qualityOrder.map((item) => (
-              <SelectItem key={item} value={item}>
-                {qualityLabels[item]}
-                {item === defaultQuality && "（默认）"}
-              </SelectItem>
-            ))}
+            <SelectGroup>
+              {qualityOrder.map((item) => (
+                <SelectItem key={item} value={item}>
+                  {qualityLabels[item]}
+                  {item === defaultQuality && "（默认）"}
+                </SelectItem>
+              ))}
+            </SelectGroup>
           </SelectContent>
         </Select>
       </div>
