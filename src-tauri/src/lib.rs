@@ -30,6 +30,14 @@ pub fn run() {
         .setup(|app| {
             // 主窗口在 tauri.conf.json 里不自动创建，由这里按平台加上透明、标题栏和材质。
             desktop::window::create_main_window(app.handle())?;
+            // 开发调试面板（src/dev/debug-panel.tsx）要切换窗口明暗；这个权限只在调试构建里放开。
+            #[cfg(debug_assertions)]
+            tauri::Manager::add_capability(
+                app,
+                tauri::ipc::CapabilityBuilder::new("dev-debug-panel")
+                    .window(desktop::MAIN_WINDOW)
+                    .permission("core:window:allow-set-theme"),
+            )?;
             ffmpeg::tauri_glue::init(app.handle())?;
             tasks::tauri_glue::init(app.handle())?;
             scheduler::tauri_glue::init(app.handle())?;

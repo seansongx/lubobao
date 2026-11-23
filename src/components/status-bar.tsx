@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
 import { AlertTriangle, Cpu, HardDrive, Loader2, RotateCw, Timer, Wifi } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,9 @@ interface StatusItemProps {
   className?: string;
   children: ReactNode;
 }
+
+// 开发调试面板（src/dev/debug-panel.tsx）：只在开发构建里加载，正式构建里这个分支和模块都会被摇掉。
+const DebugPanel = import.meta.env.DEV ? lazy(() => import("@/dev/debug-panel")) : null;
 
 function StatusItem({ hint, className, children }: StatusItemProps) {
   return (
@@ -213,6 +216,14 @@ export function StatusBar() {
       <Separator orientation="vertical" />
       <DiskItem />
       <NextCheckItem />
+      {DebugPanel && (
+        <>
+          <Separator orientation="vertical" />
+          <Suspense fallback={null}>
+            <DebugPanel />
+          </Suspense>
+        </>
+      )}
     </footer>
   );
 }

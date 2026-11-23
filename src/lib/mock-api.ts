@@ -17,6 +17,7 @@
 //   ?tasks=slow        任务列表延迟 1.5 秒返回（演示加载中）。
 //   ?saveDelay=1500    设置保存延迟（毫秒，默认 150），用来复现连续修改的先后顺序。
 //   ?tasks=fail        前两次读取任务列表失败（状态栏和直播间各一次，演示失败和重试）。
+//   ?tasks=empty       没有直播间（演示空状态）；示例动态照旧生成，都显示为已删除的任务。
 //
 // 添加任务的演示链接（见 resolveMock）
 //   live.douyin.com/{数字或抖音号}      识别成功；同一主播或同一链接判为重复
@@ -731,7 +732,8 @@ function isActive(record: RecordState) {
 
 export function createMockBackend(): Backend {
   const now = Date.now();
-  let tasks = seedTasks(now);
+  const tasksMode = new URLSearchParams(window.location.search).get("tasks");
+  let tasks = tasksMode === "empty" ? [] : seedTasks(now);
   let nextId = tasks.length + 1;
   let settings = { ...defaultSettings };
   const saveDelay = Number(new URLSearchParams(window.location.search).get("saveDelay") ?? 150) || 150;
@@ -740,7 +742,6 @@ export function createMockBackend(): Backend {
   // 与 Rust 一致，停止录制默认可用；setStopSupported(false) 演示 not_implemented。
   let stopSupported = true;
   let eventsEnabled = true;
-  const tasksMode = new URLSearchParams(window.location.search).get("tasks");
   // 状态栏和直播间各订阅一次，两次都失败才能稳定演示。
   let failuresLeft = tasksMode === "fail" ? 2 : 0;
 

@@ -577,7 +577,36 @@ const tauriBackend: Backend = {
   onPauseAllPrompt: (handler) => on("pause-all-prompt", handler),
 };
 
-/** 是否运行在浏览器假数据模式。 */
-export const isMockBackend = !isTauri();
+/**
+ * 开发构建的桌面窗口里，调试面板可用 ?mock=1 改用示例数据（见 src/dev/overrides.ts）。
+ * 正式构建里恒为 false。
+ */
+export const isDevMockInTauri =
+  import.meta.env.DEV && isTauri() && new URLSearchParams(location.search).get("mock") === "1";
 
-export const api: Backend = isMockBackend ? createMockBackend() : tauriBackend;
+/** 是否使用假数据：浏览器预览，或开发构建里调试面板切到了示例数据。 */
+export const isMockBackend = !isTauri() || isDevMockInTauri;
+
+/**
+ * 桌面端用示例数据时，退出、关窗和托盘「全部暂停监控」仍交给真实后端：这些提示来自真实的窗口和托盘，
+ * 关系到后台真实的录制，示例数据接不住。
+ */
+function withRealDesktopShell(mock: Backend): Backend {
+  return {
+    ...mock,
+    getQuitState: tauriBackend.getQuitState,
+    confirmQuit: tauriBackend.confirmQuit,
+    cancelQuit: tauriBackend.cancelQuit,
+    onQuitState: tauriBackend.onQuitState,
+    resolveClose: tauriBackend.resolveClose,
+    onClosePrompt: tauriBackend.onClosePrompt,
+    confirmPauseAll: tauriBackend.confirmPauseAll,
+    onPauseAllPrompt: tauriBackend.onPauseAllPrompt,
+  };
+}
+
+export const api: Backend = isMockBackend
+  ? isDevMockInTauri
+    ? withRealDesktopShell(createMockBackend())
+    : createMockBackend()
+  : tauriBackend;

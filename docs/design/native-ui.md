@@ -90,9 +90,9 @@ macOS 用 Cmd，其他平台用 Ctrl：
 
 ### 检测
 
-- **平台**：`index.html` 里一段同步内联脚本按 `navigator.userAgent` 判断（WebView2 含 `Windows NT`，WKWebView 含 `Macintosh`，WebKitGTK 含 `Linux`），首帧前写入 `<html data-platform="windows|macos|linux">`，不会闪烁。浏览器假数据模式下可用 `?platform=macos` 覆盖，方便在 Windows 上预览三个平台的外壳差异（内容区相同）。
+- **平台**：`index.html` 里一段同步内联脚本按 `navigator.userAgent` 判断（WebView2 含 `Windows NT`，WKWebView 含 `Macintosh`，WebKitGTK 含 `Linux`），首帧前写入 `<html data-platform="windows|macos|linux">`，不会闪烁。浏览器假数据模式下可用 `?platform=macos` 覆盖，方便在 Windows 上预览三个平台的外壳差异（内容区相同）。开发构建（`npm run dev`、`npm run tauri dev`）里桌面窗口也认 `?platform=` 和 `?material=`，由调试面板写入（见下文「开发调试面板」）；正式构建的桌面端只认 Rust 给出的值。
 - **材质**：UA 分不出 Windows 10 和 11，所以材质由 Rust 决定。Rust 建窗前按系统版本定下材质（`mica` / `vibrancy` / `none`），用初始化脚本在首帧前写入 `window.__LUBOBAO_SHELL__`（同时带平台），`index.html` 的内联脚本据此写入 `data-platform` 和 `data-material`，启动时不会先画不透明底色再变透明。建窗后 `get_window_material` 返回实际结果，应用 Mica 出错时前端改回 `none`。
-- **深浅色**：继续用 `prefers-color-scheme`。窗口 `theme` 不设置，跟随系统，Mica 和 vibrancy 随之切换深浅。
+- **深浅色**：继续用 `prefers-color-scheme`。窗口 `theme` 不设置，跟随系统，Mica 和 vibrancy 随之切换深浅。只有开发构建的调试面板会临时设置窗口主题（`core:window:allow-set-theme` 只在调试构建里由 `lib.rs` 放开）。
 
 ### Windows
 
@@ -152,4 +152,5 @@ macOS 用 Cmd，其他平台用 Ctrl：
 - 详情面板底部只保留一个带文字的主要操作（停止录制、重新开始录制、恢复或暂停监控），其余（暂停监控、编辑、打开文件夹、删除）是带悬停提示的图标按钮；这些操作也都在任务行的右键菜单里。
 - 设置页：三个平台都是圆角分组表单。
 - 录像库没有删除操作（后端不提供），右键菜单是「用系统播放器打开 / 进入文件夹」「在文件夹中显示」「复制路径」。
-- 浏览器预览（`npm run dev`）可用 `?platform=windows|macos|linux` 切换平台（字体族、侧栏顶部留白、滚动条、快捷键写法），`data-material` 始终为 `none`。
+- 浏览器预览（`npm run dev`）可用 `?platform=windows|macos|linux` 切换平台（字体族、侧栏顶部留白、滚动条、快捷键写法），`data-material` 默认为 `none`。
+- 开发调试面板（`src/dev/debug-panel.tsx`，只在开发构建里存在）：状态栏最右侧的「调试」或 Ctrl+Shift+D（macOS 为 Cmd+Shift+D）打开。可切换平台、窗口材质、明暗（仅桌面窗口）和示例数据（仅桌面窗口；浏览器预览始终是示例数据），示例数据下还能弹出「发现新版本」、直播间空列表和加载失败。覆盖值放在网址参数里（`?platform=`、`?material=`、`?theme=`、`?mock=1`、`?tasks=empty|fail`，见 `src/dev/overrides.ts`），重新加载后保留，重启应用后恢复默认；有覆盖时入口上显示「已覆盖 N 项」，面板里「全部恢复默认」一键清除。强制材质只改网页底色，窗口本身的材质不变。

@@ -8,20 +8,29 @@
       // 首帧前写入平台主题和窗口材质。桌面应用由 Rust 的初始化脚本给出 window.__LUBOBAO_SHELL__；
       // 没有时按 UA 判断（WebView2 含 Windows NT，WKWebView 含 Macintosh，WebKitGTK 含 Linux），材质按 none。
       // 浏览器假数据模式下可用 ?platform=windows|macos|linux 预览其他平台。
+      // 开发构建（下面的 DEV 占位符由 Vite 替换成 true）里还可用 ?platform= 和 ?material= 覆盖桌面端的值，见 src/dev/overrides.ts。
       (function () {
+        var root = document.documentElement;
+        var dev = "%DEV%" === "true";
+        var params = new URLSearchParams(location.search);
         var shell = window.__LUBOBAO_SHELL__;
+        var platform;
         if (shell) {
-          document.documentElement.dataset.platform = shell.platform;
-          document.documentElement.dataset.material = shell.material;
-          return;
+          platform = shell.platform;
+          root.dataset.material = shell.material;
+        } else {
+          var ua = navigator.userAgent;
+          platform = /Macintosh|Mac OS X/.test(ua) ? "macos" : /Windows/.test(ua) ? "windows" : /Linux|X11/.test(ua) ? "linux" : "windows";
         }
-        var ua = navigator.userAgent;
-        var platform = /Macintosh|Mac OS X/.test(ua) ? "macos" : /Windows/.test(ua) ? "windows" : /Linux|X11/.test(ua) ? "linux" : "windows";
-        if (!window.__TAURI_INTERNALS__) {
-          var forced = new URLSearchParams(location.search).get("platform");
+        if (dev || (!shell && !window.__TAURI_INTERNALS__)) {
+          var forced = params.get("platform");
           if (forced === "windows" || forced === "macos" || forced === "linux") platform = forced;
         }
-        document.documentElement.dataset.platform = platform;
+        if (dev) {
+          var material = params.get("material");
+          if (material === "mica" || material === "vibrancy" || material === "none") root.dataset.material = material;
+        }
+        root.dataset.platform = platform;
       })();
     </script>
   </head>

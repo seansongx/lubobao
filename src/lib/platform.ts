@@ -55,6 +55,8 @@ function setMaterial(material: WindowMaterial) {
  * 这里只在应用失败（例如 Mica 应用出错）时改回 none。浏览器预览始终为 none。
  */
 export function applyWindowMaterial(): void {
+  // 开发构建的调试面板用 ?material= 强制了材质（index.html 已写入），不再改回。
+  if (import.meta.env.DEV && new URLSearchParams(location.search).has("material")) return;
   if (!isTauri()) {
     setMaterial("none");
     return;
