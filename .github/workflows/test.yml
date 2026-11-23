@@ -51,6 +51,10 @@ jobs:
           npm ci
           npm run build
 
+      # 发布脚本的本地检查（GitHub 兜底更新清单 latest.json）。
+      - name: Release script tests
+        run: node --test scripts/updater-latest-json.test.mjs
+
       - name: Install test FFmpeg
         run: |
           dir="$RUNNER_TEMP/test-ffmpeg"

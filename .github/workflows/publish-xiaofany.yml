@@ -3,7 +3,8 @@ name: Publish to xiaofany.com
 # GitHub Release 人工发布后，把同一批文件发布到 xiaofany.com（R2 + 下载接口 + 应用内更新接口），
 # GitHub Release 登记为备用线路。手动触发只用于已经正式发布的 Release（草稿的 GitHub 下载地址
 # 是 404，备用线路会失效），草稿一律拒绝。发布脚本 scripts/publish-xiaofany.mjs 拷自 xiaofany.com。
-# 没有 Secret RELEASE_TOKEN 时（例如 fork）给出 notice 后跳过。流程见 docs/release.md。
+# 没有 Secret RELEASE_TOKEN 时（例如 fork）给出 notice 后跳过。另一个 job 把更新说明写进 Release 上的
+# GitHub 兜底更新清单 latest.json（不需要 RELEASE_TOKEN）。流程见 docs/release.md。
 on:
   release:
     types: [published]
@@ -179,3 +180,50 @@ jobs:
           done
           echo "::error::发布后核对失败：xiaofany.com 的版本接口或应用内更新接口没有返回 $version"
           exit 1
+
+  # GitHub 兜底更新清单：release.yml 生成草稿时 latest.json 还没有更新说明（正文是占位句），发布后
+  # 把正文里「<!-- 以上为应用内更新说明 -->」以上的部分写进 notes 并替换 Release 上的文件。规则与上面的
+  # 「Read release」相同；占位句没换掉时失败，latest.json 保持没有 notes（仍可用）。不需要
+  # RELEASE_TOKEN，fork 里同样运行。重跑本 workflow 会重新写入。
+  github-latest-json:
+    name: latest.json notes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Write notes into latest.json
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! printf '%s' "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::tag 必须是 v<版本号>：$TAG"
+            exit 1
+          fi
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,body,assets > "$RUNNER_TEMP/release.json"
+          if [ "$(jq -r .isDraft "$RUNNER_TEMP/release.json")" = "true" ]; then
+            echo "::error::$TAG 还是草稿：请先在 GitHub 上发布 Release。"
+            exit 1
+          fi
+          if ! jq -e '.assets[] | select(.name == "latest.json")' "$RUNNER_TEMP/release.json" > /dev/null; then
+            echo "::warning::$TAG 没有 latest.json（不是签名构建生成的 Release），跳过。"
+            exit 0
+          fi
+          jq -r '.body // ""' "$RUNNER_TEMP/release.json" > "$RUNNER_TEMP/body.md"
+          mkdir -p "$RUNNER_TEMP/latest"
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/latest" --pattern latest.json
+          node scripts/updater-latest-json.mjs --set-notes "$RUNNER_TEMP/latest/latest.json" --tag "$TAG" \
+            --release-body "$RUNNER_TEMP/body.md"
+          gh release upload "$TAG" "$RUNNER_TEMP/latest/latest.json" --repo "$GITHUB_REPOSITORY" --clobber
+          cat "$RUNNER_TEMP/latest/latest.json"
+          echo "- GitHub \`latest.json\`：已写入 ${TAG} 的更新说明" >> "$GITHUB_STEP_SUMMARY"

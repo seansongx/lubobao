@@ -45,3 +45,7 @@ windows-core = "0.62"
 libc.workspace = true
 # 桌面层监听 SIGTERM（注销、关机），与通用依赖的 tokio 合并特性。
 tokio = { workspace = true, features = ["signal"] }
+
+# 模拟运行时，测试 desktop::update 按顺序尝试多个升级接口（本地假服务器）。
+[dev-dependencies]
+tauri = { version = "2", features = ["tray-icon", "test"] }

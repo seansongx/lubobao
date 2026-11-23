@@ -42,8 +42,9 @@ const RULES = [
   { re: new RegExp(`^lubobao_${v}_linux_amd64\\.deb$`), platform: "linux", arch: "x64", format: "deb", kind: "installer" },
   { re: new RegExp(`^lubobao-cli_${v}_linux_(x64|arm64)\\.tar\\.gz$`), platform: "linux", format: "tar.gz", kind: "archive" },
 ];
-// 这些文件不上传：校验值由脚本重新计算，发布清单自己也在目录里。
-const IGNORED = new Set(["SHA256SUMS.txt", "xiaofany-release.json"]);
+// 这些文件不上传：校验值由脚本重新计算，发布清单自己也在目录里；latest.json 是 GitHub 兜底更新
+// 清单（publish-xiaofany.yml 本来就不下载它，这里防止手动放进目录时被当成认不出的文件）。
+const IGNORED = new Set(["SHA256SUMS.txt", "xiaofany-release.json", "latest.json"]);
 
 const dir = path.resolve(args.dir);
 const out = path.resolve(args.out ?? path.join(dir, "xiaofany-release.json"));

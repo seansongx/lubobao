@@ -2,14 +2,19 @@
 //!
 //! - 接口和公钥在 `tauri.conf.json` 的 `plugins.updater`。公钥还是占位符时（开发构建、没配
 //!   公钥的构建）一律报「未配置」，不发请求。
-//! - 请求带 `X-Client-Id`（本机随机生成，存在应用数据目录的 `client-id`），服务端据此灰度。
+//! - 接口按顺序逐个尝试（[`check_endpoints`]）：先 xiaofany.com，它连不上、超时或返回错误时再用
+//!   GitHub Release 上的静态清单 `latest.json`。xiaofany.com 回答「没有更新」（204）时就此为止，
+//!   灰度不会被兜底绕过。每个接口单独构建 updater：插件的请求头对全部接口生效，没法按接口区分。
+//! - 发给 xiaofany.com 的请求带 `X-Client-Id`（本机随机生成，存在应用数据目录的 `client-id`），
+//!   服务端据此灰度；发给 GitHub 的不带（[`sends_client_id`]）。
 //! - 签名在下载完成时由插件校验（[`tauri_plugin_updater::Update::download`]），安装前再校验
 //!   一次；不通过时拒绝安装。
 //! - 安装前与退出相同地收尾（[`crate::scheduler::tauri_glue::finish_before_update`]）：停止调度和
 //!   全部录制、等文件收尾。Windows 的 NSIS 安装器会结束应用，所以必须先收尾。是否有录制由
 //!   前端先确认。
 //! - Linux 只有 AppImage 能就地更新；deb 等其他安装方式只提示到官网下载。
-//! - 调试构建可以用环境变量 `LUBOBAO_UPDATER_ENDPOINT` 换成本地测试服务器。
+//! - 调试构建可以用环境变量 `LUBOBAO_UPDATER_ENDPOINT` 换成本地测试服务器（逗号分隔可写多个，
+//!   按顺序尝试，用来测兜底）。
 
 use std::fs;
 use std::sync::Mutex;
@@ -17,7 +22,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
-use tauri::{Emitter, Manager};
+use tauri::{Emitter, Manager, Runtime};
 use tauri_plugin_updater::{Error as UpdaterError, Update, UpdaterExt};
 
 use super::quit;
@@ -30,7 +35,9 @@ pub const PROGRESS_EVENT: &str = "update-progress";
 const ENDPOINT_ENV: &str = "LUBOBAO_UPDATER_ENDPOINT";
 const CLIENT_ID_FILE: &str = "client-id";
 const CLIENT_ID_HEADER: &str = "X-Client-Id";
-/// 检查更新的总时限。下载不设总时限（安装包可能很大），只靠 [`READ_TIMEOUT`]。
+/// 只有这个域名（及其子域名）的升级接口收到 `X-Client-Id`。
+const CLIENT_ID_DOMAIN: &str = "xiaofany.com";
+/// 每个接口的检查时限（逐个接口分别计时）。下载不设总时限（安装包可能很大），只靠 [`READ_TIMEOUT`]。
 const CHECK_TIMEOUT: Duration = Duration::from_secs(30);
 /// 连接建立后多久收不到数据就放弃（检查和下载都适用），免得一直停在「正在检查」。
 const READ_TIMEOUT: Duration = Duration::from_secs(30);
@@ -201,7 +208,7 @@ pub fn pubkey_configured(pubkey: Option<&str>) -> bool {
         .is_some_and(|key| !key.is_empty() && key != PUBKEY_PLACEHOLDER)
 }
 
-fn configured_pubkey(app: &tauri::AppHandle) -> Option<String> {
+fn configured_pubkey<R: Runtime>(app: &tauri::AppHandle<R>) -> Option<String> {
     app.config()
         .plugins
         .0
@@ -211,8 +218,8 @@ fn configured_pubkey(app: &tauri::AppHandle) -> Option<String> {
         .map(str::to_string)
 }
 
-/// 这种安装方式能否就地更新。Linux 上只有 AppImage 可以：xiaofany.com 对 linux 只返回 AppImage，
-/// deb、rpm 用户要到官网下载。
+/// 这种安装方式能否就地更新。Linux 上只有 AppImage 可以：xiaofany.com 和 GitHub 的 latest.json
+/// 对 linux 都只给 AppImage，deb、rpm 用户要到官网下载（[`download_update`] 拒绝下载）。
 fn install_mode() -> InstallMode {
     if cfg!(target_os = "linux") {
         let appimage = tauri::utils::platform::bundle_type()
@@ -237,7 +244,7 @@ fn new_client_id() -> Option<String> {
 }
 
 /// 读取或生成本机的客户端 ID，只用于灰度分桶。读写失败时返回 `None`（不带这个头，按全量）。
-fn client_id(app: &tauri::AppHandle) -> Option<String> {
+fn client_id<R: Runtime>(app: &tauri::AppHandle<R>) -> Option<String> {
     let dir = app.path().app_local_data_dir().ok()?;
     let path = dir.join(CLIENT_ID_FILE);
     if let Ok(text) = fs::read_to_string(&path) {
@@ -252,34 +259,100 @@ fn client_id(app: &tauri::AppHandle) -> Option<String> {
     Some(id)
 }
 
-fn build_updater(app: &tauri::AppHandle) -> Result<tauri_plugin_updater::Updater, UpdateError> {
-    if !pubkey_configured(configured_pubkey(app).as_deref()) {
-        return Err(UpdateError::new(
-            UpdateErrorKind::NotConfigured,
-            "这个版本没有配置更新签名公钥，无法应用内更新，请到官网下载新版本",
-        ));
+/// 逗号分隔的接口地址（[`ENDPOINT_ENV`] 的格式），空项忽略。
+fn parse_endpoints(list: &str) -> Result<Vec<tauri::Url>, String> {
+    list.split(',')
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+        .map(|item| tauri::Url::parse(item).map_err(|error| format!("{item}：{error}")))
+        .collect()
+}
+
+/// 升级接口，按顺序尝试：`tauri.conf.json` 的 `plugins.updater.endpoints`；调试构建可以用
+/// [`ENDPOINT_ENV`] 整个替换。
+fn endpoints<R: Runtime>(app: &tauri::AppHandle<R>) -> Result<Vec<tauri::Url>, UpdateError> {
+    let invalid = |source: &str, error: String| {
+        UpdateError::new(
+            UpdateErrorKind::Network,
+            format!("{source} 里的更新地址无效：{error}"),
+        )
+    };
+    let endpoints = if cfg!(debug_assertions)
+        && let Ok(list) = std::env::var(ENDPOINT_ENV)
+    {
+        parse_endpoints(&list).map_err(|error| invalid(ENDPOINT_ENV, error))?
+    } else {
+        let configured = app
+            .config()
+            .plugins
+            .0
+            .get("updater")
+            .and_then(|config| config.get("endpoints"))
+            .and_then(|value| value.as_array())
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| item.as_str())
+                    .collect::<Vec<_>>()
+                    .join(",")
+            })
+            .unwrap_or_default();
+        parse_endpoints(&configured).map_err(|error| invalid("tauri.conf.json", error))?
+    };
+    if endpoints.is_empty() {
+        return Err(UpdaterError::EmptyEndpoints.into());
     }
+    Ok(endpoints)
+}
+
+/// 这个接口是否收到 `X-Client-Id`：只有 xiaofany.com 及其子域名（灰度在那里做）；调试构建另外
+/// 给本机地址，方便本地测试服务器检查。GitHub 等兜底接口不收。
+fn sends_client_id(url: &tauri::Url, debug: bool) -> bool {
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    let host = host.trim_end_matches('.').to_ascii_lowercase();
+    if host == CLIENT_ID_DOMAIN || host.ends_with(&format!(".{CLIENT_ID_DOMAIN}")) {
+        return true;
+    }
+    debug
+        && (host == "localhost"
+            || host
+                .trim_start_matches('[')
+                .trim_end_matches(']')
+                .parse::<std::net::IpAddr>()
+                .is_ok_and(|ip| ip.is_loopback()))
+}
+
+fn ensure_pubkey<R: Runtime>(app: &tauri::AppHandle<R>) -> Result<(), UpdateError> {
+    if pubkey_configured(configured_pubkey(app).as_deref()) {
+        return Ok(());
+    }
+    Err(UpdateError::new(
+        UpdateErrorKind::NotConfigured,
+        "这个版本没有配置更新签名公钥，无法应用内更新，请到官网下载新版本",
+    ))
+}
+
+/// 只查一个接口的 updater。时限对每个接口分别生效：检查总时限 `check_timeout`（正式为
+/// [`CHECK_TIMEOUT`]）、连接 [`CONNECT_TIMEOUT`]、读 [`READ_TIMEOUT`]。
+fn build_updater<R: Runtime>(
+    app: &tauri::AppHandle<R>,
+    endpoint: tauri::Url,
+    client_id: Option<&str>,
+    check_timeout: Duration,
+) -> Result<tauri_plugin_updater::Updater, UpdateError> {
     let mut builder = app
         .updater_builder()
-        .timeout(CHECK_TIMEOUT)
+        .endpoints(vec![endpoint])?
+        .timeout(check_timeout)
         .configure_client(|client| {
             client
                 .connect_timeout(CONNECT_TIMEOUT)
                 .read_timeout(READ_TIMEOUT)
         });
-    if let Some(id) = client_id(app) {
+    if let Some(id) = client_id {
         builder = builder.header(CLIENT_ID_HEADER, id)?;
-    }
-    if cfg!(debug_assertions)
-        && let Ok(endpoint) = std::env::var(ENDPOINT_ENV)
-    {
-        let url = tauri::Url::parse(&endpoint).map_err(|error| {
-            UpdateError::new(
-                UpdateErrorKind::Network,
-                format!("{ENDPOINT_ENV} 不是有效的地址：{error}"),
-            )
-        })?;
-        builder = builder.endpoints(vec![url])?;
     }
     // Windows 上安装器启动后插件直接结束进程，不经过 RunEvent::Exit：先保存窗口大小和位置，
     // 再清掉托盘图标，免得任务栏留下残影。
@@ -295,6 +368,45 @@ fn build_updater(app: &tauri::AppHandle) -> Result<tauri_plugin_updater::Updater
         });
     }
     Ok(builder.build()?)
+}
+
+/// 按顺序查各个接口，第一个给出答复（有更新，或 204 没有更新）的为准；连不上、超时、返回错误
+/// 状态或无效数据时换下一个。全部失败时返回最后一个错误，与插件自己的多接口逻辑相同。
+async fn check_endpoints<R: Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> Result<Option<Update>, UpdateError> {
+    ensure_pubkey(app)?;
+    let endpoints = endpoints(app)?;
+    check_in_order(app, endpoints, cfg!(debug_assertions), CHECK_TIMEOUT).await
+}
+
+/// 按顺序查给定的接口（`check_endpoints` 的核心，公开给 `tests/updater_fallback.rs`）。`debug`
+/// 决定本机地址是否收到客户端 ID（`sends_client_id`），`check_timeout` 是每个接口的检查时限。
+pub async fn check_in_order<R: Runtime>(
+    app: &tauri::AppHandle<R>,
+    endpoints: Vec<tauri::Url>,
+    debug: bool,
+    check_timeout: Duration,
+) -> Result<Option<Update>, UpdateError> {
+    let id = endpoints
+        .iter()
+        .any(|endpoint| sends_client_id(endpoint, debug))
+        .then(|| client_id(app))
+        .flatten();
+    let mut last_error = UpdaterError::EmptyEndpoints;
+    for endpoint in endpoints {
+        let host = endpoint.host_str().unwrap_or_default().to_string();
+        let header = id.as_deref().filter(|_| sends_client_id(&endpoint, debug));
+        let updater = build_updater(app, endpoint, header, check_timeout)?;
+        match updater.check().await {
+            Ok(found) => return Ok(found),
+            Err(error) => {
+                eprintln!("录播宝检查更新失败（{host}），换下一个接口：{error}");
+                last_error = error;
+            }
+        }
+    }
+    Err(last_error.into())
 }
 
 fn info_of(update: &Update) -> UpdateInfo {
@@ -354,9 +466,8 @@ fn prepare_download(mut update: Update) -> Result<Update, UpdateError> {
 pub async fn check_update(app: tauri::AppHandle) -> Result<UpdateCheck, UpdateError> {
     let state = state(&app)?;
     let _busy = BusyGuard::take(&state.busy)?;
-    let updater = build_updater(&app)?;
     let current_version = app.package_info().version.to_string();
-    match updater.check().await? {
+    match check_endpoints(&app).await? {
         Some(update) => {
             let update = prepare_download(update)?;
             let info = info_of(&update);
@@ -532,6 +643,68 @@ mod tests {
         assert!(!download_url_allowed(&http, false));
         assert!(download_url_allowed(&http, true));
         assert!(!download_url_allowed(&file, true));
+    }
+
+    #[test]
+    fn only_xiaofany_endpoints_receive_the_client_id() {
+        let url = |text: &str| tauri::Url::parse(text).unwrap();
+        let xiaofany =
+            url("https://xiaofany.com/api/update/lubobao/tauri/{{target}}/{{arch}}/0.1.0");
+        let github =
+            url("https://github.com/seansongx/lubobao/releases/latest/download/latest.json");
+        assert!(sends_client_id(&xiaofany, false));
+        assert!(sends_client_id(&url("https://api.XIAOFANY.com./x"), false));
+        assert!(!sends_client_id(&github, false));
+        assert!(!sends_client_id(&url("https://notxiaofany.com/x"), false));
+        assert!(!sends_client_id(
+            &url("https://xiaofany.com.evil.example/x"),
+            false
+        ));
+        // 本机测试服务器只在调试构建里收到。
+        for local in [
+            "http://127.0.0.1:8080/u",
+            "http://localhost/u",
+            "http://[::1]/u",
+        ] {
+            assert!(sends_client_id(&url(local), true), "{local}");
+            assert!(!sends_client_id(&url(local), false), "{local}");
+        }
+        assert!(!sends_client_id(&github, true));
+    }
+
+    #[test]
+    fn endpoint_lists_keep_their_order_and_skip_empty_items() {
+        let list = parse_endpoints(" http://127.0.0.1:1/a , ,https://github.com/o/r/latest.json,")
+            .unwrap();
+        let list: Vec<_> = list.iter().map(|url| url.as_str()).collect();
+        assert_eq!(
+            list,
+            ["http://127.0.0.1:1/a", "https://github.com/o/r/latest.json"]
+        );
+        assert!(parse_endpoints("").unwrap().is_empty());
+        assert!(parse_endpoints("not a url").is_err());
+    }
+
+    #[test]
+    fn configured_endpoints_try_xiaofany_before_github() {
+        let conf: serde_json::Value =
+            serde_json::from_str(include_str!("../../tauri.conf.json")).unwrap();
+        let endpoints: Vec<_> = conf["plugins"]["updater"]["endpoints"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|item| tauri::Url::parse(item.as_str().unwrap()).unwrap())
+            .collect();
+        assert_eq!(endpoints.len(), 2);
+        assert!(sends_client_id(&endpoints[0], false));
+        assert_eq!(endpoints[1].host_str(), Some("github.com"));
+        assert!(
+            endpoints[1]
+                .path()
+                .ends_with("/releases/latest/download/latest.json")
+        );
+        assert!(!sends_client_id(&endpoints[1], false));
+        assert_eq!(conf["plugins"]["updater"]["requireSignedVersion"], true);
     }
 
     #[test]
