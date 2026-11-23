@@ -75,6 +75,13 @@ pub const MIN_STALL_TIMEOUT_SECS: u64 = 40;
 const ERROR_TAIL_LINES: usize = 20;
 /// ffmpeg 退出后，等待 stderr 读完的时间。
 const STDERR_DRAIN_TIMEOUT: Duration = Duration::from_secs(3);
+/// 用户停止时，进度超过这么久没有前进就判定为断流，直接结束 ffmpeg。
+///
+/// 统计行每秒一行（`-stats_period 1`），正常推流时时长和大小每秒都会增加；3 秒相当于
+/// 连续漏掉 3 次进度，CDN 一两秒的抖动不会误判。断流时 ffmpeg 卡在网络读取里，读不到
+/// stdin 上的 `q`，只能等 `-rw_timeout` 或 `stop_timeout_secs`；TS 没有文件尾，直接结束
+/// 也能完整播放已写入的部分。
+const STOP_IDLE_THRESHOLD: Duration = Duration::from_secs(3);
 
 /// 输出容器。目前只支持 TS。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -316,7 +323,8 @@ pub fn active_recordings() -> usize {
 
 /// 停止所有正在运行的录制并等待收尾，返回各自的结果。应用在
 /// `RunEvent::ExitRequested` 中先 `prevent_exit`，等它完成后再退出。
-/// 每个录制最多等待 `stop_timeout_secs` 后被强制结束，所以总耗时有上限。
+/// 每个录制最多等待 `stop_timeout_secs` 后被强制结束，所以总耗时有上限；这也是用户停止，
+/// 断流的录制会立即结束，见 [`STOP_IDLE_THRESHOLD`]。
 pub async fn stop_all() -> Vec<RecordingOutcome> {
     let handles: Vec<RecordingHandle> = lock(&ACTIVE).values().cloned().collect();
     for handle in &handles {
@@ -689,12 +697,6 @@ impl Supervisor {
                                 .map(|(_, size)| size)
                                 .sum();
                     }
-                    if let Some(deadline) = state.kill_deadline
-                        && Instant::now() >= deadline
-                    {
-                        let _ = child.start_kill();
-                        state.kill_deadline = None;
-                    }
                     if state.stop_cause.is_none() {
                         let stalled = self
                             .stall_timeout
@@ -707,6 +709,13 @@ impl Supervisor {
                         }
                     }
                 }
+            }
+            // 每轮都检查，让断流时的停止不必等下一次 tick。
+            if let Some(deadline) = state.kill_deadline
+                && Instant::now() >= deadline
+            {
+                let _ = child.start_kill();
+                state.kill_deadline = None;
             }
         };
 
@@ -792,12 +801,16 @@ impl Supervisor {
     }
 
     /// 用户停止。引擎已经在停止时只改记原因，不再写 `q`，也不推迟强制结束的时间。
+    /// 最近 [`STOP_IDLE_THRESHOLD`] 内没有新数据时不再等 ffmpeg 收尾，立即结束进程。
     async fn user_stop(&self, state: &mut RunState, stdin: &mut Option<ChildStdin>) {
         if state.stop_cause.is_none() {
             self.begin_stop(state, stdin, StopCause::User).await;
-            return;
+        } else {
+            self.set_stop_cause(state, StopCause::User);
         }
-        self.set_stop_cause(state, StopCause::User);
+        if state.last_advance.elapsed() >= STOP_IDLE_THRESHOLD {
+            state.kill_deadline = Some(Instant::now());
+        }
     }
 
     async fn begin_stop(
