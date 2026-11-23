@@ -281,11 +281,18 @@ fn build_updater(app: &tauri::AppHandle) -> Result<tauri_plugin_updater::Updater
         })?;
         builder = builder.endpoints(vec![url])?;
     }
-    // Windows 上安装器启动后插件直接结束进程：先清掉托盘图标，免得任务栏留下残影。
+    // Windows 上安装器启动后插件直接结束进程，不经过 RunEvent::Exit：先保存窗口大小和位置，
+    // 再清掉托盘图标，免得任务栏留下残影。
     #[cfg(windows)]
     {
         let handle = app.clone();
-        builder = builder.on_before_exit(move || handle.cleanup_before_exit());
+        builder = builder.on_before_exit(move || {
+            use tauri_plugin_window_state::AppHandleExt;
+            if let Err(error) = handle.save_window_state(super::window::SAVED_STATE) {
+                eprintln!("录播宝无法保存窗口位置：{error}");
+            }
+            handle.cleanup_before_exit();
+        });
     }
     Ok(builder.build()?)
 }

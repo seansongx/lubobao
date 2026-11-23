@@ -19,13 +19,10 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         // 应用内更新（检查、下载、安装和安装失败后的重启见 desktop::update）。
         .plugin(tauri_plugin_updater::Builder::new().build())
-        // 记住主窗口大小、位置和最大化状态；显示与否由托盘和关窗逻辑决定，不恢复。
+        // 只记住主窗口大小、位置和最大化状态：显示与否由托盘和关窗逻辑决定，也不恢复 macOS 的全屏。
         .plugin(
             tauri_plugin_window_state::Builder::new()
-                .with_state_flags(
-                    tauri_plugin_window_state::StateFlags::all()
-                        - tauri_plugin_window_state::StateFlags::VISIBLE,
-                )
+                .with_state_flags(desktop::window::SAVED_STATE)
                 .build(),
         )
         // 关闭主窗口：按设置隐藏到托盘（录制继续）、退出或询问。

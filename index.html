@@ -5,9 +5,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>录播宝</title>
     <script>
-      // 首帧前按 UA 写入平台主题（WebView2 含 Windows NT，WKWebView 含 Macintosh，WebKitGTK 含 Linux）。
+      // 首帧前写入平台主题和窗口材质。桌面应用由 Rust 的初始化脚本给出 window.__LUBOBAO_SHELL__；
+      // 没有时按 UA 判断（WebView2 含 Windows NT，WKWebView 含 Macintosh，WebKitGTK 含 Linux），材质按 none。
       // 浏览器假数据模式下可用 ?platform=windows|macos|linux 预览其他平台。
       (function () {
+        var shell = window.__LUBOBAO_SHELL__;
+        if (shell) {
+          document.documentElement.dataset.platform = shell.platform;
+          document.documentElement.dataset.material = shell.material;
+          return;
+        }
         var ua = navigator.userAgent;
         var platform = /Macintosh|Mac OS X/.test(ua) ? "macos" : /Windows/.test(ua) ? "windows" : /Linux|X11/.test(ua) ? "linux" : "windows";
         if (!window.__TAURI_INTERNALS__) {

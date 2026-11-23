@@ -146,7 +146,7 @@ export function ComponentsSection() {
         </span>
       </FieldRow>
       <FieldRow label="路径" stacked>
-        <code className="block min-w-0 flex-1 truncate rounded-md bg-muted px-2 py-1 font-mono text-xs" title={ready?.path}>
+        <code className="block min-w-0 flex-1 truncate rounded-md bg-muted px-2 py-1 font-mono text-xs select-text" title={ready?.path}>
           {ready ? ready.path : "尚未安装"}
         </code>
       </FieldRow>

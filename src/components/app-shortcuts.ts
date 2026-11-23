@@ -1,5 +1,5 @@
 // 应用快捷键（macOS 用 Cmd，其他平台用 Ctrl）：
-// Ctrl/Cmd+N 添加直播间，Ctrl/Cmd+F 聚焦搜索框，Delete（macOS 另有 Cmd+Backspace）删除选中项，
+// Ctrl/Cmd+N 添加直播间，Ctrl/Cmd+F 聚焦当前页的搜索框，Delete（macOS 另有 Cmd+Backspace）删除选中项，
 // Esc 关闭详情（对话框和菜单自己处理 Esc），macOS 上 Cmd+, 打开设置。
 
 import { useEffect } from "react";
@@ -19,12 +19,21 @@ function overlayOpen(): boolean {
   );
 }
 
+/**
+ * 切换页面前先让当前输入框失焦：设置页的输入框在失焦时保存，页面直接卸载不会触发 onBlur，
+ * 未按 Enter 的修改会丢失。
+ */
+function leavePage(navigate: Navigate, target: PageId) {
+  (document.activeElement as HTMLElement | null)?.blur();
+  navigate(target);
+}
+
 /** 在直播间页执行命令；在其他页面时先切到直播间，等页面挂载后执行。 */
-function runOnRooms(command: "add-task" | "focus-search", current: PageId, navigate: Navigate) {
+function runOnRooms(command: "add-task", current: PageId, navigate: Navigate) {
   if (current === "rooms") {
     dispatchAppCommand(command);
   } else {
-    navigate("rooms");
+    leavePage(navigate, "rooms");
     dispatchAppCommand(command, true);
   }
 }
@@ -45,18 +54,15 @@ export function useAppShortcuts(navigate: Navigate, current: PageId): void {
       if (mod && key === "f") {
         event.preventDefault();
         if (overlayOpen()) return;
+        // 只聚焦当前页的搜索框；没有搜索框的页面不做任何事。
         const input = document.querySelector<HTMLInputElement>("[data-search-input]");
-        if (input) {
-          input.focus();
-          input.select();
-        } else {
-          runOnRooms("focus-search", current, navigate);
-        }
+        input?.focus();
+        input?.select();
         return;
       }
       if (isMac && mod && key === ",") {
         event.preventDefault();
-        if (!overlayOpen()) navigate("settings");
+        if (!overlayOpen() && current !== "settings") leavePage(navigate, "settings");
         return;
       }
       const deleteKey = key === "delete" || (isMac && event.metaKey && key === "backspace");

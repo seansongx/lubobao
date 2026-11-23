@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 
-export type AppCommand = "add-task" | "focus-search" | "delete-selection" | "dismiss";
+export type AppCommand = "add-task" | "delete-selection" | "dismiss";
 
 type Handler = () => boolean | void;
 

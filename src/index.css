@@ -100,9 +100,12 @@
     -webkit-tap-highlight-color: transparent;
   }
 
+  /* 错误原因、字段提示和提示框的说明可以选中复制 */
   input,
   textarea,
-  [contenteditable="true"] {
+  [contenteditable="true"],
+  [role="alert"],
+  [data-sonner-toast] [data-description] {
     user-select: text;
     -webkit-user-select: text;
   }

@@ -1,7 +1,7 @@
 // 去掉网页感的全局行为，说明见 docs/design/native-ui.md「去网页感的行为清单」。
 // 在 main.tsx 里、React 渲染前安装一次。
 
-import { hasModifier } from "@/lib/platform";
+import { hasModifier, isMac } from "@/lib/platform";
 
 /** 可以弹出系统编辑菜单（剪切、复制、粘贴）的元素。 */
 export function isEditable(target: EventTarget | null): boolean {
@@ -14,14 +14,18 @@ export function isEditable(target: EventTarget | null): boolean {
   return true;
 }
 
-/** 浏览器自带、应用里没有意义的快捷键。开发构建保留刷新，方便调试。 */
+/**
+ * 浏览器自带、应用里没有意义的快捷键。开发构建保留刷新，方便调试。
+ * macOS 的 WKWebView 本来没有这些快捷键，一律放行，免得挡住系统的 Cmd+H、Option+方向键等。
+ */
 function isBrowserShortcut(event: KeyboardEvent): boolean {
+  if (isMac) return false;
   const key = event.key.toLowerCase();
   const reload = key === "f5" || (hasModifier(event) && key === "r");
   if (reload) return !import.meta.env.DEV;
   if (["f3", "f7"].includes(key)) return true;
-  // 前进后退
-  if (event.altKey && (key === "arrowleft" || key === "arrowright")) return true;
+  // 前进后退；输入框里的 Alt+方向键留给编辑
+  if (event.altKey && (key === "arrowleft" || key === "arrowright")) return !isEditable(event.target);
   if (!hasModifier(event)) return false;
   // 打印、查看源代码、保存网页、查找下一个、下载、历史记录、缩放；Ctrl+F 由应用接管（聚焦搜索框）
   return ["p", "u", "s", "g", "j", "h", "f", "=", "+", "-", "_", "0"].includes(key);

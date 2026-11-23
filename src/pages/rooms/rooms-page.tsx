@@ -191,12 +191,6 @@ export function RoomsPage({ taskList, view, onViewChange, focusTask }: RoomsPage
   );
 
   useAppCommand("add-task", openAdd);
-  useAppCommand("focus-search", () => {
-    const input = searchRef.current;
-    if (!input) return false;
-    input.focus();
-    input.select();
-  });
   useAppCommand("delete-selection", () => {
     if (selected.length > 0) openDelete(selected);
     else if (activeTask) openDelete([activeTask]);
@@ -276,6 +270,11 @@ export function RoomsPage({ taskList, view, onViewChange, focusTask }: RoomsPage
             <div className="flex flex-wrap items-center gap-2 px-(--page-pad) pt-3.5 pb-2.5 mac:pt-2.5 mac:pb-2">
               <StatusFilter value={view.group} counts={counts} onChange={(group) => patch({ group })} />
               <div className="ml-auto flex items-center gap-2">
+                {filtered && (
+                  <span className="text-xs whitespace-nowrap text-muted-foreground tabular-nums" aria-live="polite">
+                    {visible.length} / {tasks.length} 项
+                  </span>
+                )}
                 <Select value={view.platform} onValueChange={(platform) => patch({ platform })}>
                   <SelectTrigger className="w-24" aria-label="按平台筛选">
                     <SelectValue />

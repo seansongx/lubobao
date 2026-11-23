@@ -232,7 +232,9 @@ export function LibraryPage({ onNavigate }: LibraryPageProps) {
   // 整个列表共用一个右键菜单：按右键所在行（data-path）决定内容，空白处不弹。
   const onListContextMenu = (event: React.MouseEvent) => {
     const row = event.target instanceof Element ? event.target.closest<HTMLElement>("[data-path]") : null;
-    const entry = row ? listing?.entries.find((item) => item.path === row.dataset.path) : undefined;
+    // 键盘触发（焦点在列表本身）时用当前选中的项
+    const entryPath = row?.dataset.path ?? (event.target === listRef.current ? selected : null);
+    const entry = entryPath ? listing?.entries.find((item) => item.path === entryPath) : undefined;
     if (!entry) {
       event.preventDefault();
       return;
@@ -241,7 +243,30 @@ export function LibraryPage({ onNavigate }: LibraryPageProps) {
     setMenuEntry(entry);
   };
 
+  const openMenuForSelected = () => {
+    if (!selected) return;
+    const row = [...(listRef.current?.querySelectorAll<HTMLElement>("[data-path]") ?? [])].find(
+      (element) => element.dataset.path === selected,
+    );
+    if (!row) return;
+    const rect = row.getBoundingClientRect();
+    row.dispatchEvent(
+      new MouseEvent("contextmenu", {
+        bubbles: true,
+        cancelable: true,
+        clientX: rect.left + 32,
+        clientY: rect.top + rect.height / 2,
+      }),
+    );
+  };
+
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    // Shift+F10 或菜单键：在当前选中的行上打开右键菜单。
+    if ((event.shiftKey && event.key === "F10") || event.key === "ContextMenu") {
+      event.preventDefault();
+      openMenuForSelected();
+      return;
+    }
     if (event.key === "Backspace" && path) {
       event.preventDefault();
       go(parentOf(path));

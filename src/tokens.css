@@ -337,3 +337,14 @@
     --scrim: rgb(0 0 0 / 0.4);
   }
 }
+
+/* 高对比度（Windows 强制颜色）：窗口和内容层用系统 Canvas，避免透明底在系统配色下变黑 */
+@media (forced-colors: active) {
+  /* !important：要盖过各平台、各材质组合里更具体的选择器 */
+  :root {
+    --window: Canvas !important;
+    --content: Canvas !important;
+    --sidebar: Canvas !important;
+    --statusbar: Canvas !important;
+  }
+}

@@ -43,12 +43,12 @@ HTML 原型画不出真实的 Mica 和毛玻璃：
 
 1. **右键菜单**：全局屏蔽浏览器右键菜单。输入框、文本框保留系统编辑菜单（剪切、复制、粘贴）。任务行和录像条目弹出应用自己的菜单，菜单项与现有操作一致：
    - 任务行：开始录制/停止录制、重新录制、暂停监控/恢复监控、编辑、打开文件夹、复制直播间链接、删除。
-   - 录像条目：打开、在文件夹中显示、复制路径、删除。
-   - 可选中文字（路径、链接、日志）上有选区时，弹出只含「复制」的应用菜单。
+   - 录像条目：用系统播放器打开或进入文件夹、在文件夹中显示、复制路径（后端没有删除录像的操作）。键盘上按 Shift+F10 或菜单键，在当前选中的条目上打开。
+   - 可选中文字（路径、链接、日志、错误原因）上有选区、且右键落在选区内时，弹出只含「复制」的应用菜单；关闭后焦点回到原来的位置。
    菜单外观随平台：Windows 8px 圆角加阴影、项高 32px；macOS 6px 圆角半透明、项高 22px；Linux 12px 圆角、项高 32px。
-2. **文字选择**：界面框架（导航、按钮、表头、标签、状态栏、行内容）不可选中。输入框、详情里的文件路径和链接、动态日志、错误详情可以选中复制。
-3. **浏览器快捷键**：正式构建屏蔽 F5、Ctrl+R、Ctrl+Shift+R、Ctrl+P、Ctrl+F（浏览器查找）、Ctrl+G/F3、Ctrl+U、Ctrl+S、Ctrl+J、Ctrl+H、F7（光标浏览）、Alt+←/→（前进后退）、Ctrl+加号/减号/0 与 Ctrl+滚轮缩放。开发构建保留 F5 和开发者工具，方便调试。
-4. **拖拽**：图片和链接不可拖出（`draggable=false`，并拦截 `dragstart`）；窗口不接受拖入文件导航（`dragDropEnabled` 保持关闭浏览器默认行为，必要时由应用处理）。
+2. **文字选择**：界面框架（导航、按钮、表头、标签、状态栏、行内容）不可选中。输入框、详情里的文件路径和链接、动态日志、FFmpeg 路径、错误原因（`role="alert"`）、字段错误提示和提示框的说明可以选中复制。
+3. **浏览器快捷键**：正式构建屏蔽 F5、Ctrl+R、Ctrl+Shift+R、Ctrl+P、Ctrl+F（浏览器查找）、Ctrl+G/F3、Ctrl+U、Ctrl+S、Ctrl+J、Ctrl+H、F7（光标浏览）、Alt+←/→（前进后退）、Ctrl+加号/减号/0 与 Ctrl+滚轮缩放。开发构建保留 F5 和开发者工具，方便调试。输入框里的 Alt+方向键留给编辑。macOS 的 WKWebView 本来没有这些浏览器快捷键，前端一律不拦截，免得挡住 Option+方向键（按词移动光标）、Cmd+H（隐藏）、Ctrl+Cmd+F（全屏）等系统快捷键。
+4. **拖拽**：图片和链接不可拖出（`draggable=false`，并拦截 `dragstart`）；拖入窗口的文件不会让 WebView 打开：`dragDropEnabled` 保持 Tauri 默认（开启），系统拖放由 Tauri 接管、不交给 WebView；页面里另拦截 `dragover` 和 `drop`。
 5. **光标**：按钮、导航项、列表行用系统箭头光标；只有真正的外部链接（例如「查看更新说明」「官网」）用手形。
 6. **焦点环**：只在键盘操作时显示（`:focus-visible`），鼠标点击不出现焦点框。
 7. **滚动条**：按上表随平台；`overscroll-behavior: none`，去掉橡皮筋回弹带出的空白（macOS 内容区保留系统回弹）。
@@ -61,10 +61,12 @@ macOS 用 Cmd，其他平台用 Ctrl：
 | 快捷键 | 作用 |
 |---|---|
 | Ctrl/Cmd+N | 添加直播间 |
-| Ctrl/Cmd+F | 聚焦当前页的搜索框 |
+| Ctrl/Cmd+F | 聚焦当前页的搜索框；没有搜索框的页面不做任何事 |
 | Delete（macOS 还有 Cmd+Backspace） | 删除选中项，弹确认 |
 | Esc | 关闭对话框；没有对话框时关闭详情面板 |
 | Cmd+,（仅 macOS） | 打开设置 |
+
+主修饰键要单独按下：macOS 上同时按着 Ctrl、其他平台上同时按着 Win 时不算（Ctrl+Cmd+F 不会被当成 Cmd+F）。用快捷键切换页面前，先让当前输入框失焦，设置页在失焦时保存，未按 Enter 的修改不会丢。
 
 按钮的悬停提示里写出快捷键，例如「添加直播间（Ctrl+N）」，macOS 显示为「添加直播间 ⌘N」。
 
@@ -73,15 +75,15 @@ macOS 用 Cmd，其他平台用 Ctrl：
 ### 检测
 
 - **平台**：`index.html` 里一段同步内联脚本按 `navigator.userAgent` 判断（WebView2 含 `Windows NT`，WKWebView 含 `Macintosh`，WebKitGTK 含 `Linux`），首帧前写入 `<html data-platform="windows|macos|linux">`，不会闪烁。浏览器假数据模式下可用 `?platform=macos` 覆盖，方便在 Windows 上预览三套主题。
-- **材质**：UA 分不出 Windows 10 和 11，所以材质由 Rust 决定。Rust 在窗口创建后尝试应用材质，把结果（`mica` / `vibrancy` / `none`）通过 command 交给前端，前端写入 `data-material`。在拿到结果之前按 `none`（不透明底色）渲染，最坏情况是启动时一帧不透明，不会出现透明窗口。
+- **材质**：UA 分不出 Windows 10 和 11，所以材质由 Rust 决定。Rust 建窗前按系统版本定下材质（`mica` / `vibrancy` / `none`），用初始化脚本在首帧前写入 `window.__LUBOBAO_SHELL__`（同时带平台），`index.html` 的内联脚本据此写入 `data-platform` 和 `data-material`，启动时不会先画不透明底色再变透明。建窗后 `get_window_material` 返回实际结果，应用 Mica 出错时前端改回 `none`。
 - **深浅色**：继续用 `prefers-color-scheme`。窗口 `theme` 不设置，跟随系统，Mica 和 vibrancy 随之切换深浅。
 
 ### Windows
 
-- 主窗口在 `tauri.conf.json` 里设 `create: false`，由 `src-tauri/src/desktop/window.rs` 按配置创建并加上 `transparent(true)`，`decorations` 保持默认，保留系统标题栏，贴靠布局（Snap Layouts）、拖拽、双击最大化等系统行为不受影响。
+- 主窗口在 `tauri.conf.json` 里设 `create: false`，由 `src-tauri/src/desktop/window.rs` 按配置创建。建窗前用 `RtlGetVersion` 读系统 build 号：22000（Windows 11）起才加 `transparent(true)` 并应用 Mica，Windows 10 建普通的不透明窗口（透明窗口建好后改不回来，否则首帧之前、放大窗口新露出的区域和 WebView2 卡住时都会透出桌面）。`decorations` 保持默认，保留系统标题栏，贴靠布局（Snap Layouts）、拖拽、双击最大化等系统行为不受影响。
 - Rust 在创建窗口后调用 `window_vibrancy::apply_mica(&window, None)`（Tauri 已依赖该库；也可用 `window.set_effects`，但它不返回是否成功）。`apply_mica` 在 Windows 11 22H2+ 用 `DWMWA_SYSTEMBACKDROP_TYPE = DWMSBT_MAINWINDOW`，在 21H2 用未公开的 `DWMWA_MICA_EFFECT`，其他版本返回错误。
-- **Windows 10 退化**：`apply_mica` 返回错误，`data-material=none`，前端给 `body` 画不透明的 Windows 10 底色（浅色 `#f3f3f3`，深色 `#202020`）。透明窗口被网页内容完全盖住，看起来与普通窗口相同。字体栈里 `Segoe UI Variable` 不存在，自动回落到 `Segoe UI`。窗口没有圆角，属系统行为。
-- 浏览器快捷键：正式构建里通过 `with_webview` 拿到 `ICoreWebView2Settings3`，调用 `SetAreBrowserAcceleratorKeysEnabled(false)`。浏览器不再处理 Ctrl+F、Ctrl+P、F5 等，但按键仍会传给页面，Ctrl+F 可以用作应用快捷键。前端另加一层 `keydown` 拦截兜底。缩放热键由 Tauri 的 `zoomHotkeysEnabled: false`（默认）关闭，同时也关闭了 Ctrl+滚轮缩放。
+- **Windows 10 退化**：窗口不透明、不应用 Mica，`data-material=none`，前端给 `body` 画不透明的 Windows 10 底色（浅色 `#f3f3f3`，深色 `#202020`）。字体栈里 `Segoe UI Variable` 不存在，自动回落到 `Segoe UI`。窗口没有圆角，属系统行为。
+- 浏览器快捷键：正式构建里通过 `with_webview` 拿到 `ICoreWebView2Settings3`，调用 `SetAreBrowserAcceleratorKeysEnabled(false)`，失败时记一行日志。浏览器不再处理 Ctrl+F、Ctrl+P、F5 等，但按键仍会传给页面，Ctrl+F 可以用作应用快捷键。前端另加一层 `keydown` 拦截兜底。缩放热键由 Tauri 的 `zoomHotkeysEnabled: false`（默认）关闭，同时也关闭了 Ctrl+滚轮缩放。
 - 透明窗口可能在调整大小时出现白边，`noRedirectionBitmap` 可以缓解。目前没有开启：实机验证时窗口被其他窗口遮挡，没有观察到调整大小时的画面，留待在桌面上实际拖动窗口时确认。
 
 ### macOS
@@ -98,13 +100,20 @@ macOS 用 Cmd，其他平台用 Ctrl：
 
 ### 窗口状态
 
-用 `tauri-plugin-window-state` 记住窗口大小、位置和最大化状态。首次启动仍是 1280×800、最小 1024×680。窗口先隐藏创建，插件在创建时恢复尺寸，之后再显示，避免先闪出默认大小。插件不恢复显示状态，托盘隐藏的窗口下次启动仍正常显示。
+用 `tauri-plugin-window-state` 只记住窗口大小、位置和最大化状态（`SIZE | POSITION | MAXIMIZED`），不恢复显示状态和 macOS 全屏。Windows 应用内更新由插件直接结束进程、不经过 Exit 事件，所以在 `on_before_exit` 里先保存窗口状态。首次启动仍是 1280×800、最小 1024×680。窗口先隐藏创建，插件在创建时恢复尺寸，之后再显示，避免先闪出默认大小。插件不恢复显示状态，托盘隐藏的窗口下次启动仍正常显示。
 
 ## 实现方式
 
 - 根节点 `data-platform` 选择平台主题，`data-material` 决定窗口底是否透明。
 - `src/tokens.css` 按平台分组定义 token：颜色（含深色）、字体、字号、控件高度、圆角、导航项高度、内容边距、对话框与菜单圆角、动效时长和曲线。shadcn/ui 组件只读这些变量，按需调整类名，不另起组件库。
 - 对话框按钮顺序用 `DialogFooter` 的 CSS（`flex-direction` 随平台）控制，组件里按「取消、主操作」的语义顺序书写。
+- 高对比度（Windows 强制颜色）下，窗口、内容层、侧栏和状态栏改用系统 `Canvas`，不会因透明底变黑。
+
+## 已知限制
+
+- **多显示器**：窗口位置按上次关闭时恢复。如果那块显示器已经断开或分辨率变小，窗口可能只露出一角（窗口状态插件不做越界校正）。
+- **vibrancy 是否生效无法校验**：macOS 的材质在建窗时由 Tauri 应用，不返回结果，`get_window_material` 一律报 `vibrancy`。
+- **Windows 对话框的 Tab 顺序**：按钮视觉顺序由 CSS 反转，Tab 键仍按 DOM 顺序（先取消后主操作），与视觉顺序相反。
 
 ## 已确定的取舍（2026-11-23）
 

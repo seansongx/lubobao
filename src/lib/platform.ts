@@ -16,9 +16,12 @@ function readPlatform(): Platform {
 export const platform: Platform = readPlatform();
 export const isMac = platform === "macos";
 
-/** 平台的主修饰键是否按下：macOS 为 Cmd，其他平台为 Ctrl。 */
+/**
+ * 平台的主修饰键是否按下，且另一个修饰键（macOS 的 Ctrl、其他平台的 Win/Meta）没有按下：
+ * macOS 为 Cmd，其他平台为 Ctrl。Ctrl+Cmd+F（macOS 全屏）这类组合因此不会被当成 Cmd+F。
+ */
 export function hasModifier(event: KeyboardEvent | MouseEvent | WheelEvent): boolean {
-  return isMac ? event.metaKey : event.ctrlKey;
+  return isMac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
 }
 
 const keyNames: Record<string, [mac: string, other: string]> = {
@@ -47,10 +50,15 @@ function setMaterial(material: WindowMaterial) {
   document.documentElement.dataset.material = material;
 }
 
-/** 向 Rust 询问窗口材质是否生效，写入 data-material。浏览器预览始终为 none。 */
+/**
+ * 向 Rust 确认窗口材质是否生效，写入 data-material。首帧前 index.html 已按 Rust 的计划写入，
+ * 这里只在应用失败（例如 Mica 应用出错）时改回 none。浏览器预览始终为 none。
+ */
 export function applyWindowMaterial(): void {
-  setMaterial("none");
-  if (!isTauri()) return;
+  if (!isTauri()) {
+    setMaterial("none");
+    return;
+  }
   invoke<WindowMaterial>("get_window_material").then(
     (material) => setMaterial(material),
     () => setMaterial("none"),
