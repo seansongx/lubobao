@@ -147,7 +147,20 @@ function displayReason(status: DisplayStatus, live: LiveState, record: RecordSta
 }
 
 type MockSeed = Pick<TaskSnapshot, "anchorName" | "roomId" | "monitoring" | "live" | "record"> &
-  Partial<Pick<TaskSnapshot, "notifyOnly" | "quality" | "note" | "platform" | "anchorId" | "url" | "liveUrl">>;
+  Partial<Pick<TaskSnapshot, "notifyOnly" | "quality" | "note" | "platform" | "anchorId" | "url" | "liveUrl" | "recordHeld">>;
+
+const HELD_REASON = "已手动停止录制，下次开播时自动录制";
+
+/** 与 Rust 的 EndCause 一致。 */
+type MockEndCause = "manual" | "paused" | "shutdown" | "streamEnded" | "networkError" | "stopped";
+const endCauseLabel: Record<MockEndCause, string> = {
+  manual: "手动停止",
+  paused: "暂停监控",
+  shutdown: "应用退出",
+  streamEnded: "直播结束或断流",
+  networkError: "网络错误",
+  stopped: "已停止",
+};
 
 const mockPlatforms: Record<Platform, { name: string; roomUrl: (roomId: string) => string }> = {
   douyin: { name: "抖音", roomUrl: (roomId) => `https://live.douyin.com/${roomId}` },
@@ -156,7 +169,8 @@ const mockPlatforms: Record<Platform, { name: string; roomUrl: (roomId: string) 
 
 function snapshot(id: TaskId, seed: MockSeed, createdAt: number): TaskSnapshot {
   const notifyOnly = seed.notifyOnly ?? false;
-  const display = deriveDisplay(seed.monitoring, seed.live, seed.record, notifyOnly);
+  const recordHeld = seed.recordHeld ?? false;
+  const display = deriveDisplay(seed.monitoring, seed.live, seed.record, notifyOnly || recordHeld);
   const platform = seed.platform ?? "douyin";
   const roomUrl = mockPlatforms[platform].roomUrl(seed.roomId);
   return {
@@ -175,9 +189,10 @@ function snapshot(id: TaskId, seed: MockSeed, createdAt: number): TaskSnapshot {
     monitoring: seed.monitoring,
     live: seed.live,
     record: seed.record,
-    recordHeld: false,
+    recordHeld,
     display,
-    displayReason: displayReason(display, seed.live, seed.record),
+    displayReason:
+      display === "notify" && recordHeld && !notifyOnly ? HELD_REASON : displayReason(display, seed.live, seed.record),
   };
 }
 
@@ -191,7 +206,7 @@ function seedTasks(now: number): TaskSnapshot[] {
       live: { state: "live", checkedAt: now - 20_000, title: "晚间闲聊" },
       record: {
         state: "recording",
-        filePath: "D:\\Records\\抖音\\一只小羊驼\\一只小羊驼_2026-11-22_20-14-03.ts",
+        filePath: "D:\\Records\\抖音\\一只小羊驼\\一只小羊驼_2026-11-22_20-14-03_000.ts",
         startedAt: now - 83 * minute,
         bytesWritten: 3_661_000_000,
         bitrateKbps: 6200,
@@ -213,7 +228,7 @@ function seedTasks(now: number): TaskSnapshot[] {
       live: { state: "live", checkedAt: now - 40_000, title: null },
       record: {
         state: "recording",
-        filePath: "D:\\Records\\快手直播\\峡谷练习生\\峡谷练习生_2026-11-22_21-02-10.ts",
+        filePath: "D:\\Records\\快手直播\\峡谷练习生\\峡谷练习生_2026-11-22_21-02-10_000.ts",
         startedAt: now - 26 * minute,
         bytesWritten: 1_634_000_000,
         bitrateKbps: 8400,
@@ -248,6 +263,14 @@ function seedTasks(now: number): TaskSnapshot[] {
         attempt: 2,
       },
       record: { state: "idle" },
+    },
+    {
+      anchorName: "夜跑日记",
+      roomId: "6620418",
+      monitoring: "enabled",
+      live: { state: "live", checkedAt: now - 2 * minute, title: "江边十公里" },
+      record: { state: "idle" },
+      recordHeld: true,
     },
     {
       anchorName: "晚八点读书会",
@@ -516,8 +539,8 @@ function seedActivity(tasks: TaskSnapshot[], now: number): { at: number; seed: A
       push(start - 111, {
         task,
         kind: "record_end",
-        message: "录制结束",
-        detail: { filePath, durationMs: 110 * minute },
+        message: "录制结束：直播结束或断流，共 4 个分段",
+        detail: { filePath, segments: 4, endCause: "streamEnded", durationMs: 110 * minute },
       });
       const mp4 = filePath.replace(/\.ts$/, ".mp4");
       push(start - 112, { task, kind: "convert", message: "开始转为 MP4", detail: { filePath, targetPath: mp4 } });
@@ -831,7 +854,12 @@ export function createMockBackend(): Backend {
     setTimeout(simulateDownload, 800);
   }
 
-  function log(task: TaskSnapshot | null, kind: ActivityEntry["kind"], message: string) {
+  function log(
+    task: TaskSnapshot | null,
+    kind: ActivityEntry["kind"],
+    message: string,
+    detail: ActivityEntry["detail"] = null,
+  ) {
     const entry: ActivityEntry = {
       id: nextActivityId++,
       at: Date.now(),
@@ -839,7 +867,7 @@ export function createMockBackend(): Backend {
       anchorName: task?.anchorName ?? "",
       kind,
       message,
-      detail: null,
+      detail,
     };
     activity.unshift(entry);
     activityChannel.emit(entry);
@@ -886,13 +914,19 @@ export function createMockBackend(): Backend {
     return next;
   }
 
+  /** 与 Rust 一致：分段录制时显示第一个分段 `_000.ts`。 */
+  function recordingPath(task: TaskSnapshot, stamp: string) {
+    const suffix = settings.segmented_recording_enabled ? "_000.ts" : ".ts";
+    return `${settings.live_save_path}\\${task.platformName}\\${task.anchorName}\\${task.anchorName}_${stamp}${suffix}`;
+  }
+
   function startRecording(task: TaskSnapshot) {
     const started = Date.now();
     const stamp = new Date(started).toISOString().slice(0, 19).replace("T", "_").replace(/:/g, "-");
     return patchTask(task.id, {
       record: {
         state: "recording",
-        filePath: `${settings.live_save_path}\\${task.platformName}\\${task.anchorName}\\${task.anchorName}_${stamp}.ts`,
+        filePath: recordingPath(task, stamp),
         startedAt: started,
         bytesWritten: 0,
         bitrateKbps: 4000 + Math.round(Math.random() * 3000),
@@ -901,7 +935,7 @@ export function createMockBackend(): Backend {
   }
 
   /** 收尾 1.5 秒后回到空闲，写一条 record_end。 */
-  function finishRecording(id: TaskId, message: string, patch: Partial<TaskSnapshot> = {}) {
+  function finishRecording(id: TaskId, cause: MockEndCause, patch: Partial<TaskSnapshot> = {}) {
     const task = tasks.find((item) => item.id === id);
     if (!task || task.record.state !== "recording") return task ?? null;
     const { filePath, startedAt } = task.record;
@@ -911,7 +945,13 @@ export function createMockBackend(): Backend {
       if (current?.record.state !== "finishing") return;
       const idle = patchTask(id, { record: { state: "idle" } });
       if (idle) {
-        log(idle, "record_end", message);
+        log(idle, "record_end", `录制结束：${endCauseLabel[cause]}`, {
+          filePath,
+          files: [filePath],
+          segments: 1,
+          endCause: cause,
+          durationMs: Date.now() - startedAt,
+        });
         if (settings.convert_to_mp4) {
           log(idle, "convert", "开始转为 MP4");
           setTimeout(() => log(idle, "convert", "已转为 MP4"), 1000);
@@ -939,7 +979,7 @@ export function createMockBackend(): Backend {
   function endLive(id: TaskId) {
     const task = tasks.find((item) => item.id === id);
     if (!task) return;
-    finishRecording(id, "下播，录制结束");
+    finishRecording(id, "streamEnded");
     // 与 Rust 一致：下播后清除手动停止。
     const next = patchTask(id, { live: { state: "offline", checkedAt: Date.now() }, recordHeld: false });
     if (next && task.live.state === "live") log(next, "live_end", "已下播");
@@ -1136,7 +1176,7 @@ export function createMockBackend(): Backend {
         });
         replace(next);
         log(next, "user_action", enabled ? "开始监控" : "暂停监控");
-        if (!enabled && recording) log(next, "record_end", "录制结束");
+        if (!enabled && recording) log(next, "record_end", "录制结束：暂停监控", { endCause: "paused" });
         result.push(next);
         if (enabled) {
           // 模拟一次检测：1.5 秒后回到未开播。
@@ -1161,10 +1201,37 @@ export function createMockBackend(): Backend {
           continue;
         }
         // 与 Rust 一致：先进入收尾中，ffmpeg 写完文件尾后回到空闲；本场直播不再自动录制。
-        log(task, "user_action", "手动停止录制");
-        const finishing = finishRecording(id, "录制结束", { recordHeld: true });
+        // 「录制结束：手动停止」写明是用户停止的。
+        const finishing = finishRecording(id, "manual", { recordHeld: true });
         if (finishing) result.push(finishing);
       }
+      return result;
+    },
+
+    async startRecording(ids) {
+      if (!stopSupported) return reject("not_implemented", "录制功能尚未接入");
+      const result: TaskSnapshot[] = [];
+      for (const task of tasks.filter((item) => ids.includes(item.id))) {
+        // 与 Rust 一致：只对监控中、会录制、当前没有录制的任务生效。
+        if (task.monitoring !== "enabled" || task.notifyOnly || isActive(task.record)) continue;
+        const next = rederive(task, {
+          recordHeld: false,
+          record: task.record.state === "failed" ? { state: "idle" } : task.record,
+          live: { state: "checking", since: Date.now() },
+        });
+        replace(next);
+        log(next, "user_action", "重新开始录制");
+        result.push(next);
+        // 模拟立即检测：之前在播的仍在播，开始录制；其余回到未开播。
+        const wasLive = task.live.state === "live";
+        setTimeout(() => {
+          const current = tasks.find((item) => item.id === task.id);
+          if (current?.live.state !== "checking") return;
+          if (wasLive) goLive(task.id);
+          else patchTask(task.id, { live: { state: "offline", checkedAt: Date.now() } });
+        }, 1200);
+      }
+      schedulerChannel.emit(schedulerStatus());
       return result;
     },
 

@@ -1,5 +1,5 @@
 import { memo, useEffect, useState, type ReactNode } from "react";
-import { ExternalLink, FolderOpen, Loader2, Pause, Pencil, Play, Square, Trash2, X } from "lucide-react";
+import { Circle, ExternalLink, FolderOpen, Loader2, Pause, Pencil, Play, Square, Trash2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { api, type ActivityEntry, type ActivityKind, type TaskId, type TaskSnapshot } from "@/lib/api";
@@ -17,7 +17,7 @@ import {
   qualityLabels,
 } from "@/pages/rooms/format";
 import { Notice } from "@/pages/rooms/notice";
-import { openFolder, openInBrowser, setMonitoring, stopRecording } from "@/pages/rooms/task-actions";
+import { openFolder, openInBrowser, setMonitoring, startRecording, stopRecording } from "@/pages/rooms/task-actions";
 import { TaskStatus } from "@/pages/rooms/task-status";
 import { useNow } from "@/pages/rooms/use-now";
 
@@ -132,13 +132,16 @@ interface TaskInspectorProps {
 /** 回调由页面用 useCallback 固定，只有当前任务的快照变化时才重渲染。 */
 export const TaskInspector = memo(function TaskInspector({ task, onClose, onEdit, onDelete }: TaskInspectorProps) {
   const { entries: activity, failed: activityFailed } = useTaskActivity(task.id);
-  const [busy, setBusy] = useState<"stop" | "monitor" | null>(null);
+  const [busy, setBusy] = useState<"stop" | "start" | "monitor" | null>(null);
   const recording = isRecordingActive(task.record);
   const paused = task.monitoring === "paused";
+  // 手动停止后保持停止，录制失败后不再自动重试：给一个直接重新开始的入口。
+  const canRestart =
+    !recording && !paused && !task.notifyOnly && (task.recordHeld || task.record.state === "failed");
   const live = describeLive(task.live);
   const record = describeRecord(task);
 
-  async function run(kind: "stop" | "monitor", action: () => Promise<unknown>) {
+  async function run(kind: "stop" | "start" | "monitor", action: () => Promise<unknown>) {
     setBusy(kind);
     try {
       await action();
@@ -255,6 +258,12 @@ export const TaskInspector = memo(function TaskInspector({ task, onClose, onEdit
           >
             {task.record.state === "finishing" ? <Loader2 className="animate-spin" aria-hidden /> : <Square aria-hidden />}
             {task.record.state === "finishing" ? "正在收尾…" : "停止录制"}
+          </Button>
+        )}
+        {canRestart && (
+          <Button className="col-span-2" disabled={busy !== null} onClick={() => void run("start", () => startRecording(task))}>
+            {busy === "start" ? <Loader2 className="animate-spin" aria-hidden /> : <Circle className="fill-current" aria-hidden />}
+            重新开始录制
           </Button>
         )}
         <Button

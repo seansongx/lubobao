@@ -455,6 +455,11 @@ export interface Backend {
    * 被停止的任务 recordHeld 为 true：本次直播不再自动录制。
    */
   stopRecording(ids: TaskId[]): Promise<TaskSnapshot[]>;
+  /**
+   * 重新开始录制：清除手动停止的保持状态和录制失败，立即检测一次，仍在播就开始录制。
+   * 只对监控中、会录制、当前没有录制的任务生效，返回其中重新开始的任务。
+   */
+  startRecording(ids: TaskId[]): Promise<TaskSnapshot[]>;
   getSettings(): Promise<Settings>;
   /** 后端的默认值（settings.rs），“恢复默认值”用。保存目录是本机的默认目录。 */
   getSettingDefaults(): Promise<Settings>;
@@ -531,6 +536,7 @@ const tauriBackend: Backend = {
   deleteTasks: (ids) => invoke("delete_tasks", { ids }),
   setMonitoring: (ids, enabled) => invoke("set_monitoring", { ids, enabled }),
   stopRecording: (ids) => invoke("stop_recording", { ids }),
+  startRecording: (ids) => invoke("start_recording", { ids }),
   getSettings: () => invoke("get_settings"),
   getSettingDefaults: () => invoke("get_setting_defaults"),
   updateSettings: (values) => invoke("update_settings", { values }),

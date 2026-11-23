@@ -1417,3 +1417,143 @@ async fn startup_removes_leftover_partial_mp4_files() {
     assert!(ts.exists());
     h.scheduler.shutdown().await;
 }
+
+// ---- 录制结束原因、实际文件名和重新开始录制 ----
+
+fn record_ends(h: &Harness) -> Vec<crate::tasks::ActivityEntry> {
+    activity_of(h, ActivityKind::RecordEnd)
+}
+
+#[tokio::test(start_paused = true)]
+async fn segmented_recordings_show_the_first_segment_instead_of_the_template() {
+    let h = harness();
+    let (id, _) = h.add("1101", Reply::Live, false);
+    h.start();
+    until(SHORT, "开始录制", || h.engine.starts() == 1).await;
+    let RecordState::Recording { file_path, .. } = h.task(id).record else {
+        panic!("应在录制中");
+    };
+    assert_eq!(file_path, PathBuf::from("out/rec_000.ts"));
+    let start = &activity_of(&h, ActivityKind::RecordStart)[0];
+    assert_eq!(start.message, "开始录制");
+    assert_eq!(start.detail.as_ref().unwrap()["filePath"], json!(file_path));
+}
+
+#[tokio::test(start_paused = true)]
+async fn manual_stop_is_logged_with_the_actual_files() {
+    let h = harness();
+    let files = vec![
+        PathBuf::from("out/rec_000.ts"),
+        PathBuf::from("out/rec_001.ts"),
+        PathBuf::from("out/rec_002.ts"),
+    ];
+    *h.engine.files.lock().unwrap() = Some(files.clone());
+    let (id, _) = h.add("1102", Reply::Live, false);
+    h.start();
+    until(SHORT, "开始录制", || h.engine.starts() == 1).await;
+    h.tasks.stop_recording(&[id]).unwrap();
+    until(SHORT, "收尾", || h.task(id).record == RecordState::Idle).await;
+
+    let ends = record_ends(&h);
+    assert_eq!(ends.len(), 1);
+    assert_eq!(ends[0].message, "录制结束：手动停止，共 3 个分段");
+    let detail = ends[0].detail.as_ref().unwrap();
+    assert_eq!(detail["endCause"], "manual");
+    assert_eq!(detail["filePath"], json!(files[0]));
+    assert_eq!(detail["files"], json!(files));
+    assert_eq!(detail["segments"], 3);
+}
+
+#[tokio::test(start_paused = true)]
+async fn stream_end_pause_and_shutdown_are_logged_apart_from_manual_stop() {
+    let h = harness();
+    let (id, _) = h.add("1103", Reply::Live, false);
+    h.start();
+    until(SHORT, "开始录制", || h.engine.starts() == 1).await;
+    h.engine.end(0, EndReason::StreamEnded);
+    until(INTERVAL, "断流后续录", || h.engine.starts() == 2).await;
+    h.engine.end(1, EndReason::NetworkError);
+    until(INTERVAL, "网络错误后续录", || h.engine.starts() == 3).await;
+    h.tasks.set_monitoring(&[id], false).unwrap();
+    until(SHORT, "暂停后收尾", || {
+        h.task(id).record == RecordState::Idle
+    })
+    .await;
+    h.tasks.set_monitoring(&[id], true).unwrap();
+    until(SHORT, "恢复后录制", || h.engine.starts() == 4).await;
+    h.scheduler.shutdown().await;
+
+    let mut messages: Vec<String> = record_ends(&h).into_iter().map(|e| e.message).collect();
+    messages.reverse();
+    assert_eq!(
+        messages,
+        [
+            "录制结束：直播结束或断流",
+            "录制结束：网络错误",
+            "录制结束：暂停监控",
+            "录制结束：应用退出",
+        ]
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn start_recording_clears_the_user_stop_and_checks_at_once() {
+    let h = harness();
+    let (id, url) = h.add("1104", Reply::Live, false);
+    h.start();
+    until(SHORT, "开始录制", || h.engine.starts() == 1).await;
+    h.tasks.stop_recording(&[id]).unwrap();
+    until(SHORT, "收尾", || h.task(id).record == RecordState::Idle).await;
+    assert!(h.task(id).record_held);
+    let checks = h.source.calls(&url).len();
+    let live_starts = activity_of(&h, ActivityKind::LiveStart).len();
+
+    let started = h.tasks.start_recording(&[id]).unwrap();
+    assert_eq!(started.len(), 1);
+    assert!(!started[0].record_held);
+    // 立即检测，不等检测间隔；仍在播就开始录制。
+    until(SHORT, "重新录制", || h.engine.starts() == 2).await;
+    assert_eq!(h.source.calls(&url).len(), checks + 1);
+    let actions: Vec<String> = activity_of(&h, ActivityKind::UserAction)
+        .into_iter()
+        .map(|e| e.message)
+        .collect();
+    assert!(actions.contains(&"重新开始录制".to_string()), "{actions:?}");
+    // 开播判断保留，不重复写「检测到开播」。
+    assert_eq!(activity_of(&h, ActivityKind::LiveStart).len(), live_starts);
+
+    // 正在录制时再点不会重复开始。
+    assert!(h.tasks.start_recording(&[id]).unwrap().is_empty());
+    sleep(SHORT).await;
+    assert_eq!(h.engine.starts(), 2);
+}
+
+#[tokio::test(start_paused = true)]
+async fn start_recording_clears_a_failure_and_skips_paused_and_notify_only_tasks() {
+    let h = harness();
+    let (failed, _) = h.add("1105", Reply::Live, false);
+    let (paused, _) = h.add("1106", Reply::Live, false);
+    let (notify, _) = h.add("1107", Reply::Live, true);
+    h.tasks.set_monitoring(&[paused], false).unwrap();
+    h.start();
+    until(SHORT, "开始录制", || h.engine.starts() == 1).await;
+    h.engine.end(0, EndReason::DiskFull);
+    until(SHORT, "失败", || {
+        matches!(h.task(failed).record, RecordState::Failed { .. })
+    })
+    .await;
+
+    let started = h
+        .tasks
+        .start_recording(&[failed, paused, notify, failed])
+        .unwrap();
+    assert_eq!(
+        started.iter().map(|task| task.id).collect::<Vec<_>>(),
+        [failed]
+    );
+    assert_eq!(started[0].record, RecordState::Idle);
+    until(SHORT, "清除失败后录制", || h.engine.starts() == 2).await;
+    sleep(SHORT).await;
+    assert_eq!(h.engine.starts(), 2);
+    assert_eq!(h.task(paused).display, DisplayStatus::Paused);
+}

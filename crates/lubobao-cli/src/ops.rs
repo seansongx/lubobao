@@ -168,6 +168,14 @@ pub async fn execute(ctx: &Ctx, request: &Request) -> Result<Value, Failure> {
             check_ids(tasks, &ids)?;
             to_value(tasks.stop_recording(&ids)?)
         }
+        Request::Start { target } => {
+            if !running {
+                return Err(not_running(&ctx.dirs));
+            }
+            let ids = ids_of(tasks, target);
+            check_ids(tasks, &ids)?;
+            to_value(tasks.start_recording(&ids)?)
+        }
         Request::Status => {
             let list = tasks.list();
             let settings = tasks.settings();

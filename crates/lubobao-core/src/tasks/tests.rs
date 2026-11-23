@@ -990,3 +990,62 @@ fn read_only_open_of_missing_database_is_empty_and_creates_nothing() {
     assert_eq!(manager.settings()["loop_time_seconds"], json!(180));
     assert!(!dir.path().join(DB_FILE).exists());
 }
+
+#[test]
+fn start_recording_without_scheduler_reports_not_implemented() {
+    let dir = tempfile::tempdir().unwrap();
+    let (manager, _) = open(dir.path());
+    let error = manager.start_recording(&[1]).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::NotImplemented);
+}
+
+#[test]
+fn record_end_message_names_the_cause_and_segment_count() {
+    assert_eq!(
+        record_end_message(EndCause::Manual, 1),
+        "录制结束：手动停止"
+    );
+    assert_eq!(
+        record_end_message(EndCause::StreamEnded, 0),
+        "录制结束：直播结束或断流"
+    );
+    assert_eq!(
+        record_end_message(EndCause::Paused, 2),
+        "录制结束：暂停监控，共 2 个分段"
+    );
+    assert_eq!(json!(EndCause::NetworkError), json!("networkError"));
+}
+
+#[test]
+fn record_end_without_details_falls_back_to_the_recorded_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let (manager, _) = open(dir.path());
+    let task = added(
+        manager
+            .add_resolved(
+                add_input("https://live.douyin.com/1"),
+                &info("1", None, "主播"),
+            )
+            .unwrap(),
+    );
+    let recording = RecordState::Recording {
+        file_path: PathBuf::from("a_000.ts"),
+        started_at: now_ms(),
+        bytes_written: 0,
+        bitrate_kbps: 0.0,
+    };
+    manager.set_record_state(task.id, recording).unwrap();
+    manager
+        .set_record_state(task.id, RecordState::Idle)
+        .unwrap();
+    let page = manager
+        .list_activity(&ActivityQuery {
+            kinds: vec![ActivityKind::RecordEnd],
+            ..ActivityQuery::default()
+        })
+        .unwrap();
+    assert_eq!(page.items[0].message, "录制结束：已停止");
+    let detail = page.items[0].detail.as_ref().unwrap();
+    assert_eq!(detail["filePath"], "a_000.ts");
+    assert_eq!(detail["segments"], 1);
+}

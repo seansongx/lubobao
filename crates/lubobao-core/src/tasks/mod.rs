@@ -6,7 +6,7 @@
 //! 回写状态，由这里负责持久化、写动态和推送事件。
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, Weak};
 
 use serde::{Deserialize, Serialize};
@@ -52,10 +52,70 @@ pub type Listener = Box<dyn Fn(TaskEvent) + Send + Sync>;
 pub trait SchedulerHook: Send + Sync {
     /// 任务集合或监控意图变了，请尽快重新排期（新任务、恢复监控立即检测）。
     fn wake(&self);
-    /// 请求停止这个任务的录制（包括正在启动的录制）。有录制时返回 true。
-    fn stop_recording(&self, id: TaskId) -> bool;
+    /// 请求停止这个任务的录制（包括正在启动的录制）。有录制时返回 true。`origin` 写进
+    /// 「录制结束」动态，区分手动停止和暂停监控。
+    fn stop_recording(&self, id: TaskId, origin: StopOrigin) -> bool;
     /// 设置已保存，下一轮按新设置检测。
     fn settings_changed(&self);
+}
+
+/// 用户发起的停止录制来自哪个操作。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StopOrigin {
+    /// 「停止录制」。
+    Manual,
+    /// 「暂停监控」。
+    Paused,
+    /// 删除任务。
+    Deleted,
+}
+
+/// 录制正常结束的原因，写进「录制结束」动态（`detail.endCause`）。需要处理的结束
+/// （磁盘不足、FFmpeg 异常）记为录制失败，不在这里。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum EndCause {
+    /// 用户点了「停止录制」或 CLI `stop`。
+    Manual,
+    /// 暂停监控时一并停止。
+    Paused,
+    /// 应用或 `run` 退出。
+    Shutdown,
+    /// 直播结束或断流。
+    StreamEnded,
+    NetworkError,
+    /// 其他停止（例如任务已删除）。
+    Stopped,
+}
+
+impl EndCause {
+    pub fn label(self) -> &'static str {
+        match self {
+            EndCause::Manual => "手动停止",
+            EndCause::Paused => "暂停监控",
+            EndCause::Shutdown => "应用退出",
+            EndCause::StreamEnded => "直播结束或断流",
+            EndCause::NetworkError => "网络错误",
+            EndCause::Stopped => "已停止",
+        }
+    }
+}
+
+/// 一次录制结束时实际生成的文件和结束原因。
+#[derive(Debug, Clone, PartialEq)]
+pub struct RecordingEnd {
+    /// 实际生成的文件，分段时按序号排列；为空时用录制中记下的文件。
+    pub files: Vec<PathBuf>,
+    pub cause: EndCause,
+}
+
+/// 「录制结束」动态的说明：写明原因，多个分段时注明段数。
+pub fn record_end_message(cause: EndCause, segments: usize) -> String {
+    if segments > 1 {
+        format!("录制结束：{}，共 {segments} 个分段", cause.label())
+    } else {
+        format!("录制结束：{}", cause.label())
+    }
 }
 
 /// 命令失败时返回给前端的结构化错误：`{ kind, message }`。
@@ -624,7 +684,7 @@ impl TaskManager {
         // 正在启动、还没写入录制状态的录制不会被上面的检查拦住，一并停止。
         if let Some(hook) = self.scheduler() {
             for id in &removed {
-                hook.stop_recording(*id);
+                hook.stop_recording(*id, StopOrigin::Deleted);
             }
             hook.wake();
         }
@@ -699,7 +759,7 @@ impl TaskManager {
         if let Some(hook) = self.scheduler() {
             if !enabled {
                 for task in &changed {
-                    hook.stop_recording(task.id);
+                    hook.stop_recording(task.id, StopOrigin::Paused);
                 }
             }
             hook.wake();
@@ -773,6 +833,26 @@ impl TaskManager {
 
     /// 更新录制状态并持久化。在开始录制、录制结束和录制失败时写动态，与状态在同一事务。
     pub fn set_record_state(&self, id: TaskId, record: RecordState) -> CommandResult<TaskSnapshot> {
+        self.write_record_state(id, record, None)
+    }
+
+    /// 录制结束时回写状态。与 [`TaskManager::set_record_state`] 相同，「录制结束」动态
+    /// 写明结束原因和实际生成的文件（多个分段时显示第一个并注明段数）。
+    pub fn finish_recording(
+        &self,
+        id: TaskId,
+        record: RecordState,
+        end: &RecordingEnd,
+    ) -> CommandResult<TaskSnapshot> {
+        self.write_record_state(id, record, Some(end))
+    }
+
+    fn write_record_state(
+        &self,
+        id: TaskId,
+        record: RecordState,
+        end: Option<&RecordingEnd>,
+    ) -> CommandResult<TaskSnapshot> {
         let mut guard = self.lock();
         let inner = &mut *guard;
         let task = inner.tasks.get(&id).cloned().ok_or_else(|| not_found(id))?;
@@ -797,14 +877,24 @@ impl TaskManager {
                     started_at,
                 },
                 RecordState::Idle,
-            ) => Some((
-                ActivityKind::RecordEnd,
-                "录制结束".to_string(),
-                Some(json!({
-                    "filePath": file_path,
-                    "durationMs": now_ms() - started_at,
-                })),
-            )),
+            ) => {
+                let files = match end {
+                    Some(end) if !end.files.is_empty() => end.files.clone(),
+                    _ => vec![file_path.clone()],
+                };
+                let cause = end.map_or(EndCause::Stopped, |end| end.cause);
+                Some((
+                    ActivityKind::RecordEnd,
+                    record_end_message(cause, files.len()),
+                    Some(json!({
+                        "filePath": files[0],
+                        "files": files,
+                        "segments": files.len(),
+                        "endCause": cause,
+                        "durationMs": now_ms() - started_at,
+                    })),
+                ))
+            }
             (
                 _,
                 RecordState::Failed {
@@ -919,7 +1009,7 @@ impl TaskManager {
             .ok_or_else(|| CommandError::new(ErrorKind::NotImplemented, "录制调度尚未启动"))?;
         let mut events = Vec::new();
         for id in ids {
-            if !hook.stop_recording(*id) {
+            if !hook.stop_recording(*id, StopOrigin::Manual) {
                 continue;
             }
             let mut inner = self.lock();
@@ -937,6 +1027,61 @@ impl TaskManager {
                 .collect()
         };
         self.emit_all(events);
+        Ok(snapshots)
+    }
+}
+
+impl TaskManager {
+    /// 重新开始录制，参照 StreamCap 单个任务的「开始录制」：清除手动停止后的保持状态和
+    /// 录制失败，立即检测一次，仍在播就开始录制。只对监控中、会录制、当前没有录制的
+    /// 任务生效，其余跳过（已暂停监控的应先恢复监控）。返回重新开始的任务快照。
+    pub fn start_recording(&self, ids: &[TaskId]) -> CommandResult<Vec<TaskSnapshot>> {
+        let hook = self
+            .scheduler()
+            .ok_or_else(|| CommandError::new(ErrorKind::NotImplemented, "录制调度尚未启动"))?;
+        let mut guard = self.lock();
+        let inner = &mut *guard;
+        let mut seen = HashSet::new();
+        let targets: Vec<Task> = ids
+            .iter()
+            .filter(|id| seen.insert(**id))
+            .filter_map(|id| inner.tasks.get(id))
+            .filter(|task| {
+                task.monitoring == Monitoring::Enabled
+                    && !task.config.notify_only
+                    && !task.record.is_active()
+            })
+            .cloned()
+            .collect();
+        let failed = |task: &Task| matches!(task.record, RecordState::Failed { .. });
+        let entries = inner.store.transaction(|db| {
+            let mut entries = Vec::new();
+            for task in &targets {
+                if failed(task) {
+                    db.set_record_state(task.id, &RecordState::Idle)?;
+                }
+                entries.push(db.insert_activity(&user_action(task, "重新开始录制", None))?);
+            }
+            Ok(entries)
+        })?;
+        let mut events = Vec::new();
+        let mut snapshots = Vec::new();
+        for (task, entry) in targets.iter().zip(entries) {
+            let updated = inner.tasks.get_mut(&task.id).expect("task exists");
+            if failed(task) {
+                updated.record = RecordState::Idle;
+            }
+            updated.held = false;
+            // 直播状态为未知时调度立即检测。保留上次的开播判断，不重复写「检测到开播」。
+            updated.live = LiveState::Unknown;
+            let snapshot = updated.snapshot();
+            events.push(TaskEvent::Updated(Box::new(snapshot.clone())));
+            events.push(TaskEvent::Activity(entry));
+            snapshots.push(snapshot);
+        }
+        drop(guard);
+        self.emit_all(events);
+        hook.wake();
         Ok(snapshots)
     }
 }
