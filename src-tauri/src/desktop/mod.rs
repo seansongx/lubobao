@@ -15,6 +15,7 @@ mod hint;
 pub mod notify;
 pub mod quit;
 pub mod tray;
+pub mod update;
 
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
@@ -50,6 +51,7 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 /// 在 `setup` 中、任务和调度初始化之后调用。托盘创建失败只记日志。
 pub fn init(app: &tauri::AppHandle) -> tauri::Result<()> {
     app.manage(quit::QuitState::default());
+    update::init(app);
     app.manage(tray::TrayState::default());
     let desktop = Desktop::default();
     if let Some(tasks) = app.try_state::<Arc<TaskManager>>() {

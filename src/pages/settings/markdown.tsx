@@ -1,4 +1,4 @@
-// 只覆盖 THIRD_PARTY_NOTICES.md 用到的 Markdown：标题、段落、列表、代码块、行内代码和链接。
+// 只覆盖 THIRD_PARTY_NOTICES.md 和更新说明用到的 Markdown：标题、段落、列表、代码块、行内代码、粗体和链接。
 // 链接交给系统浏览器打开；相对链接指向 GitHub 仓库中的同名文件。
 
 import type { ReactNode } from "react";
@@ -77,7 +77,7 @@ function Link({ href, children }: { href: string; children: ReactNode }) {
   );
 }
 
-const INLINE = /`([^`]+)`|\[([^\]]+)\]\(([^)\s]+)\)|(https?:\/\/[^\s)]+[^\s).,;])/g;
+const INLINE = /`([^`]+)`|\[([^\]]+)\]\(([^)\s]+)\)|(https?:\/\/[^\s)]+[^\s).,;])|\*\*([^*]+)\*\*/g;
 
 function inline(text: string): ReactNode[] {
   const out: ReactNode[] = [];
@@ -98,11 +98,17 @@ function inline(text: string): ReactNode[] {
           {inline(match[2])}
         </Link>,
       );
-    } else {
+    } else if (match[4] !== undefined) {
       out.push(
         <Link key={key} href={match[4]}>
           {match[4]}
         </Link>,
+      );
+    } else {
+      out.push(
+        <strong key={key} className="font-semibold text-foreground">
+          {inline(match[5])}
+        </strong>,
       );
     }
     last = at + match[0].length;

@@ -31,6 +31,15 @@ pub enum QuitPhase {
     Finishing,
 }
 
+/// 为什么收尾：退出应用，或安装更新（收尾后安装并重启，见 `desktop::update`）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum QuitPurpose {
+    #[default]
+    Quit,
+    Update,
+}
+
 /// `quit-state` 事件和 `get_quit_state` 的载荷。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -38,6 +47,7 @@ pub struct QuitSnapshot {
     pub phase: QuitPhase,
     /// 正在录制的任务数（含启动中、收尾中）。
     pub recording: usize,
+    pub purpose: QuitPurpose,
 }
 
 #[derive(Default)]
@@ -68,8 +78,8 @@ fn state<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<tauri::State<'_
 /// 当前状态：录制数以调度的实时数字为准，调度没启动（例如任务数据打不开）时用记下的数字。
 pub fn snapshot_now(scheduler_recording: Option<usize>, stored: QuitSnapshot) -> QuitSnapshot {
     QuitSnapshot {
-        phase: stored.phase,
         recording: scheduler_recording.unwrap_or(stored.recording),
+        ..stored
     }
 }
 
@@ -111,6 +121,14 @@ pub fn set_recording<R: tauri::Runtime>(app: &tauri::AppHandle<R>, recording: us
 }
 
 fn set_phase<R: tauri::Runtime>(app: &tauri::AppHandle<R>, phase: QuitPhase) {
+    set_phase_for(app, phase, QuitPurpose::Quit);
+}
+
+fn set_phase_for<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    phase: QuitPhase,
+    purpose: QuitPurpose,
+) {
     let recording = current_recording(app);
     let Some(state) = state(app) else {
         return;
@@ -118,8 +136,20 @@ fn set_phase<R: tauri::Runtime>(app: &tauri::AppHandle<R>, phase: QuitPhase) {
     let snapshot = state.update(|snapshot| {
         snapshot.phase = phase;
         snapshot.recording = recording;
+        snapshot.purpose = purpose;
     });
     publish(app, snapshot);
+}
+
+/// 安装更新前开始收尾（主线程）：与退出一样进入 finishing（托盘显示「正在收尾…」、不再发通知、
+/// 退出入口只显示窗口），前端据 `purpose` 显示更新的提示。
+pub fn begin_update<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    set_phase_for(app, QuitPhase::Finishing, QuitPurpose::Update);
+}
+
+/// 安装更新失败（主线程）：回到 idle，前端提示重启。调度已经停止。
+pub fn end_update<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    set_phase_for(app, QuitPhase::Idle, QuitPurpose::Quit);
 }
 
 /// 退出入口（主线程）：有录制时显示窗口并弹出确认；收尾中只把窗口显示出来，让用户看到
@@ -176,7 +206,23 @@ mod tests {
     use super::*;
 
     fn snapshot(phase: QuitPhase, recording: usize) -> QuitSnapshot {
-        QuitSnapshot { phase, recording }
+        QuitSnapshot {
+            phase,
+            recording,
+            purpose: QuitPurpose::Quit,
+        }
+    }
+
+    #[test]
+    fn snapshot_keeps_the_update_purpose() {
+        let stored = QuitSnapshot {
+            phase: QuitPhase::Finishing,
+            recording: 1,
+            purpose: QuitPurpose::Update,
+        };
+        assert_eq!(snapshot_now(Some(0), stored).purpose, QuitPurpose::Update);
+        let json = serde_json::to_value(stored).unwrap();
+        assert_eq!(json["purpose"], "update");
     }
 
     #[test]

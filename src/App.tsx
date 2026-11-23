@@ -4,6 +4,7 @@ import { AppSidebar } from "@/components/app-sidebar";
 import type { Navigate, TaskFocusRequest } from "@/components/navigation";
 import { DesktopDialogs } from "@/components/desktop-dialogs";
 import { StatusBar } from "@/components/status-bar";
+import { UpdateDialog } from "@/components/update-dialog";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useTaskList } from "@/lib/use-backend";
@@ -56,6 +57,7 @@ export default function App() {
         <StatusBar />
       </div>
       <DesktopDialogs />
+      <UpdateDialog />
       {/* 顶部居中，避免遮住详情面板底部的操作按钮和批量操作条。 */}
       <Toaster position="top-center" />
     </TooltipProvider>

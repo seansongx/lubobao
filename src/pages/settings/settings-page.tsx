@@ -83,7 +83,7 @@ export function SettingsPage() {
   if (group === "components") {
     body = <ComponentsSection />;
   } else if (group === "about") {
-    body = <AboutSection />;
+    body = <AboutSection ctx={controller} />;
   } else if (controller) {
     body = <SettingsGroup key={controller.revision} group={group} ctx={controller} />;
   } else if (loadError) {

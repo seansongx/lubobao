@@ -59,6 +59,24 @@ pub fn on_exit_requested(app: &tauri::AppHandle, code: Option<i32>, api: &tauri:
     });
 }
 
+/// 安装更新前收尾：与退出相同地停止调度和全部录制、等文件收尾（[`Scheduler::shutdown`]），
+/// 但不退出。收尾已经开始时只等它完成。完成后的退出、重启请求直接放行，不会重复收尾。
+pub async fn finish_before_update(app: &tauri::AppHandle) {
+    if EXIT_STARTED.swap(true, Ordering::SeqCst) {
+        while !EXIT_READY.load(Ordering::SeqCst) {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        return;
+    }
+    match app.try_state::<Arc<Scheduler>>() {
+        Some(scheduler) => scheduler.shutdown().await,
+        None => {
+            crate::recorder::stop_all().await;
+        }
+    }
+    EXIT_READY.store(true, Ordering::SeqCst);
+}
+
 /// 系统直接结束进程时的收尾时限，短于注销、关机的宽限时间（Windows 约 5 秒起）。
 const EXIT_FALLBACK_LIMIT: Duration = Duration::from_secs(4);
 

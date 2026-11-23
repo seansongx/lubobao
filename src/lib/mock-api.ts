@@ -1,4 +1,6 @@
 // 浏览器假数据（npm run dev，不在 Tauri 里时使用），方便调界面。
+// 应用内更新：window.__lubobaoMock.setUpdate("none" | "mandatory" | "manual" | "network" | "signature" | "install")
+// 切换检查和安装的结果。
 // 桌面外壳：控制台调用 window.__lubobaoMock.requestQuit() 模拟托盘「退出」，requestClose()
 // 模拟关闭主窗口（按 close_window_action），requestPauseAll() 模拟托盘「全部暂停监控」。
 // 显示状态的推导复刻 src-tauri/src/tasks/model.rs 的 derive_display，只用于假数据。
@@ -66,7 +68,12 @@ import type {
   TaskId,
   TaskMutation,
   TaskSnapshot,
+  UpdateError,
+  UpdateInfo,
+  UpdateProgress,
 } from "@/lib/api";
+
+type MockUpdateMode = "available" | "mandatory" | "manual" | "none" | "network" | "signature" | "install";
 
 const TOTAL_BYTES = 39_636_992;
 
@@ -322,6 +329,7 @@ const defaultSettings: Settings = {
   stream_start_notification_enabled: true,
   stream_end_notification_enabled: false,
   close_window_action: "ask",
+  auto_check_update: true,
 };
 
 /** 与 src-tauri/src/tasks/settings.rs 的 ENUM_SETTINGS 一致。 */
@@ -739,10 +747,25 @@ export function createMockBackend(): Backend {
   }, 1000);
 
   // 假退出：有录制时先确认；确认后收尾 3 秒，浏览器里无法退出，回到 idle。
-  let quit: QuitState = { phase: "idle", recording: 0 };
-  function setQuit(phase: QuitState["phase"]) {
-    quit = { phase, recording: schedulerStatus().recording };
+  let quit: QuitState = { phase: "idle", recording: 0, purpose: "quit" };
+  function setQuit(phase: QuitState["phase"], purpose: QuitState["purpose"] = "quit") {
+    quit = { phase, recording: schedulerStatus().recording, purpose };
     quitChannel.emit(quit);
+  }
+
+  // 假更新：window.__lubobaoMock.setUpdate(mode) 切换检查结果。
+  // available（默认）、mandatory、manual（deb）、none、network、signature（下载完校验失败）、install（安装失败）。
+  let updateMode: MockUpdateMode = "available";
+  let updateDownloaded = false;
+  const updateProgressChannel = new Channel<UpdateProgress>();
+  function mockUpdateInfo(): UpdateInfo {
+    return {
+      version: "0.1.1",
+      currentVersion: "0.1.0",
+      notes: ["## 新功能", "", "- 录像库支持按主播筛选", "- 断流后自动续录", "", "## 修复", "", "- 修复 **抖音** 部分直播间检测失败"].join("\n"),
+      pubDate: new Date().toISOString(),
+      mandatory: updateMode === "mandatory",
+    };
   }
   function requestQuit() {
     if (quit.phase === "finishing") return;
@@ -1270,6 +1293,39 @@ export function createMockBackend(): Backend {
       console.info("[mock] 在文件夹中显示", path || "（根目录）");
     },
 
+    async checkUpdate() {
+      await delay(800);
+      if (updateMode === "network") throw { kind: "network", message: "无法连接更新服务器：连接超时" } satisfies UpdateError;
+      if (updateMode === "none") return { status: "upToDate", currentVersion: "0.1.0" };
+      return { status: "available", update: mockUpdateInfo(), install: updateMode === "manual" ? "manual" : "auto" };
+    },
+    async downloadUpdate() {
+      if (updateDownloaded) return;
+      const total = 4_200_000;
+      for (let downloaded = 0; downloaded < total; ) {
+        await delay(120);
+        downloaded = Math.min(total, downloaded + 180_000);
+        updateProgressChannel.emit({ downloaded, total });
+      }
+      if (updateMode === "signature") {
+        throw { kind: "signature", message: "更新包签名校验失败，已拒绝安装：Invalid signature" } satisfies UpdateError;
+      }
+      updateDownloaded = true;
+    },
+    async installUpdate() {
+      if (!updateDownloaded) throw { kind: "not_ready", message: "请先下载更新" } satisfies UpdateError;
+      updateDownloaded = false;
+      setQuit("finishing", "update");
+      await delay(2500);
+      setQuit("idle");
+      if (updateMode === "install") {
+        throw { kind: "install", message: "安装更新失败：拒绝访问。录制已经停止，请重启录播宝" } satisfies UpdateError;
+      }
+      console.info("[mock] 已安装更新并重启（浏览器里回到 idle）");
+    },
+    relaunch: async () => window.location.reload(),
+    onUpdateProgress: (handler) => updateProgressChannel.subscribe(handler),
+
     getAppVersion: () => Promise.resolve("0.1.0"),
     pickDirectory: async (options) => {
       // 浏览器里没有系统目录选择框，用输入框代替。
@@ -1318,6 +1374,10 @@ export function createMockBackend(): Backend {
     simulateDownload,
     requestQuit,
     requestClose,
+    setUpdate: (mode: MockUpdateMode) => {
+      updateMode = mode;
+      updateDownloaded = false;
+    },
     requestPauseAll,
     goLive,
     endLive,

@@ -350,6 +350,7 @@ mod tests {
         let snapshot = QuitSnapshot {
             phase: QuitPhase::Idle,
             recording: 2,
+            ..QuitSnapshot::default()
         };
         assert_eq!(tooltip_text(snapshot), "录播宝 · 录制中 2");
         let confirming = QuitSnapshot {
@@ -366,11 +367,13 @@ mod tests {
         let recording = QuitSnapshot {
             phase: QuitPhase::Idle,
             recording: 2,
+            ..QuitSnapshot::default()
         };
         assert_eq!(title_text(recording), "录播宝 · 录制中 2");
         let finishing = QuitSnapshot {
             phase: QuitPhase::Finishing,
             recording: 0,
+            ..QuitSnapshot::default()
         };
         assert_eq!(title_text(finishing), "录播宝 · 正在收尾…");
     }
@@ -380,6 +383,7 @@ mod tests {
         let snapshot = QuitSnapshot {
             phase: QuitPhase::Finishing,
             recording: 1,
+            ..QuitSnapshot::default()
         };
         assert_eq!(tooltip_text(snapshot), "录播宝 · 正在收尾…");
     }

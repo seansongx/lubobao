@@ -47,6 +47,8 @@ pub fn defaults(save_dir: &Path) -> Map<String, Value> {
         "stream_start_notification_enabled": true,
         "stream_end_notification_enabled": false,
         "close_window_action": "ask",
+        // 桌面端：启动约 10 秒后检查一次更新。命令行不用。
+        "auto_check_update": true,
     });
     match value {
         Value::Object(map) => map,
