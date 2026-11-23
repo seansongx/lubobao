@@ -118,7 +118,7 @@ export function AddTaskDialog({ open, onOpenChange, onShowTask }: AddTaskDialogP
   return (
     <Dialog open={open} onOpenChange={(next) => !busy && onOpenChange(next)}>
       <DialogContent
-        className="sm:max-w-[520px]"
+        className="sm:max-w-(--dialog-width)"
         onOpenAutoFocus={(event) => {
           event.preventDefault();
           inputRef.current?.focus();

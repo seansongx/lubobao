@@ -50,7 +50,7 @@ class SettingsErrorBoundary extends Component<BoundaryProps, { error: Error | nu
   render() {
     if (!this.state.error) return this.props.children;
     return (
-      <div role="alert" className="flex max-w-[760px] items-center gap-3 rounded-lg border bg-card px-4 py-3 select-text">
+      <div role="alert" className="flex max-w-(--settings-width) items-center gap-3 rounded-lg border bg-card px-4 py-3 select-text">
         <span className="flex-1 text-destructive">这一组设置显示失败：{this.state.error.message}</span>
         {/* 重新读取成功后父组件换 key，错误边界随之重置。 */}
         <Button type="button" variant="outline" onClick={this.props.onRetry}>
@@ -107,7 +107,7 @@ export function SettingsPage({ focusGroup }: SettingsPageProps) {
     body = <SettingsGroup key={controller.revision} group={group} ctx={controller} />;
   } else if (loadError) {
     body = (
-      <div role="alert" className="flex max-w-[760px] items-center gap-3 rounded-lg border bg-card px-4 py-3">
+      <div role="alert" className="flex max-w-(--settings-width) items-center gap-3 rounded-lg border bg-card px-4 py-3">
         <span className="flex-1 text-destructive">读取设置失败：{loadError}</span>
         <Button type="button" variant="outline" onClick={reload}>
           重试
@@ -132,7 +132,7 @@ export function SettingsPage({ focusGroup }: SettingsPageProps) {
               className={cn(
                 "relative h-[calc(var(--nav-item-h)-4px)] rounded-md px-3 text-left text-(length:--text-ui) outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring mac:px-2",
                 group === item.id &&
-                  "bg-accent linux:font-semibold win:before:absolute win:before:top-1/2 win:before:left-0 win:before:h-4 win:before:w-[3px] win:before:-translate-y-1/2 win:before:rounded-full win:before:bg-primary",
+                  "bg-accent linux:font-semibold win:selection-bar",
               )}
             >
               {item.label}

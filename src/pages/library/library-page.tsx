@@ -372,7 +372,7 @@ export function LibraryPage({ onNavigate }: LibraryPageProps) {
           <TooltipContent>返回上级（Backspace）</TooltipContent>
         </Tooltip>
         <Breadcrumb className="min-w-0">
-          <BreadcrumbList className="flex-nowrap text-[13px]">
+          <BreadcrumbList className="flex-nowrap text-(length:--text-dense)">
             <BreadcrumbItem className="min-w-0">
               <CrumbButton current={parts.length === 0} title={root} onClick={() => go("")}>
                 {root || "录像目录"}
@@ -393,7 +393,7 @@ export function LibraryPage({ onNavigate }: LibraryPageProps) {
       {notice && (
         <div
           role="alert"
-          className="mx-(--page-pad) mb-2 flex items-start gap-2 rounded-lg border border-destructive/30 bg-status-recording-soft px-3 py-2 text-[13px] select-text"
+          className="mx-(--page-pad) mb-2 flex items-start gap-2 rounded-lg border border-destructive/30 bg-status-recording-soft px-3 py-2 text-(length:--text-dense) select-text"
         >
           <AlertTriangle className="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden />
           <span className="min-w-0 flex-1 break-all">{notice}</span>
@@ -616,7 +616,7 @@ function EntryRow({ entry, nested, style, selected, onSelect, onActivate, onReve
         )}
         <span className="truncate">{entry.name}</span>
         {entry.segment !== null && nested && (
-          <span className="shrink-0 rounded bg-muted px-1.5 text-[11px] text-muted-foreground tabular-nums">
+          <span className="shrink-0 rounded bg-muted px-1.5 text-xs text-muted-foreground tabular-nums">
             第 {entry.segment + 1} 段
           </span>
         )}

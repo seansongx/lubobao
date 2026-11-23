@@ -140,7 +140,7 @@ function inline(text: string, restrict: boolean): ReactNode[] {
 /** restrictLinks：内容来自服务器（更新说明）时只放行 linkAllowed 的链接。 */
 export function Markdown({ source, restrictLinks = false }: { source: string; restrictLinks?: boolean }) {
   return (
-    <div className="space-y-2.5 text-[13px] leading-relaxed">
+    <div className="space-y-2.5 text-(length:--text-dense) leading-relaxed">
       {parse(source).map((block, index) => {
         switch (block.type) {
           case "heading":
@@ -149,7 +149,7 @@ export function Markdown({ source, restrictLinks = false }: { source: string; re
                 {inline(block.text, restrictLinks)}
               </h3>
             ) : (
-              <h4 key={index} className="m-0 pt-1.5 text-[13px] font-semibold">
+              <h4 key={index} className="m-0 pt-1.5 font-semibold">
                 {inline(block.text, restrictLinks)}
               </h4>
             );
@@ -171,7 +171,7 @@ export function Markdown({ source, restrictLinks = false }: { source: string; re
             return (
               <pre
                 key={index}
-                className="m-0 overflow-x-auto rounded-md bg-muted p-3 font-mono text-[11px] leading-snug whitespace-pre-wrap"
+                className="m-0 overflow-x-auto rounded-md bg-muted p-3 font-mono text-xs leading-snug whitespace-pre-wrap"
               >
                 {block.text}
               </pre>

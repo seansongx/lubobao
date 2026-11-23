@@ -30,7 +30,7 @@ interface SettingsCardProps {
 export function SettingsCard({ title, description, onReset, children }: SettingsCardProps) {
   const headingId = useId();
   return (
-    <section aria-labelledby={headingId} className="mb-6 max-w-[760px] text-card-foreground">
+    <section aria-labelledby={headingId} className="mb-6 max-w-(--settings-width) text-card-foreground">
       <header className="flex min-h-8 items-center gap-3 pb-2 pl-1">
         <div className="min-w-0 flex-1">
           <h2 id={headingId} className="m-0 text-(length:--text-ui) font-semibold mac:font-bold linux:font-bold">

@@ -101,7 +101,7 @@ function Section({ title, action, children }: { title: string; action?: ReactNod
   return (
     <section>
       <div className="mb-2 flex items-center gap-2">
-        <h3 className="m-0 flex-1 text-xs font-semibold text-muted-foreground win:text-[13px] win:text-foreground">{title}</h3>
+        <h3 className="m-0 flex-1 text-xs font-semibold text-muted-foreground win:text-(length:--text-dense) win:text-foreground">{title}</h3>
         {action}
       </div>
       {children}
@@ -112,9 +112,9 @@ function Section({ title, action, children }: { title: string; action?: ReactNod
 function StateCell({ label, value, reason }: { label: string; value: string; reason: string | null }) {
   return (
     <div className="min-w-0 rounded-md border border-black/5 bg-card px-2.5 py-1.5 dark:border-white/5 linux:rounded-lg">
-      <small className="block text-[11px] text-muted-foreground">{label}</small>
+      <small className="block text-xs text-muted-foreground">{label}</small>
       <b className="block truncate text-[12.5px] font-medium">{value}</b>
-      {reason && <span className="mt-0.5 block text-[11px] leading-snug break-words text-muted-foreground">{reason}</span>}
+      {reason && <span className="mt-0.5 block text-xs leading-snug break-words text-muted-foreground">{reason}</span>}
     </div>
   );
 }

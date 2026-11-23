@@ -26,6 +26,10 @@
   --page-pad: 24px;
   --sidebar-width: 216px;
   --header-h: auto;
+  --dialog-width: 520px; /* 添加、编辑直播间和更新对话框，三平台相同 */
+  --settings-width: 760px; /* 设置页内容最大宽度，三平台相同 */
+  --selection-bar-width: 3px; /* Windows 选中竖条（selection-bar），三平台相同 */
+  --selection-bar-height: 16px;
   --radius: 4px;
 
   --window: #f3f3f3;

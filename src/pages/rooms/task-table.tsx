@@ -124,7 +124,7 @@ const TaskRow = memo(function TaskRow({ task, selected, active, onSelect, onActi
           ? "bg-status-recording-soft hover:bg-status-recording-soft data-[state=selected]:bg-status-recording-soft"
           : active && "bg-selection hover:bg-selection data-[state=selected]:bg-selection",
         active &&
-          "win:[&>td:first-child]:relative win:[&>td:first-child]:before:absolute win:[&>td:first-child]:before:top-1/2 win:[&>td:first-child]:before:left-0 win:[&>td:first-child]:before:h-4 win:[&>td:first-child]:before:w-[3px] win:[&>td:first-child]:before:-translate-y-1/2 win:[&>td:first-child]:before:rounded-full win:[&>td:first-child]:before:bg-primary",
+          "win:[&>td:first-child]:relative win:[&>td:first-child]:selection-bar",
         active && needsAction && "linux:shadow-[inset_3px_0_0_var(--primary)] mac:shadow-[inset_3px_0_0_var(--primary)]",
         task.display === "paused" && "[&>td:not(:first-child)]:opacity-55",
       )}
@@ -152,7 +152,7 @@ const TaskRow = memo(function TaskRow({ task, selected, active, onSelect, onActi
             >
               <span className="truncate">{task.anchorName}</span>
             </Button>
-            <div className="flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
+            <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
               <PlatformTag task={task} />
               <span className="truncate tabular-nums">{task.roomId}</span>
             </div>

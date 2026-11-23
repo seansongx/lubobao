@@ -39,7 +39,7 @@ export function AppSidebar({ current, onNavigate, recordingCount }: AppSidebarPr
                 "mac:gap-2 mac:px-2",
                 active && "bg-sidebar-accent linux:font-semibold",
                 active &&
-                  "win:before:absolute win:before:top-1/2 win:before:left-0 win:before:h-4 win:before:w-[3px] win:before:-translate-y-1/2 win:before:rounded-full win:before:bg-primary",
+                  "win:selection-bar",
               )}
             >
               <Icon className="size-4 shrink-0 mac:text-primary" aria-hidden />

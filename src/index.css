@@ -218,6 +218,24 @@
   border-radius: calc(var(--radius) - 2px);
 }
 
+/*
+ * Windows 选中竖条：左侧导航、设置分组和任务表当前行共用，只配 win: 变体使用（如 win:selection-bar、
+ * win:[&>td:first-child]:selection-bar）。画在 ::before 上，宿主元素需要 relative。
+ */
+@utility selection-bar {
+  &::before {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 0;
+    width: var(--selection-bar-width);
+    height: var(--selection-bar-height);
+    translate: 0 -50%;
+    border-radius: calc(infinity * 1px);
+    background-color: var(--color-primary);
+  }
+}
+
 /* 选中文字的颜色用 Teal */
 ::selection {
   background: color-mix(in srgb, var(--primary) 30%, transparent);

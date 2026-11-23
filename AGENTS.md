@@ -44,7 +44,7 @@ Run commands from the repository root. Install Node.js, npm, and stable Rust. On
 
 ## Coding Style
 
-桌面 CSS token 统一维护在 `src/tokens.css`，按平台分组。控件颜色和圆角只用 shadcn/ui 语义名称（组件跟着变）；页面布局另有 `--window`、`--content`、`--content-border`、`--selection`、`--statusbar`，尺寸用 `--nav-item-h`、`--page-pad`、`--sidebar-width`、`--header-h`、`--text-ui`、`--text-dense`、`--text-small`、`--text-title`；任务状态使用 `--status-recording`、`--status-waiting`、`--status-checking`、`--status-retrying`、`--status-notify`，需处理行底色使用 `--status-recording-soft`，任务行高使用 `--task-row-height`。接入 Tailwind 时将主题映射到同一组变量。
+桌面 CSS token 统一维护在 `src/tokens.css`，按平台分组。控件颜色和圆角只用 shadcn/ui 语义名称（组件跟着变）；页面布局另有 `--window`、`--content`、`--content-border`、`--selection`、`--statusbar`，尺寸用 `--nav-item-h`、`--page-pad`、`--sidebar-width`、`--header-h`、`--dialog-width`、`--settings-width`、`--selection-bar-width`、`--selection-bar-height`、`--text-ui`、`--text-dense`、`--text-small`、`--text-title`；任务状态使用 `--status-recording`、`--status-waiting`、`--status-checking`、`--status-retrying`、`--status-notify`，需处理行底色使用 `--status-recording-soft`，任务行高使用 `--task-row-height`。接入 Tailwind 时将主题映射到同一组变量。
 
 Use two spaces in TypeScript, HTML, and CSS. Name React components in PascalCase and other TypeScript identifiers in camelCase; use kebab-case file names, such as `AppSidebar` in `src/components/app-sidebar.tsx`. Strict TypeScript checks include unused locals and parameters. Use four spaces and snake_case function names in Rust.
 
