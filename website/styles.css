@@ -420,6 +420,10 @@ section[id], [id^="first-run-"], .dl-card { scroll-margin-top: 72px; }
 }
 .guide-body ol, .guide-body ul { display: grid; gap: 4px; margin: 0; padding-left: 1.4em; }
 .guide-body strong { color: var(--ink); font-weight: 600; }
+/* 系统提示的真实截图：桌面上两张并排，窄屏上下排列 */
+.guide-shots { display: grid; grid-template-columns: repeat(2, minmax(0, 360px)); gap: 12px; margin: 4px 0 0; }
+.guide-shots .shot { margin: 0; }
+@media (max-width: 640px) { .guide-shots { grid-template-columns: minmax(0, 360px); } }
 
 /* ---------- 开源 ---------- */
 .oss-inner { text-align: center; }
