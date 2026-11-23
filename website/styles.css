@@ -125,10 +125,8 @@ section[id], [id^="first-run-"], .dl-card { scroll-margin-top: 72px; }
 [hidden] { display: none !important; }
 
 /* ---------- 标志 ---------- */
-.logo { width: 26px; height: 26px; flex: none; }
-.logo rect { fill: var(--brand); }
-.logo circle { fill: var(--on-brand); }
-.logo circle[fill="none"] { fill: none; stroke: var(--on-brand); }
+/* 标志就是 App 图标（favicon.svg，与 docs/brand/app-icon.svg 相同），浅色、深色模式下都不变色。 */
+.logo { display: block; width: 26px; height: 26px; flex: none; }
 
 /* ---------- 顶栏 ---------- */
 .site-header {
