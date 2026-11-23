@@ -97,10 +97,13 @@ const activityDot: Record<ActivityKind, string> = {
   convert: "bg-primary",
 };
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
+function Section({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
   return (
     <section>
-      <h3 className="m-0 mb-2 text-xs font-semibold text-muted-foreground win:text-[13px] win:text-foreground">{title}</h3>
+      <div className="mb-2 flex items-center gap-2">
+        <h3 className="m-0 flex-1 text-xs font-semibold text-muted-foreground win:text-[13px] win:text-foreground">{title}</h3>
+        {action}
+      </div>
       {children}
     </section>
   );
@@ -136,10 +139,12 @@ interface TaskInspectorProps {
   onClose: () => void;
   onEdit: (id: TaskId) => void;
   onDelete: (tasks: TaskSnapshot[]) => void;
+  /** 跳到动态页，只看这个任务。 */
+  onShowActivity?: (id: TaskId) => void;
 }
 
 /** 回调由页面用 useCallback 固定，只有当前任务的快照变化时才重渲染。 */
-export const TaskInspector = memo(function TaskInspector({ task, onClose, onEdit, onDelete }: TaskInspectorProps) {
+export const TaskInspector = memo(function TaskInspector({ task, onClose, onEdit, onDelete, onShowActivity }: TaskInspectorProps) {
   const { entries: activity, failed: activityFailed } = useTaskActivity(task.id);
   const [busy, setBusy] = useState<"stop" | "start" | "monitor" | null>(null);
   const recording = isRecordingActive(task.record);
@@ -234,7 +239,16 @@ export const TaskInspector = memo(function TaskInspector({ task, onClose, onEdit
           />
         </Section>
 
-        <Section title="最近动态">
+        <Section
+          title="最近动态"
+          action={
+            onShowActivity && (
+              <Button variant="link" size="xs" className="h-auto p-0" onClick={() => onShowActivity(task.id)}>
+                全部动态
+              </Button>
+            )
+          }
+        >
           {activity === null ? (
             <p className="m-0 text-xs text-muted-foreground">正在读取…</p>
           ) : activity.length === 0 ? (

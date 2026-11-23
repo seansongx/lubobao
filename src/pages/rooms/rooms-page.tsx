@@ -14,7 +14,7 @@ import {
   X,
 } from "lucide-react";
 
-import type { TaskFocusRequest } from "@/components/navigation";
+import type { Navigate, TaskFocusRequest } from "@/components/navigation";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -67,6 +67,8 @@ interface RoomsPageProps {
   view: RoomsView;
   onViewChange: Dispatch<SetStateAction<RoomsView>>;
   focusTask?: TaskFocusRequest | null;
+  /** 详情面板「全部动态」跳到动态页。 */
+  onNavigate?: Navigate;
 }
 
 const NO_TASKS: TaskSnapshot[] = [];
@@ -78,7 +80,7 @@ interface DialogState<T> {
   value: T;
 }
 
-export function RoomsPage({ taskList, view, onViewChange, focusTask }: RoomsPageProps) {
+export function RoomsPage({ taskList, view, onViewChange, focusTask, onNavigate }: RoomsPageProps) {
   const tasks = taskList.tasks ?? NO_TASKS;
   const [adding, setAdding] = useState<DialogState<null>>({ open: false, key: 0, value: null });
   const [editing, setEditing] = useState<DialogState<TaskId | null>>({ open: false, key: 0, value: null });
@@ -201,6 +203,11 @@ export function RoomsPage({ taskList, view, onViewChange, focusTask }: RoomsPage
     else if (selected.length > 0) clearSelection();
     else return false;
   });
+
+  const onShowActivity = useCallback(
+    (id: TaskId) => onNavigate?.("activity", { activityTaskId: id }),
+    [onNavigate],
+  );
 
   const showTask = (id: TaskId) => {
     // 定位到任务：清除会把它隐藏的筛选。
@@ -408,6 +415,7 @@ export function RoomsPage({ taskList, view, onViewChange, focusTask }: RoomsPage
           onClose={closeInspector}
           onEdit={openEdit}
           onDelete={openDelete}
+          onShowActivity={onShowActivity}
         />
       )}
 

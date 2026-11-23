@@ -54,8 +54,10 @@ export function useAppShortcuts(navigate: Navigate, current: PageId): void {
       if (mod && key === "f") {
         event.preventDefault();
         if (overlayOpen()) return;
-        // 只聚焦当前页的搜索框；没有搜索框的页面不做任何事。
-        const input = document.querySelector<HTMLInputElement>("[data-search-input]");
+        // 只聚焦当前页的搜索框；没有搜索框的页面不做任何事。隐藏页仍然挂载（页面保活），要跳过 inert 里的。
+        const input = [...document.querySelectorAll<HTMLInputElement>("[data-search-input]")].find(
+          (element) => !element.closest("[inert]"),
+        );
         input?.focus();
         input?.select();
         return;

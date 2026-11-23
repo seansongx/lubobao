@@ -17,7 +17,8 @@ import {
 } from "lucide-react";
 
 import { dayKey, formatClock, formatDateTime, formatDay, formatDuration } from "@/components/format";
-import type { Navigate } from "@/components/navigation";
+import type { FocusRequest, Navigate } from "@/components/navigation";
+import { usePageActive } from "@/components/page-activity";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import {
@@ -38,6 +39,8 @@ const PAGE_SIZE = 50;
 
 interface ActivityPageProps {
   onNavigate: Navigate;
+  /** 从别处跳过来时要筛选的任务（页面保活，按 seq 应用）。 */
+  focusTask?: FocusRequest<TaskId> | null;
 }
 
 const KIND_FILTERS: { value: ActivityKind; label: string }[] = [
@@ -152,9 +155,11 @@ function matches(entry: ActivityEntry, filter: Filter): boolean {
 
 type LoadState = "loading" | "idle" | "loadingMore" | "error";
 
-export function ActivityPage({ onNavigate }: ActivityPageProps) {
+export function ActivityPage({ onNavigate, focusTask }: ActivityPageProps) {
   const tasks = useTasks();
-  const [filter, setFilter] = useState<Filter>({ taskId: null, kind: null });
+  const active = usePageActive();
+  const activeRef = useRef(active);
+  const [filter, setFilter] = useState<Filter>(() => ({ taskId: focusTask?.value ?? null, kind: null }));
   const [items, setItems] = useState<ActivityEntry[]>([]);
   const [nextBefore, setNextBefore] = useState<number | null>(null);
   const [state, setState] = useState<LoadState>("loading");
@@ -191,6 +196,18 @@ export function ActivityPage({ onNavigate }: ActivityPageProps) {
       );
   }, []);
 
+  useEffect(() => {
+    activeRef.current = active;
+  }, [active]);
+
+  // 从直播间详情跳过来：只看该任务的全部动态。首次挂载时初始值已经用上，这里处理之后的跳转。
+  const handledFocus = useRef(focusTask?.seq ?? 0);
+  useEffect(() => {
+    if (!focusTask || focusTask.seq === handledFocus.current) return;
+    handledFocus.current = focusTask.seq;
+    setFilter({ taskId: focusTask.value, kind: null });
+  }, [focusTask]);
+
   // 筛选变化：清空后重新读第一页。
   useEffect(() => {
     filterRef.current = filter;
@@ -208,7 +225,8 @@ export function ActivityPage({ onNavigate }: ActivityPageProps) {
       .onActivity((entry) => {
         if (!matches(entry, filterRef.current)) return;
         setItems((current) => merge(current, [entry]));
-        setFreshIds((current) => new Set(current).add(entry.id));
+        // 页面隐藏时照常收下新动态，但不标记为新到（否则切回来才播放入场动画）。
+        if (activeRef.current) setFreshIds((current) => new Set(current).add(entry.id));
       })
       .then((fn) => {
         if (disposed) fn();

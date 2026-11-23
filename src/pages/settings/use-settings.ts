@@ -119,14 +119,16 @@ export function useSettings() {
 
   useEffect(load, [load]);
 
+  // 静默重新读取：不重新挂载分组（revision 不变），输入框里正在编辑的草稿保留，其余字段显示新值。
+  const refresh = useCallback(() => {
+    api.getSettings().then(apply, () => undefined);
+  }, [apply]);
+
   // 设置在别处被修改（例如关窗时记住选择）后重新读取，页面显示新值。
   useEffect(() => {
-    const refresh = () => {
-      api.getSettings().then(apply, () => undefined);
-    };
     window.addEventListener(SETTINGS_CHANGED_EVENT, refresh);
     return () => window.removeEventListener(SETTINGS_CHANGED_EVENT, refresh);
-  }, [apply]);
+  }, [refresh]);
 
   const setError = useCallback((key: SettingKey, message: string | null) => {
     setErrors((current) => {
@@ -203,5 +205,5 @@ export function useSettings() {
   );
 
   const controller: SettingsController | null = settings ? { settings, errors, save, setError, reset, revision } : null;
-  return { controller, loadError, reload: load, loadId };
+  return { controller, loadError, reload: load, refresh, loadId };
 }

@@ -2,7 +2,8 @@ import { useCallback, useMemo, useState } from "react";
 
 import { AppSidebar } from "@/components/app-sidebar";
 import { useAppShortcuts } from "@/components/app-shortcuts";
-import type { Navigate, TaskFocusRequest } from "@/components/navigation";
+import type { FocusRequest, Navigate, SettingsGroupId, TaskFocusRequest } from "@/components/navigation";
+import { PageSlot } from "@/components/page-activity";
 import { DesktopDialogs } from "@/components/desktop-dialogs";
 import { SelectionMenu } from "@/components/selection-menu";
 import { StatusBar } from "@/components/status-bar";
@@ -27,13 +28,26 @@ export default function App() {
   const taskList = useTaskList();
   // 跳到直播间时要选中的任务；RoomsPage 在 seq 变化时选中 taskId。
   const [taskFocus, setTaskFocus] = useState<TaskFocusRequest | null>(null);
-  const page = pages.find((item) => item.id === current) ?? pages[0];
+  // 跳到动态时的任务筛选、跳到设置时的分组；目标页保活，按 seq 应用。
+  const [activityFocus, setActivityFocus] = useState<FocusRequest<number> | null>(null);
+  const [settingsFocus, setSettingsFocus] = useState<FocusRequest<SettingsGroupId> | null>(null);
+  // 打开过的页面一直挂载（页面保活），非当前页隐藏。
+  const [visited, setVisited] = useState<ReadonlySet<PageId>>(() => new Set<PageId>(["rooms"]));
 
   const navigate = useCallback<Navigate>((target, options) => {
     if (options?.taskId !== undefined) {
       const taskId = options.taskId;
       setTaskFocus((previous) => ({ taskId, seq: (previous?.seq ?? 0) + 1 }));
     }
+    if (options?.activityTaskId !== undefined) {
+      const value = options.activityTaskId;
+      setActivityFocus((previous) => ({ value, seq: (previous?.seq ?? 0) + 1 }));
+    }
+    if (options?.settingsGroup !== undefined) {
+      const value = options.settingsGroup;
+      setSettingsFocus((previous) => ({ value, seq: (previous?.seq ?? 0) + 1 }));
+    }
+    setVisited((previous) => (previous.has(target) ? previous : new Set(previous).add(target)));
     setCurrent(target);
   }, []);
 
@@ -44,20 +58,30 @@ export default function App() {
     [taskList.tasks],
   );
 
-  const content = (() => {
-    switch (page.id) {
+  const renderPage = (id: PageId) => {
+    switch (id) {
       case "rooms":
-        return <RoomsPage taskList={taskList} view={roomsView} onViewChange={setRoomsView} focusTask={taskFocus} />;
+        return (
+          <RoomsPage
+            taskList={taskList}
+            view={roomsView}
+            onViewChange={setRoomsView}
+            focusTask={taskFocus}
+            onNavigate={navigate}
+          />
+        );
       case "library":
         return <LibraryPage onNavigate={navigate} />;
       case "activity":
-        return <ActivityPage onNavigate={navigate} />;
+        return <ActivityPage onNavigate={navigate} focusTask={activityFocus} />;
       case "settings":
-        return <SettingsPage />;
-      default:
-        return <PagePlaceholder key={page.id} page={page} />;
+        return <SettingsPage focusGroup={settingsFocus} />;
+      default: {
+        const page = pages.find((item) => item.id === id) ?? pages[0];
+        return <PagePlaceholder page={page} />;
+      }
     }
-  })();
+  };
 
   return (
     <TooltipProvider delayDuration={400}>
@@ -65,8 +89,14 @@ export default function App() {
       <div className="grid h-screen grid-cols-[var(--sidebar-width)_minmax(0,1fr)] bg-window">
         <AppSidebar current={current} onNavigate={navigate} recordingCount={recordingCount} />
         <div className="flex min-h-0 min-w-0 flex-col">
-          <main className="flex min-h-0 min-w-0 flex-1 bg-content win:rounded-tl-xl win:border-t win:border-l win:border-content-border">
-            {content}
+          <main className="relative flex min-h-0 min-w-0 flex-1 bg-content win:rounded-tl-xl win:border-t win:border-l win:border-content-border">
+            {pages
+              .filter((page) => visited.has(page.id))
+              .map((page) => (
+                <PageSlot key={page.id} active={page.id === current}>
+                  {renderPage(page.id)}
+                </PageSlot>
+              ))}
           </main>
           <StatusBar />
         </div>

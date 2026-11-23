@@ -38,6 +38,7 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useOnPageActivate, usePageActive } from "@/components/page-activity";
 import { useDiskSpace, useLibraryUsage } from "@/components/use-library-space";
 import {
   api,
@@ -130,7 +131,8 @@ export function LibraryPage({ onNavigate }: LibraryPageProps) {
   const [selected, setSelected] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const { space } = useDiskSpace();
-  const { snapshot: usage, refresh: refreshUsage } = useLibraryUsage();
+  const active = usePageActive();
+  const { snapshot: usage, refresh: refreshUsage } = useLibraryUsage(active);
   const request = useRef(0);
   const listRef = useRef<HTMLDivElement>(null);
   const [scroll, setScroll] = useState({ top: 0, height: 0 });
@@ -166,6 +168,29 @@ export function LibraryPage({ onNavigate }: LibraryPageProps) {
     fetchListing(path);
     refreshUsage();
   };
+
+  // 回到录像库：后台重新读取当前目录，读完前继续显示旧列表，不转圈、不清空；
+  // 当前目录已被删除时回到上一级并提示。
+  useOnPageActivate(() => {
+    if (load.state !== "ready") return;
+    const target = path;
+    const id = ++request.current;
+    api.listLibrary(target).then(
+      (next) => {
+        if (id === request.current) setLoad({ state: "ready", listing: next });
+      },
+      (error: unknown) => {
+        if (id !== request.current) return;
+        const failure = toLibraryError(error);
+        if (failure.kind === "not_found" && target) {
+          go(parentOf(target));
+          setNotice(`文件夹「${target.split("/").pop()}」已不存在，已回到上一级。`);
+        } else {
+          setLoad({ state: "error", error: failure });
+        }
+      },
+    );
+  });
 
   const listing = load.state === "ready" ? load.listing : load.state === "loading" ? load.previous : null;
   const rows = useMemo(() => buildRows(listing?.entries ?? []), [listing]);
@@ -709,7 +734,7 @@ function LibraryErrorView({ error, atRoot, onNavigate, onRetry, onRoot }: Librar
         <p className="m-0 break-all text-muted-foreground">{view.description}</p>
         <div className="mt-2 flex gap-2">
           {"settings" in view && view.settings && (
-            <Button size="sm" onClick={() => onNavigate("settings")}>
+            <Button size="sm" onClick={() => onNavigate("settings", { settingsGroup: "record" })}>
               <Settings aria-hidden />
               前往设置
             </Button>

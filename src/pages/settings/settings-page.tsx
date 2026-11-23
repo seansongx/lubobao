@@ -1,7 +1,9 @@
 // 设置页：左侧分组导航，右侧显示当前分组。修改后自动保存。
 
-import { Component, useState, type ErrorInfo, type ReactNode } from "react";
+import { Component, useEffect, useRef, useState, type ErrorInfo, type ReactNode } from "react";
 
+import type { FocusRequest, SettingsGroupId } from "@/components/navigation";
+import { useOnPageActivate } from "@/components/page-activity";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -16,7 +18,7 @@ import {
 } from "@/pages/settings/setting-sections";
 import { useSettings, type SettingsController } from "@/pages/settings/use-settings";
 
-type GroupId = "record" | "check" | "network" | "accounts" | "notify" | "components" | "about";
+type GroupId = SettingsGroupId;
 
 const groups: { id: GroupId; label: string }[] = [
   { id: "record", label: "录制" },
@@ -59,9 +61,9 @@ class SettingsErrorBoundary extends Component<BoundaryProps, { error: Error | nu
   }
 }
 
-type SettingsGroupId = Exclude<GroupId, "components" | "about">;
+type FormGroupId = Exclude<GroupId, "components" | "about">;
 
-function SettingsGroup({ group, ctx }: { group: SettingsGroupId; ctx: SettingsController }) {
+function SettingsGroup({ group, ctx }: { group: FormGroupId; ctx: SettingsController }) {
   switch (group) {
     case "record":
       return <RecordSection ctx={ctx} />;
@@ -76,9 +78,25 @@ function SettingsGroup({ group, ctx }: { group: SettingsGroupId; ctx: SettingsCo
   }
 }
 
-export function SettingsPage() {
-  const [group, setGroup] = useState<GroupId>("record");
-  const { controller, loadError, reload, loadId } = useSettings();
+interface SettingsPageProps {
+  /** 从别处跳过来时要打开的分组（页面保活，按 seq 应用）。 */
+  focusGroup?: FocusRequest<SettingsGroupId> | null;
+}
+
+export function SettingsPage({ focusGroup }: SettingsPageProps) {
+  const [group, setGroup] = useState<GroupId>(() => focusGroup?.value ?? "record");
+  const { controller, loadError, reload, refresh, loadId } = useSettings();
+
+  // 首次挂载时初始分组已经用上，这里处理之后的跳转。
+  const handledFocus = useRef(focusGroup?.seq ?? 0);
+  useEffect(() => {
+    if (!focusGroup || focusGroup.seq === handledFocus.current) return;
+    handledFocus.current = focusGroup.seq;
+    setGroup(focusGroup.value);
+  }, [focusGroup]);
+
+  // 回到设置页：静默读取一次，别处改过的设置显示新值，正在编辑的草稿不覆盖。
+  useOnPageActivate(refresh);
 
   let body;
   if (group === "components") {

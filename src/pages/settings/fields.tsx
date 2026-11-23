@@ -202,13 +202,17 @@ interface DraftInputOptions {
   onError: (message: string | null) => void;
 }
 
-/** 输入框草稿：外部值变化时同步；失焦或 Enter 时校验并提交，Esc 撤销。 */
+/**
+ * 输入框草稿：外部值变化时同步，但正在编辑（草稿与上次保存的值不同）的不覆盖；
+ * 失焦或 Enter 时校验并提交，Esc 撤销。
+ */
 function useDraft({ value, validate, onCommit, onError }: DraftInputOptions) {
   const [draft, setDraft] = useState(value);
   const committed = useRef(value);
   useEffect(() => {
+    const previous = committed.current;
     committed.current = value;
-    setDraft(value);
+    setDraft((current) => (current === previous ? value : current));
   }, [value]);
 
   const commit = () => {
