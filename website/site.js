@@ -198,6 +198,90 @@
     return null;
   }
 
+  /* ---------- 更新说明：极简 Markdown ---------- */
+  // 只认段落、"- " 列表、"#" 小标题、**加粗**、`代码` 和 [文字](http(s)://…) 链接，
+  // 全部用 createElement / textContent 生成；不认识的写法原样当文字显示。
+
+  var INLINE = [
+    { re: /\*\*([^*]+?)\*\*/, make: function (m) { var el = document.createElement("strong"); appendInline(el, m[1]); return el; } },
+    { re: /`([^`]+)`/, make: function (m) { var el = document.createElement("code"); el.textContent = m[1]; return el; } },
+    {
+      re: /\[([^\]]+)\]\((https?:\/\/[^\s()]+)\)/,
+      make: function (m) {
+        var el = document.createElement("a");
+        el.textContent = m[1];
+        el.setAttribute("href", m[2]);
+        el.setAttribute("rel", "noopener");
+        return el;
+      }
+    }
+  ];
+
+  function appendInline(parent, text) {
+    while (text) {
+      var best = null;
+      var bestRule = null;
+      for (var i = 0; i < INLINE.length; i++) {
+        var m = INLINE[i].re.exec(text);
+        if (m && (!best || m.index < best.index)) { best = m; bestRule = INLINE[i]; }
+      }
+      if (!best) {
+        parent.appendChild(document.createTextNode(text));
+        return;
+      }
+      if (best.index > 0) parent.appendChild(document.createTextNode(text.slice(0, best.index)));
+      parent.appendChild(bestRule.make(best));
+      text = text.slice(best.index + best[0].length);
+    }
+  }
+
+  function renderMarkdown(container, source) {
+    while (container.firstChild) container.removeChild(container.firstChild);
+    var lines = source.replace(/\r\n?/g, "\n").split("\n");
+    var para = null;
+    var list = null;
+    function flushPara() {
+      if (!para) return;
+      var p = document.createElement("p");
+      appendInline(p, para.join("\n"));
+      container.appendChild(p);
+      para = null;
+    }
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i];
+      var item = /^\s*[-*]\s+(.*)$/.exec(line);
+      var heading = /^\s*#{1,6}\s+(.*)$/.exec(line);
+      if (!line.trim()) {
+        flushPara();
+        list = null;
+      } else if (item) {
+        flushPara();
+        if (!list) {
+          list = document.createElement("ul");
+          container.appendChild(list);
+        }
+        var li = document.createElement("li");
+        appendInline(li, item[1]);
+        list.appendChild(li);
+      } else if (heading) {
+        flushPara();
+        list = null;
+        var h = document.createElement("h4");
+        appendInline(h, heading[1].replace(/\s+#+\s*$/, ""));
+        container.appendChild(h);
+      } else if (list && /^\s{2,}\S/.test(line)) {
+        // 列表项的续行
+        var last = list.lastChild;
+        last.appendChild(document.createTextNode("\n"));
+        appendInline(last, line.trim());
+      } else {
+        list = null;
+        (para = para || []).push(line.trim());
+      }
+    }
+    flushPara();
+  }
+
   function fill(data) {
     var latest = safeVersion(data.version);
     var date = formatDate(data.pubDate);
@@ -211,7 +295,7 @@
       var notes = document.getElementById("dl-notes");
       var text = document.getElementById("dl-notes-text");
       if (notes && text) {
-        text.textContent = data.notes.trim();
+        renderMarkdown(text, data.notes.trim());
         notes.hidden = false;
       }
     }
@@ -286,6 +370,24 @@
       showError();
     });
   }
+
+  /* ---------- 首次打开：跳到某个系统的说明时自动展开 ---------- */
+
+  function openDetails(id) {
+    var el = id ? document.getElementById(id) : null;
+    if (el && el.tagName === "DETAILS") el.open = true;
+  }
+
+  function hashId(hash) {
+    try { return decodeURIComponent(String(hash || "").slice(1)); } catch (e) { return ""; }
+  }
+
+  document.addEventListener("click", function (event) {
+    var link = event.target.closest ? event.target.closest('a[href^="#"]') : null;
+    if (link) openDetails(hashId(link.getAttribute("href")));
+  });
+  window.addEventListener("hashchange", function () { openDetails(hashId(location.hash)); });
+  openDetails(hashId(location.hash));
 
   recommend(detectOs());
   load();

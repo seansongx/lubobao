@@ -1,4 +1,4 @@
-// 生成 xiaofany.com 产品页用的图标、截图和封面。
+// 生成 xiaofany.com 产品页用的图标、截图和封面，以及官网 website/assets/ 里的界面截图。
 //
 // 用法（仓库根目录）：
 //   npm run build
@@ -6,7 +6,7 @@
 //
 // 流程：用 vite preview 在 127.0.0.1:4180 提供正式构建（不在 Tauri 里，自动用 src/lib/mock-api.ts 的示例数据，
 // 正式构建没有状态栏的「调试」入口），再用无头 Edge（或 Chrome）通过 DevTools 协议打开页面、点击、截图。
-// 浅色，?platform=windows&ffmpeg=ready（状态栏显示 FFmpeg 可用），窗口 1440×900。不依赖额外的 npm 包，需要 Node 22 以上（内置 WebSocket）。
+// 浅色，?platform=windows&ffmpeg=ready（状态栏显示 FFmpeg 可用），窗口 1280×800、两倍像素。不依赖额外的 npm 包，需要 Node 22 以上（内置 WebSocket）。
 // 浏览器路径可用环境变量 BROWSER 指定。
 
 import { spawn } from "node:child_process";
@@ -138,7 +138,8 @@ async function shot(cdp, file, options = {}) {
   const { format = "png", quality } = options;
   const overlays = await cdp.evaluate(overlayCheck);
   if (overlays) throw new Error(`截图 ${file} 时页面上有浮层：${overlays}`);
-  const result = await cdp.send("Page.captureScreenshot", { format, quality, captureBeyondViewport: false });
+  const clip = options.clip ? { ...options.clip, scale: 1 } : undefined;
+  const result = await cdp.send("Page.captureScreenshot", { format, quality, clip, captureBeyondViewport: false });
   writeFileSync(file, Buffer.from(result.data, "base64"));
   console.log(`已生成 ${file}`);
 }
@@ -168,12 +169,22 @@ const openLibraryFolder = (name) => `(() => {
   return true;
 })()`;
 
+// 官网功能区用的局部区域（1280×800 窗口里的 CSS 像素，输出两倍像素）。官网按 CSS 像素原大显示
+// （功能区图片最宽约 700px），页面上的字和真实界面差不多大。坐标对应当前界面和示例数据，界面布局变了要重新量。
+const websiteCrops = {
+  rooms: { x: 462, y: 96, width: 818, height: 476 }, // 状态列和右侧详情
+  library: { x: 216, y: 58, width: 544, height: 530 }, // 路径、两组分段和 MP4
+  activity: { x: 216, y: 104, width: 664, height: 406 }, // 今天的几条记录
+  settings: { x: 372, y: 62, width: 788, height: 361 }, // 录制分组的前几项
+};
+
 // 移走鼠标悬停和焦点，免得截图里出现悬停底色或焦点环。
 const blur = `(() => { document.activeElement?.blur?.(); return true; })()`;
 
 async function main() {
   if (!existsSync(join(root, "dist/index.html"))) throw new Error("先运行 npm run build");
   const assets = here;
+  const website = join(root, "website/assets");
 
   const preview = spawn("npx", ["vite", "preview", "--host", "127.0.0.1", "--port", String(port), "--strictPort"], {
     cwd: root,
@@ -207,43 +218,67 @@ async function main() {
     await cdp.send("Page.enable");
     await cdp.send("Runtime.enable");
 
-    // 1. 截图：1440×900，浅色。
-    await setViewport(cdp, 1440, 900);
+    // 1. 界面图：1280×800，两倍像素，浅色。每页截一张整窗图（排版成 gallery-*.png），
+    //    再为官网截局部放大图（website/assets/*.webp，两倍像素，按 CSS 像素区域裁剪）。
+    await setViewport(cdp, 1280, 800, 2);
     await navigate(cdp, base, 2500);
-    await cdp.evaluate(selectRecordingRow);
-    await sleep(800);
-    await cdp.evaluate(blur);
-    await shot(cdp, join(assets, "screenshot-1-rooms.png"));
-
-    // 录像库进到「抖音 / 一只小羊驼」，显示分段和 MP4 文件。
-    await cdp.evaluate(clickNav("录像库"));
-    await sleep(1200);
-    for (const folder of ["抖音", "一只小羊驼"]) {
-      await cdp.evaluate(openLibraryFolder(folder));
-      await sleep(1200);
-    }
-    await sleep(2500);
-    await cdp.evaluate(blur);
-    await shot(cdp, join(assets, "screenshot-2-library.png"));
-
-    for (const [label, file] of [
-      ["动态", "screenshot-3-activity.png"],
-      ["设置", "screenshot-4-settings.png"],
-    ]) {
-      await cdp.evaluate(clickNav(label));
-      await sleep(1500);
+    const pages = [
+      {
+        name: "rooms",
+        prepare: async () => {
+          await cdp.evaluate(selectRecordingRow);
+          await sleep(800);
+        },
+      },
+      {
+        name: "library",
+        prepare: async () => {
+          // 录像库进到「抖音 / 一只小羊驼」，显示分段和 MP4 文件。
+          await cdp.evaluate(clickNav("录像库"));
+          await sleep(1200);
+          for (const folder of ["抖音", "一只小羊驼"]) {
+            await cdp.evaluate(openLibraryFolder(folder));
+            await sleep(1200);
+          }
+          await sleep(2500);
+        },
+      },
+      { name: "activity", prepare: () => cdp.evaluate(clickNav("动态")).then(() => sleep(1500)) },
+      { name: "settings", prepare: () => cdp.evaluate(clickNav("设置")).then(() => sleep(1500)) },
+    ];
+    const sources = process.env.CAPTURE_SOURCES; // 调试用：把整窗原图另存到这个目录
+    for (const [index, item] of pages.entries()) {
+      await item.prepare();
       await cdp.evaluate(blur);
-      await shot(cdp, join(assets, file));
+      const source = join(profile, `${item.name}.png`);
+      await shot(cdp, source);
+      if (sources) await shot(cdp, join(sources, `${item.name}.png`));
+      item.source = source;
+      item.file = `gallery-${index + 1}-${item.name}`;
+      const crop = websiteCrops[item.name];
+      if (crop) await shot(cdp, join(website, `${item.name}-detail.webp`), { format: "webp", quality: 82, clip: crop });
+      if (item.name === "rooms") await shot(cdp, join(website, "rooms.webp"), { format: "webp", quality: 80 });
     }
 
-    // 2. 封面用的界面图：1280×800 两倍像素，直播间页不选中行。
+    // 2. 产品页截图：gallery.html 把整窗图放在纸色背景上，1600×1000。
+    const galleryTemplate = readFileSync(join(assets, "gallery.html"), "utf8");
+    await setViewport(cdp, 1600, 1000);
+    for (const item of pages) {
+      const page = join(profile, `${item.file}.html`);
+      writeFileSync(page, galleryTemplate.replace('src="gallery-source.png"', `src="${pathToFileURL(item.source).href}"`));
+      await navigate(cdp, pathToFileURL(page).href, 600);
+      await shot(cdp, join(assets, `${item.file}.png`));
+      await shot(cdp, join(assets, `${item.file}.webp`), { format: "webp", quality: 88 });
+    }
+
+    // 3. 封面用的界面图：1280×800 两倍像素，直播间页不选中行。
     await setViewport(cdp, 1280, 800, 2);
     await navigate(cdp, base, 2500);
     await cdp.evaluate(blur);
     const coverSource = join(profile, "cover-source.png");
     await shot(cdp, coverSource);
 
-    // 3. 封面：cover.html 把界面图放在纸色背景上，1600×1000。
+    // 4. 封面：cover.html 把界面图放在纸色背景上，1600×1000。
     const coverHtml = readFileSync(join(assets, "cover.html"), "utf8")
       .replace('src="cover-source.png"', `src="${pathToFileURL(coverSource).href}"`)
       .replace('src="app-icon.svg"', `src="${pathToFileURL(join(root, "docs/brand/app-icon.svg")).href}"`);
@@ -254,7 +289,7 @@ async function main() {
     await shot(cdp, join(assets, "cover.png"));
     await shot(cdp, join(assets, "cover.webp"), { format: "webp", quality: 90 });
 
-    // 4. 图标：app-icon.svg 渲染成 256×256 透明底 PNG。
+    // 5. 图标：app-icon.svg 渲染成 256×256 透明底 PNG。
     const iconPage = join(profile, "icon.html");
     const svg = pathToFileURL(join(root, "docs/brand/app-icon.svg")).href;
     writeFileSync(

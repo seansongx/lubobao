@@ -1,0 +1,51 @@
+<!doctype html>
+<!-- xiaofany.com 产品页截图的外框，1600×1000（16:10），和 cover.html 同一套底色和窗口样式。
+     由 capture.mjs 渲染，gallery-source.png 会被替换成实际路径（1280×800 两倍像素的界面图）。 -->
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <style>
+      :root {
+        --paper: #faf9f5;
+        --paper-deep: #f1efe6;
+        --line: #d9d6c9;
+      }
+      html,
+      body {
+        margin: 0;
+        width: 1600px;
+        height: 1000px;
+        overflow: hidden;
+      }
+      body {
+        position: relative;
+        background:
+          radial-gradient(ellipse 900px 520px at 50% 60%, rgba(15, 118, 110, 0.07), transparent 70%),
+          linear-gradient(180deg, var(--paper) 0%, var(--paper-deep) 100%);
+      }
+      .window {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: 1392px;
+        height: 870px;
+        transform: translate(-50%, -50%);
+        border-radius: 12px;
+        border: 1px solid var(--line);
+        overflow: hidden;
+        background: #fff;
+        box-shadow:
+          0 1px 2px rgba(20, 20, 19, 0.06),
+          0 24px 60px -12px rgba(20, 20, 19, 0.22);
+      }
+      .window img {
+        display: block;
+        width: 100%;
+        height: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="window"><img src="gallery-source.png" alt="" /></div>
+  </body>
+</html>

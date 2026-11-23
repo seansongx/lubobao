@@ -6,14 +6,15 @@
     <title>录播宝 · 开播自动录，不用再蹲直播</title>
     <meta name="description" content="录播宝：开播自动录，不用再蹲直播。开源的直播录制工具，添加抖音、快手直播间后在后台定时检测，开播自动录制，下播自动收尾，录像保存在本地。支持 Windows、macOS、Linux，另有服务器命令行版和 Docker 镜像。">
     <meta name="color-scheme" content="light dark">
-    <meta name="theme-color" content="#f8faf9" media="(prefers-color-scheme: light)">
-    <meta name="theme-color" content="#0d0f0f" media="(prefers-color-scheme: dark)">
+    <meta name="theme-color" content="#f5f5f6" media="(prefers-color-scheme: light)">
+    <meta name="theme-color" content="#1a1a1c" media="(prefers-color-scheme: dark)">
     <meta property="og:type" content="website">
     <meta property="og:locale" content="zh_CN">
     <meta property="og:site_name" content="录播宝">
     <meta property="og:title" content="录播宝 · 开播自动录，不用再蹲直播">
     <meta property="og:description" content="开播自动录，不用再蹲直播。开源直播录制工具，支持抖音和快手，录像保存在本地。">
     <link rel="icon" href="./favicon.svg" type="image/svg+xml">
+    <link rel="preload" href="./assets/rooms.webp" as="image" type="image/webp">
     <link rel="stylesheet" href="./styles.css">
     <script src="./site.js" defer></script>
   </head>
@@ -33,10 +34,9 @@
         <nav aria-label="页面导航">
           <ul>
             <li class="nav-optional"><a href="#features">功能</a></li>
-            <li class="nav-optional"><a href="#platforms">平台</a></li>
             <li><a href="#download">下载</a></li>
             <li class="nav-optional"><a href="#first-run">首次打开</a></li>
-            <li><a class="nav-gh" href="https://github.com/seansongx/lubobao">GitHub</a></li>
+            <li><a href="https://github.com/seansongx/lubobao">GitHub</a></li>
           </ul>
         </nav>
       </div>
@@ -45,140 +45,87 @@
     <main id="main" tabindex="-1">
       <section class="hero" id="top" aria-labelledby="hero-title">
         <div class="wrap hero-copy">
-          <p class="eyebrow"><span class="pulse-tag">0.1 公测版</span>开源直播录制工具 · Windows / macOS / Linux</p>
-          <h1 id="hero-title">开播自动录，<br>不用再蹲直播。</h1>
-          <p class="lead">添加抖音、快手直播间，录播宝在后台定时检测，主播一开播就开始录制，下播后自动收尾，录像直接存进你的电脑。</p>
+          <h1 id="hero-title"><span class="nowrap">开播自动录，</span><span class="nowrap">不用再蹲直播</span></h1>
+          <p class="lead">添加抖音、快手直播间，录播宝在后台定时检测，主播一开播就录，下播自动收尾，录像存在你自己的电脑上。</p>
           <div class="actions">
-            <a class="btn btn-primary" id="hero-download" href="#download">免费下载</a>
-            <a class="btn btn-ghost" href="https://github.com/seansongx/lubobao">在 GitHub 上查看源代码</a>
+            <a class="btn btn-primary btn-lg" id="hero-download" href="#download">免费下载</a>
+            <a class="btn btn-ghost btn-lg" href="https://github.com/seansongx/lubobao">GitHub 源代码</a>
           </div>
+          <p class="hero-meta">开源 · MIT 许可证 · Windows / macOS / Linux</p>
         </div>
-
-        <figure class="wrap preview">
-          <div class="window" aria-hidden="true">
-            <div class="titlebar">
-              <span class="lights"><i></i><i></i><i></i></span>
-              <span class="titlebar-name">录播宝</span>
-            </div>
-            <div class="app">
-              <div class="side">
-                <span class="side-item on"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="m16 10 5-3v10l-5-3"/></svg><span class="side-label">直播间</span></span>
-                <span class="side-item"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 4v5M16 4v5"/></svg><span class="side-label">录像库</span></span>
-                <span class="side-item"><svg viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg><span class="side-label">动态</span></span>
-                <span class="side-item"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/></svg><span class="side-label">设置</span></span>
-              </div>
-              <div class="pane">
-                <div class="pane-head">
-                  <span class="pane-title">直播间</span>
-                  <span class="pane-btn">＋ 添加直播间</span>
-                </div>
-                <div class="rows">
-                  <div class="row head"><span>主播</span><span class="col-plat">平台</span><span>状态</span><span class="col-meta">画质 · 时长</span></div>
-                  <div class="row sel"><span class="who"><b class="av av1"></b>示例直播间 A</span><span class="col-plat">抖音</span><span class="st st-rec"><i></i>录制中</span><span class="col-meta num">原画 · 01:23:45</span></div>
-                  <div class="row"><span class="who"><b class="av av2"></b>示例直播间 B</span><span class="col-plat">抖音</span><span class="st st-check"><i></i>检测中</span><span class="col-meta">—</span></div>
-                  <div class="row"><span class="who"><b class="av av3"></b>示例直播间 C</span><span class="col-plat">快手</span><span class="st st-wait"><i></i>等待开播</span><span class="col-meta num">下次 02:41</span></div>
-                  <div class="row"><span class="who"><b class="av av4"></b>示例直播间 D</span><span class="col-plat">抖音</span><span class="st st-retry"><i></i>重试中</span><span class="col-meta">第 2 次</span></div>
-                  <div class="row"><span class="who"><b class="av av5"></b>示例直播间 E</span><span class="col-plat">快手</span><span class="st st-notify"><svg viewBox="0 0 24 24"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4zM10 21h4"/></svg>仅通知</span><span class="col-meta">已开播</span></div>
-                  <div class="row paused"><span class="who"><b class="av av6"></b>示例直播间 F</span><span class="col-plat">抖音</span><span class="st st-pause"><i></i>已暂停</span><span class="col-meta">—</span></div>
-                </div>
-              </div>
-              <div class="detail">
-                <span class="detail-k">当前录制</span>
-                <span class="detail-v">示例直播间 A</span>
-                <span class="detail-k">画质</span>
-                <span class="detail-v">原画 · TS</span>
-                <span class="detail-k">已录制</span>
-                <span class="detail-v num">01:23:45</span>
-                <span class="detail-k">文件大小</span>
-                <span class="detail-v num">3.41 GB</span>
-              </div>
-              <div class="statusbar">
-                <span>FFmpeg 已就绪</span>
-                <span><i class="dot-rec"></i>录制中 1</span>
-                <span class="sb-opt num">6.2 Mbps</span>
-                <span class="sb-opt">磁盘剩余 <span class="num">186 GB</span></span>
-                <span class="sb-right">下次检测 <span class="num">02:41</span></span>
-              </div>
-            </div>
+        <figure class="wrap hero-shot">
+          <div class="shot">
+            <img src="./assets/rooms.webp" width="1280" height="800" fetchpriority="high"
+                 alt="录播宝的直播间页面：任务表列出各直播间的录制状态、画质和时长，右侧是当前录制的详情。">
           </div>
-          <figcaption><span class="tag">界面示意</span>直播间均为虚构示例。</figcaption>
+          <figcaption>直播间页面。图中为示例数据，主播名均为虚构。</figcaption>
         </figure>
+      </section>
+
+      <section class="platforms" id="platforms" aria-label="支持平台">
+        <div class="wrap platforms-inner">
+          <span class="platforms-label">支持平台</span>
+          <span class="plat"><span class="plat-dot" aria-hidden="true"></span>抖音</span>
+          <span class="plat"><span class="plat-dot" aria-hidden="true"></span>快手</span>
+          <span class="platforms-next">虎牙、斗鱼、B 站等之后逐个接入</span>
+        </div>
       </section>
 
       <section class="section" id="features" aria-labelledby="features-title">
         <div class="wrap">
-          <header class="section-head">
-            <p class="kicker"><span class="num">01</span>主要功能</p>
-            <h2 id="features-title">挂在后台，<br>等主播开播。</h2>
-            <p class="section-lead">盯开播、录屏、找文件这几件事，交给录播宝。</p>
-          </header>
-          <ul class="features">
-            <li class="feature">
-              <svg class="feature-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4" class="fill"/></svg>
-              <h3>开播自动录制</h3>
-              <p>按设定的间隔检测直播状态，开播即用 FFmpeg 开始录制，下播后自动收尾。断流后重新检测、接着录；手动停止的直播间保持停止，不会被重新拉起。</p>
-            </li>
-            <li class="feature">
-              <svg class="feature-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
-              <h3>抖音、快手，五档画质</h3>
-              <p>粘贴直播间链接、抖音号、短链或主页链接即可添加。原画到流畅五档可选，所选画质取流失败时自动换一档。可以为平台设置代理和 Cookie。</p>
-            </li>
-            <li class="feature">
-              <svg class="feature-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4z"/><path d="M4 9h16M9 13l2 2 4-4"/></svg>
-              <h3>分段录制，录后转 MP4</h3>
-              <p>录制时按 TS 分段写入，中途断开也不会丢掉已录的部分。录完后转成 MP4，确认能正常读取才替换；默认保留原文件，转换失败时原文件不动。</p>
-            </li>
-            <li class="feature">
-              <svg class="feature-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 11v5m-2.5-2.5L12 16l2.5-2.5"/></svg>
-              <h3>录像库与动态</h3>
-              <p>录像保存在你选的目录，不经过任何服务器。在录像库里按目录浏览，用系统播放器打开或在文件夹中显示；动态页按时间记下开播、录制和出错，可按直播间和类型筛选。</p>
-            </li>
-            <li class="feature">
-              <svg class="feature-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4zM10 21h4"/></svg>
-              <h3>后台常驻，按需提醒</h3>
-              <p>关闭窗口可以收到托盘，录制照常进行。开播和录制失败时发系统通知；只想知道开没开播的直播间可设为「仅通知」。有录制时退出会先确认，等文件写完再退出。</p>
-            </li>
-            <li class="feature">
-              <svg class="feature-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4 6v6c0 4.5 3.4 8 8 9 4.6-1 8-4.5 8-9V6z"/><path d="m8.5 12 2.5 2.5 4.5-5"/></svg>
-              <h3>FFmpeg 自动安装，应用内更新</h3>
-              <p>第一次启动时在后台下载与系统匹配的 FFmpeg，优先国内源，按固定的 SHA-256 校验通过后才安装，下载期间界面照常可用。录播宝自己的新版本可以在应用内检查和安装，更新包校验签名后才装。</p>
-            </li>
-          </ul>
+          <h2 class="sr-only" id="features-title">主要功能</h2>
+
+          <article class="feature">
+            <div class="feature-copy">
+              <h3>开播就录，状态一眼看清</h3>
+              <p>按设定间隔检测开播，断流后重新检测、接着录。哪个直播间在录、在等还是出了错，看状态列和右侧详情就知道。</p>
+            </div>
+            <figure class="shot">
+              <img src="./assets/rooms-detail.webp" width="818" height="476" loading="lazy" decoding="async"
+                   alt="直播间任务表的状态列：需处理、录制中、重试中、已开播仅通知等状态，右侧详情列出当前录制的文件、大小和码率。">
+            </figure>
+          </article>
+
+          <article class="feature feature-flip">
+            <div class="feature-copy">
+              <h3>每次开播都有记录</h3>
+              <p>动态页按时间记下开播、录制和出错。关掉窗口收进托盘照常录制，开播和失败会发系统通知。</p>
+            </div>
+            <figure class="shot">
+              <img src="./assets/activity-detail.webp" width="664" height="406" loading="lazy" decoding="async"
+                   alt="动态页面：按时间列出检测失败、录制失败、开始录制等记录。">
+            </figure>
+          </article>
+
+          <article class="feature">
+            <div class="feature-copy">
+              <h3>分段写入，录完转 MP4</h3>
+              <p>按 TS 分段写入，断流也不丢已录部分；录完转成 MP4，失败时原文件不动。录像只存在你选的目录。</p>
+            </div>
+            <figure class="shot">
+              <img src="./assets/library-detail.webp" width="544" height="530" loading="lazy" decoding="async"
+                   alt="录像库：同一场直播的多个 TS 分段归在一组，标出第几段，下面是转好的 MP4。">
+            </figure>
+          </article>
+
+          <article class="feature feature-flip">
+            <div class="feature-copy">
+              <h3>装好就能用</h3>
+              <p>首次启动时在后台下载并校验 FFmpeg，优先国内源。五档画质、分段、代理和 Cookie 都在设置里，改完自动保存；新版本在应用内更新。</p>
+            </div>
+            <figure class="shot">
+              <img src="./assets/settings-detail.webp" width="788" height="361" loading="lazy" decoding="async"
+                   alt="设置页面的录制分组：保存目录、默认画质、录制格式、分段录制和分段时长。">
+            </figure>
+          </article>
         </div>
       </section>
 
-      <section class="section section-alt" id="platforms" aria-labelledby="platforms-title">
-        <div class="wrap split">
-          <header class="section-head">
-            <p class="kicker"><span class="num">02</span>支持平台</p>
-            <h2 id="platforms-title">一个平台，<br>一个平台地来。</h2>
-            <p class="section-lead">每个平台单独适配、单独测试。当前版本支持抖音和快手。</p>
-          </header>
-          <div class="platforms">
-            <div class="plat plat-lead">
-              <h3>抖音</h3>
-              <p class="plat-state"><span class="state state-done">已支持</span></p>
-              <p class="note">直播间链接、抖音号、<code>v.douyin.com</code> 短链和主页链接都能识别。</p>
-            </div>
-            <div class="plat plat-lead">
-              <h3>快手</h3>
-              <p class="plat-state"><span class="state state-done">已支持</span></p>
-              <p class="note">支持 <code>live.kuaishou.com/u/…</code> 直播间链接，暂不支持 <code>v.kuaishou.com</code> 分享短链。</p>
-            </div>
-            <div class="plat plat-group">
-              <h3 class="plat-group-title">暂不支持 · 之后逐个接入</h3>
-              <ul class="names"><li>虎牙</li><li>斗鱼</li><li>B 站</li><li>小红书</li><li>TikTok</li><li>Twitch</li><li>YouTube</li></ul>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section class="section" id="download" data-state="loading" aria-labelledby="download-title">
+      <section class="section section-alt" id="download" data-state="loading" aria-labelledby="download-title">
         <div class="wrap">
           <header class="section-head">
-            <p class="kicker"><span class="num">03</span>下载</p>
             <h2 id="download-title">下载录播宝</h2>
-            <p class="section-lead" id="dl-version" aria-live="polite">正在获取最新版本…</p>
+            <p id="dl-version" aria-live="polite">正在获取最新版本…</p>
           </header>
 
           <div class="dl-soon" id="dl-soon" role="status" hidden>
@@ -192,7 +139,7 @@
           <p class="dl-hint" id="dl-hint" hidden>录播宝是电脑软件，请在 Windows、Mac 或 Linux 电脑上打开本页下载。</p>
           <details class="dl-notes" id="dl-notes" hidden>
             <summary>本版更新内容</summary>
-            <p id="dl-notes-text"></p>
+            <div class="dl-notes-body" id="dl-notes-text"></div>
           </details>
 
           <div class="dl-grid">
@@ -201,7 +148,7 @@
                 <h3 id="dl-win-title">Windows</h3>
                 <span class="dl-badge" hidden>适合你的电脑</span>
               </header>
-              <p class="dl-req">Windows 10 / 11 · 64 位（x64）</p>
+              <p class="dl-req">Windows 10 / 11 · x64</p>
               <div class="dl-file" data-platform="win" data-arch="x64" data-format="exe">
                 <a class="btn btn-primary dl-btn" href="https://xiaofany.com/dl/lubobao/win?arch=x64&amp;format=exe">下载安装程序（.exe）</a>
                 <dl class="dl-meta" hidden>
@@ -210,7 +157,7 @@
                   <div class="dl-hash"><dt>SHA-256</dt><dd><code data-field="sha256"></code><button type="button" class="copy copy-sm" data-copy="">复制</button></dd></div>
                 </dl>
               </div>
-              <p class="note">首次运行时 SmartScreen 可能提示，见下方<a href="#first-run-win">首次打开</a>。</p>
+              <p class="note">首次运行可能出现 SmartScreen 提示，见<a href="#first-run-win">首次打开</a>。</p>
             </article>
 
             <article class="dl-card" id="dl-mac" data-os="mac" aria-labelledby="dl-mac-title">
@@ -218,14 +165,11 @@
                 <h3 id="dl-mac-title">macOS</h3>
                 <span class="dl-badge" hidden>适合你的电脑</span>
               </header>
-              <p class="dl-req">macOS 10.15 及以后 · Apple 芯片或 Intel 芯片</p>
-              <div class="cmd cmd-feature">
-                <p class="cmd-label">一键安装（推荐）</p>
-                <div class="cmd-box"><code id="cmd-mac">curl -fsSL https://lubobao.xiaofany.com/install.sh | sh</code><button type="button" class="copy" data-copy-target="cmd-mac">复制</button></div>
-                <p class="note">打开「终端」，粘贴后按回车。脚本自动选择芯片对应的版本，校验 SHA-256 后装进「应用程序」并去掉隔离标记，打开时不会被拦截。</p>
-              </div>
-              <p class="cmd-label">或手动下载 dmg</p>
-              <p class="note" id="mac-chip-note">不确定是哪种芯片：点屏幕左上角苹果菜单 →「关于本机」，「芯片」一栏写 Apple M1、M2 等的选 Apple 芯片；写「处理器」Intel 的选 Intel 芯片。</p>
+              <p class="dl-req">macOS 10.15 及以后 · Apple 芯片 / Intel</p>
+              <p class="cmd-label">一键安装（推荐），在「终端」里运行：</p>
+              <div class="cmd-box"><code id="cmd-mac">curl -fsSL https://lubobao.xiaofany.com/install.sh | sh</code><button type="button" class="copy" data-copy-target="cmd-mac">复制</button></div>
+              <p class="note">自动选对芯片版本，校验后装进「应用程序」，打开时不会被拦截。</p>
+              <p class="cmd-label">或下载 dmg：</p>
               <div class="dl-file" data-platform="mac" data-arch="arm64" data-format="dmg">
                 <a class="btn btn-primary dl-btn" href="https://xiaofany.com/dl/lubobao/mac?arch=arm64&amp;format=dmg">Apple 芯片（M 系列）</a>
                 <dl class="dl-meta" hidden>
@@ -242,7 +186,7 @@
                   <div class="dl-hash"><dt>SHA-256</dt><dd><code data-field="sha256"></code><button type="button" class="copy copy-sm" data-copy="">复制</button></dd></div>
                 </dl>
               </div>
-              <p class="note">手动安装的 dmg 第一次打开会被拦截，见下方<a href="#first-run-mac">首次打开</a>。</p>
+              <p class="note" id="mac-chip-note">不确定芯片：苹果菜单 →「关于本机」，写 Apple M1、M2 等的选 Apple 芯片。</p>
             </article>
 
             <article class="dl-card" id="dl-linux" data-os="linux" aria-labelledby="dl-linux-title">
@@ -271,90 +215,102 @@
             </article>
           </div>
 
-          <p class="dl-alt">安装包由 xiaofany.com 提供下载。备用下载：<a href="https://github.com/seansongx/lubobao/releases">GitHub Releases</a>（每个版本附 <code>SHA256SUMS.txt</code>）。</p>
+          <p class="dl-alt">安装包由 xiaofany.com 提供。备用下载：<a href="https://github.com/seansongx/lubobao/releases">GitHub Releases</a>（附 <code>SHA256SUMS.txt</code>）。</p>
 
           <div class="cli" id="cli" aria-labelledby="cli-title">
             <header class="cli-head">
               <h3 id="cli-title">服务器 / 命令行</h3>
-              <p><code>lubobao-cli</code> 是录播宝的无界面版本，和桌面版用同一套录制核心，适合放在 Linux 服务器、NAS 或容器里长期运行。支持 x64 和 arm64。</p>
+              <p><code>lubobao-cli</code> 是无界面版本，和桌面版用同一套录制核心，适合 Linux 服务器、NAS 和容器，支持 x64 与 arm64。</p>
             </header>
             <div class="cli-grid">
               <div class="cli-col">
                 <p class="cmd-label">一键安装</p>
                 <div class="cmd-box"><code id="cmd-cli">curl -fsSL https://lubobao.xiaofany.com/install-cli.sh | sh</code><button type="button" class="copy" data-copy-target="cmd-cli">复制</button></div>
-                <p class="note">按 CPU 架构下载、校验 SHA-256 后装到 <code>/usr/local/bin</code>；没有写权限时会提示用 sudo 重跑，或改装到 <code>~/.local/bin</code>。装好后运行 <code>lubobao-cli run</code>。</p>
-                <p class="cmd-label">手动下载</p>
-                <div class="dl-file dl-file-row" data-platform="linux" data-arch="x64" data-format="tar.gz">
-                  <a class="btn btn-ghost btn-sm dl-btn" href="https://xiaofany.com/dl/lubobao/linux?arch=x64&amp;format=tar.gz">x64 · tar.gz</a>
-                  <dl class="dl-meta" hidden>
-                    <div><dt>大小</dt><dd data-field="size"></dd></div>
-                    <div class="dl-hash"><dt>SHA-256</dt><dd><code data-field="sha256"></code><button type="button" class="copy copy-sm" data-copy="">复制</button></dd></div>
-                  </dl>
-                </div>
-                <div class="dl-file dl-file-row" data-platform="linux" data-arch="arm64" data-format="tar.gz">
-                  <a class="btn btn-ghost btn-sm dl-btn" href="https://xiaofany.com/dl/lubobao/linux?arch=arm64&amp;format=tar.gz">arm64 · tar.gz</a>
-                  <dl class="dl-meta" hidden>
-                    <div><dt>大小</dt><dd data-field="size"></dd></div>
-                    <div class="dl-hash"><dt>SHA-256</dt><dd><code data-field="sha256"></code><button type="button" class="copy copy-sm" data-copy="">复制</button></dd></div>
-                  </dl>
+                <p class="note">按架构下载、校验后装到 <code>/usr/local/bin</code>，再运行 <code>lubobao-cli run</code>。</p>
+                <div class="cli-files">
+                  <div class="dl-file dl-file-row" data-platform="linux" data-arch="x64" data-format="tar.gz">
+                    <a class="btn btn-ghost btn-sm dl-btn" href="https://xiaofany.com/dl/lubobao/linux?arch=x64&amp;format=tar.gz">x64 · tar.gz</a>
+                    <dl class="dl-meta" hidden>
+                      <div><dt>大小</dt><dd data-field="size"></dd></div>
+                      <div class="dl-hash"><dt>SHA-256</dt><dd><code data-field="sha256"></code><button type="button" class="copy copy-sm" data-copy="">复制</button></dd></div>
+                    </dl>
+                  </div>
+                  <div class="dl-file dl-file-row" data-platform="linux" data-arch="arm64" data-format="tar.gz">
+                    <a class="btn btn-ghost btn-sm dl-btn" href="https://xiaofany.com/dl/lubobao/linux?arch=arm64&amp;format=tar.gz">arm64 · tar.gz</a>
+                    <dl class="dl-meta" hidden>
+                      <div><dt>大小</dt><dd data-field="size"></dd></div>
+                      <div class="dl-hash"><dt>SHA-256</dt><dd><code data-field="sha256"></code><button type="button" class="copy copy-sm" data-copy="">复制</button></dd></div>
+                    </dl>
+                  </div>
                 </div>
               </div>
               <div class="cli-col">
-                <p class="cmd-label">Docker</p>
+                <p class="cmd-label">Docker（amd64 / arm64，内置 FFmpeg）</p>
                 <div class="cmd-box cmd-block"><pre><code id="cmd-docker">docker run -d --name lubobao --restart unless-stopped --stop-timeout 45 \
   -e TZ=Asia/Shanghai \
   -v lubobao-data:/data -v lubobao-recordings:/recordings \
   ghcr.io/seansongx/lubobao:latest
 
 docker exec lubobao lubobao-cli add https://live.douyin.com/123456</code></pre><button type="button" class="copy" data-copy-target="cmd-docker">复制</button></div>
-                <p class="note">镜像 <code>ghcr.io/seansongx/lubobao</code> 支持 amd64 和 arm64，内置已校验的 FFmpeg。停止时用 <code>docker stop -t 45</code>，给录制留出收尾时间。</p>
-                <p class="note">子命令、数据目录、systemd 服务和 Docker Compose 示例见 <a href="https://github.com/seansongx/lubobao/blob/main/docs/cli.md">命令行文档</a>。</p>
+                <p class="note">停止时用 <code>docker stop -t 45</code> 给录制留出收尾时间。更多用法见<a href="https://github.com/seansongx/lubobao/blob/main/docs/cli.md">命令行文档</a>。</p>
               </div>
             </div>
           </div>
         </div>
       </section>
 
-      <section class="section section-alt" id="first-run" aria-labelledby="first-run-title">
+      <section class="section" id="first-run" aria-labelledby="first-run-title">
         <div class="wrap">
           <header class="section-head">
-            <p class="kicker"><span class="num">04</span>首次打开</p>
             <h2 id="first-run-title">第一次打开时</h2>
-            <p class="section-lead">录播宝的安装包还没有购买代码签名证书，系统第一次打开时会提示来源未知。这是未签名软件的正常提示，按下面的步骤放行一次即可。介意的话，可以先用下载区的 SHA-256 核对文件。</p>
+            <p>安装包暂未购买代码签名证书，系统第一次打开时会提示来源未知，按下面的步骤放行一次即可。</p>
           </header>
-          <div class="guides">
-            <article class="guide" id="first-run-mac" aria-labelledby="guide-mac-title">
-              <h3 id="guide-mac-title">macOS</h3>
-              <p class="note">用一键安装命令装的不会被拦截，可以跳过这一步。手动下载 dmg 时：</p>
-              <ol class="guide-steps">
-                <li>打开 dmg，把「录播宝」拖到「应用程序」文件夹。</li>
-                <li><strong>macOS 15 及以后：</strong>第一次打开被拦截后，打开「系统设置 → 隐私与安全性」，滚到页面底部，在提到「录播宝」的地方点「仍要打开」，再输入登录密码确认。</li>
-                <li><strong>macOS 14 及更早：</strong>在「应用程序」里按住 Control 键点按「录播宝」，选「打开」，再在弹窗里点「打开」。</li>
-              </ol>
-              <figure class="shot-placeholder" aria-label="截图位置">截图待补：系统设置 → 隐私与安全性 底部的「仍要打开」按钮</figure>
-              <p class="note">提示「“录播宝”已损坏，无法打开」时，在「终端」里执行下面的命令，再重新打开：</p>
-              <div class="cmd-box"><code id="cmd-xattr">xattr -dr com.apple.quarantine /Applications/录播宝.app</code><button type="button" class="copy" data-copy-target="cmd-xattr">复制</button></div>
-              <figure class="shot-placeholder" aria-label="截图位置">截图待补：「已损坏，无法打开」提示框</figure>
-            </article>
 
-            <article class="guide" id="first-run-win" aria-labelledby="guide-win-title">
-              <h3 id="guide-win-title">Windows</h3>
-              <ol class="guide-steps">
-                <li>运行安装程序时如果出现「Windows 已保护你的电脑」，点「更多信息」。</li>
+          <details class="guide" id="first-run-win">
+            <summary>Windows：出现「Windows 已保护你的电脑」</summary>
+            <div class="guide-body">
+              <ol>
+                <li>点「更多信息」。</li>
                 <li>确认应用名称是 <code>lubobao_…_windows_x64-setup.exe</code>，再点「仍要运行」。</li>
               </ol>
-              <figure class="shot-placeholder" aria-label="截图位置">截图待补：SmartScreen 提示及「更多信息」「仍要运行」</figure>
-            </article>
+              <!-- 以后在这里放 SmartScreen 提示的真实截图（由用户提供，转成 WebP 放进 assets/），例如：
+                   <figure class="shot guide-shot"><img src="./assets/smartscreen.webp" width="…" height="…" loading="lazy" alt="…"></figure> -->
+            </div>
+          </details>
 
-            <article class="guide" id="first-run-linux" aria-labelledby="guide-linux-title">
-              <h3 id="guide-linux-title">Linux</h3>
-              <p class="note"><strong>AppImage：</strong>先加上可执行权限，再运行。</p>
+          <details class="guide" id="first-run-mac">
+            <summary>macOS：手动安装的 dmg 被拦截</summary>
+            <div class="guide-body">
+              <p>用一键安装命令装的不会被拦截。手动安装时，先把「录播宝」拖进「应用程序」，然后：</p>
+              <ul>
+                <li><strong>macOS 15 及以后：</strong>第一次打开被拦截后，到「系统设置 → 隐私与安全性」底部点「仍要打开」，输入登录密码确认。</li>
+                <li><strong>macOS 14 及更早：</strong>按住 Control 键点按「录播宝」，选「打开」，再在弹窗里点「打开」。</li>
+              </ul>
+              <p>提示「“录播宝”已损坏，无法打开」时，在「终端」里运行下面的命令后重新打开：</p>
+              <div class="cmd-box"><code id="cmd-xattr">xattr -dr com.apple.quarantine /Applications/录播宝.app</code><button type="button" class="copy" data-copy-target="cmd-xattr">复制</button></div>
+            </div>
+          </details>
+
+          <details class="guide" id="first-run-linux">
+            <summary>Linux：AppImage 和 deb</summary>
+            <div class="guide-body">
+              <p><strong>AppImage</strong> 先加上可执行权限再运行；提示缺少 FUSE 时，Ubuntu 22.04 装 <code>libfuse2</code>，24.04 装 <code>libfuse2t64</code>。</p>
               <div class="cmd-box cmd-block"><pre><code id="cmd-appimage">chmod +x lubobao_*_linux_amd64.AppImage
 ./lubobao_*_linux_amd64.AppImage</code></pre><button type="button" class="copy" data-copy-target="cmd-appimage">复制</button></div>
-              <p class="note">提示缺少 FUSE 时，Ubuntu 22.04 安装 <code>libfuse2</code>，Ubuntu 24.04 安装 <code>libfuse2t64</code>。</p>
-              <p class="note"><strong>deb：</strong>在下载目录里用 apt 安装，依赖会一并装好。</p>
+              <p><strong>deb</strong> 在下载目录里用 apt 安装，依赖会一并装好：</p>
               <div class="cmd-box"><code id="cmd-deb">sudo apt install ./lubobao_*_linux_amd64.deb</code><button type="button" class="copy" data-copy-target="cmd-deb">复制</button></div>
-            </article>
+            </div>
+          </details>
+        </div>
+      </section>
+
+      <section class="section section-alt open-source" id="open-source" aria-labelledby="oss-title">
+        <div class="wrap narrow oss-inner">
+          <h2 id="oss-title">开源，免费使用</h2>
+          <p>源代码在 GitHub 上以 MIT 许可证开源。录制行为参考了开源项目 <a href="https://github.com/ihmily/StreamCap">StreamCap</a>，界面与实现为独立重写。</p>
+          <div class="actions">
+            <a class="btn btn-ghost" href="https://github.com/seansongx/lubobao">在 GitHub 上查看</a>
+            <a class="btn btn-ghost" href="https://github.com/seansongx/lubobao/blob/main/LICENSE">MIT 许可证</a>
           </div>
         </div>
       </section>
@@ -371,8 +327,6 @@ docker exec lubobao lubobao-cli add https://live.douyin.com/123456</code></pre><
           <span>录播宝</span>
           <span class="footer-slogan">开播自动录，不用再蹲直播</span>
         </div>
-        <p>源代码托管在 <a href="https://github.com/seansongx/lubobao">GitHub</a>，<a href="https://github.com/seansongx/lubobao/blob/main/LICENSE">以 MIT 许可证开源</a>。</p>
-        <p>录制行为参考了开源项目 <a href="https://github.com/ihmily/StreamCap">StreamCap</a>，界面与实现为独立重写。</p>
         <p class="footer-beian"><a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener">鲁ICP备17049248号-1</a></p>
       </div>
     </footer>
