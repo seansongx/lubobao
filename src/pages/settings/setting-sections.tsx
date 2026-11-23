@@ -286,6 +286,7 @@ const supportedPlatforms: { key: Platform; name: string }[] = [
   { key: "kuaishou", name: "快手" },
   { key: "bilibili", name: "B站" },
   { key: "huya", name: "虎牙" },
+  { key: "douyu", name: "斗鱼" },
 ];
 
 export function NetworkSection({ ctx }: SectionProps) {
@@ -334,7 +335,7 @@ export function NetworkSection({ ctx }: SectionProps) {
       />
       <TextField
         label="走代理的平台"
-        description="用逗号分隔的平台标识。抖音、快手、虎牙是国内平台，通常不需要代理。"
+        description="用逗号分隔的平台标识。抖音、快手、B站、虎牙、斗鱼是国内平台，通常不需要代理。"
         value={platformList}
         disabled={!settings.enable_proxy}
         error={platforms.error}

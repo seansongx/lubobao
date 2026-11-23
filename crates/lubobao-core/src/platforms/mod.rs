@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod bilibili;
 pub mod douyin;
+pub mod douyu;
 #[cfg(feature = "e2e")]
 pub mod e2e;
 pub mod huya;
@@ -35,6 +36,7 @@ pub enum Platform {
     Kuaishou,
     Bilibili,
     Huya,
+    Douyu,
     /// 端到端测试用的本地直播间（feature `e2e`），发布版没有。
     #[cfg(feature = "e2e")]
     E2e,
@@ -48,6 +50,7 @@ impl Platform {
             Platform::Kuaishou => "kuaishou",
             Platform::Bilibili => "bilibili",
             Platform::Huya => "huya",
+            Platform::Douyu => "douyu",
             #[cfg(feature = "e2e")]
             Platform::E2e => "e2e",
         }
@@ -60,6 +63,7 @@ impl Platform {
             Platform::Kuaishou => "快手直播",
             Platform::Bilibili => "哔哩哔哩",
             Platform::Huya => "虎牙直播",
+            Platform::Douyu => "斗鱼直播",
             #[cfg(feature = "e2e")]
             Platform::E2e => "测试直播间",
         }
@@ -356,6 +360,7 @@ pub fn adapters() -> Vec<Box<dyn PlatformAdapter>> {
         Box::new(kuaishou::KuaishouAdapter::new()),
         Box::new(bilibili::BilibiliAdapter::new()),
         Box::new(huya::HuyaAdapter::new()),
+        Box::new(douyu::DouyuAdapter::new()),
     ];
     #[cfg(feature = "e2e")]
     list.push(Box::new(e2e::E2eAdapter));

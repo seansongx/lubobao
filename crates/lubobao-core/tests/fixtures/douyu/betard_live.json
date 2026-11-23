@@ -1,0 +1,23 @@
+{
+  "room": {
+    "room_id": 100001,
+    "show_status": 1,
+    "videoLoop": 0,
+    "show_time": 1795437295,
+    "end_time": "1831433695",
+    "nickname": "测试主播",
+    "owner_uid": 200001,
+    "room_name": "测试&nbsp;直播间 ",
+    "status": "1",
+    "cate_id": 6,
+    "second_lvl_name": "CS2",
+    "owner_name": "测试主播",
+    "up_id": "TestUpId0001",
+    "room_url": "/100001",
+    "is_multibit": "0",
+    "isVertical": 0
+  },
+  "column": {
+    "cate_name": "测试"
+  }
+}

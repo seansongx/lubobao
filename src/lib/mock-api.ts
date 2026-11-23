@@ -27,6 +27,7 @@
 //   live.kuaishou.com/u/{id}           快手直播间
 //   live.bilibili.com/{房间号}          B站直播间
 //   www.huya.com/{房间号或字母标识}       虎牙直播间（字母标识演示为房间号 660000）
+//   www.douyu.com/{房间号}，topic/…?rid={房间号}  斗鱼直播间
 //   路径含 login / timeout / busy / parse  分别返回 auth_required / network / rate_limited / parse
 //   其他域名                            unsupported_platform；无法解析的文本为 invalid_url
 //
@@ -170,6 +171,7 @@ const mockPlatforms: Record<Platform, { name: string; roomUrl: (roomId: string) 
   kuaishou: { name: "快手直播", roomUrl: (roomId) => `https://live.kuaishou.com/u/${roomId}` },
   bilibili: { name: "哔哩哔哩", roomUrl: (roomId) => `https://live.bilibili.com/${roomId}` },
   huya: { name: "虎牙直播", roomUrl: (roomId) => `https://www.huya.com/${roomId}` },
+  douyu: { name: "斗鱼直播", roomUrl: (roomId) => `https://www.douyu.com/${roomId}` },
 };
 
 function snapshot(id: TaskId, seed: MockSeed, createdAt: number): TaskSnapshot {
@@ -184,7 +186,9 @@ function snapshot(id: TaskId, seed: MockSeed, createdAt: number): TaskSnapshot {
     platform,
     platformName: mockPlatforms[platform].name,
     roomId: seed.roomId,
-    anchorId: seed.anchorId ?? (platform === "douyin" ? `MS4wLjABAAAA-mock-${id}` : String(100_000_000 + id)),
+    anchorId:
+      seed.anchorId ??
+      (platform === "douyin" ? `MS4wLjABAAAA-mock-${id}` : String((platform === "douyu" ? 10_000_000 : 100_000_000) + id)),
     anchorName: seed.anchorName,
     liveUrl: seed.liveUrl === undefined ? roomUrl : seed.liveUrl,
     quality: seed.quality ?? "OD",
@@ -266,6 +270,29 @@ function seedTasks(now: number): TaskSnapshot[] {
       anchorName: "像素工坊",
       roomId: "7734200",
       platform: "bilibili",
+      monitoring: "enabled",
+      quality: "UHD",
+      live: { state: "offline", checkedAt: now - 4 * minute },
+      record: { state: "idle" },
+    },
+    {
+      anchorName: "绝地老炮",
+      roomId: "520520",
+      platform: "douyu",
+      monitoring: "enabled",
+      live: { state: "live", checkedAt: now - 30_000, title: "四排上分" },
+      record: {
+        state: "recording",
+        filePath: "D:\\Records\\斗鱼直播\\绝地老炮\\绝地老炮_2026-11-22_20-40-12_000.ts",
+        startedAt: now - 47 * minute,
+        bytesWritten: 1_052_000_000,
+        bitrateKbps: 3100,
+      },
+    },
+    {
+      anchorName: "赛事回放站",
+      roomId: "288016",
+      platform: "douyu",
       monitoring: "enabled",
       quality: "UHD",
       live: { state: "offline", checkedAt: now - 4 * minute },
@@ -470,6 +497,11 @@ function mockLibraryTree(): MockDir {
         "夜听电台 第 12 期_2026-11-21_23-40-00_001.ts": [640 * MB, 1_270],
       },
     },
+    斗鱼直播: {
+      绝地老炮: {
+        ...segments("绝地老炮_2026-11-22_20-40-12", 2, 47, 760 * MB),
+      },
+    },
     空目录: {},
     "手动转存 (旧).mp4": [3.4 * GB, 20_000],
   };
@@ -667,7 +699,7 @@ function normalizeUrl(url: string): string {
 const DEMO_ROOM = "745964462470";
 const DEMO_ANCHOR = `MS4wLjABAAAA-mock-anchor-${DEMO_ROOM}`;
 
-/** 模拟 platforms::resolve：认抖音、快手和B站、虎牙，按链接内容返回各类错误。 */
+/** 模拟 platforms::resolve：认抖音、快手和B站、虎牙、斗鱼，按链接内容返回各类错误。 */
 function resolveMock(input: string, tasks: TaskSnapshot[]): ResolvedRoom | CommandError {
   const url = input.trim();
   if (!url) return { kind: "invalid_input", message: "请输入直播间链接" };
@@ -688,7 +720,9 @@ function resolveMock(input: string, tasks: TaskSnapshot[]): ResolvedRoom | Comma
         ? "bilibili"
       : host === "huya.com" || host.endsWith(".huya.com")
         ? "huya"
-        : null;
+        : host.endsWith("douyu.com")
+          ? "douyu"
+          : null;
   if (!platform) return { kind: "unsupported_platform", message: `暂不支持 ${host} 的直播间` };
   if (/login/i.test(path)) return { kind: "auth_required", message: "该直播间需要登录后观看，请填写 Cookie" };
   if (/timeout|network/i.test(path)) return { kind: "network", message: `连接 ${host} 超时` };
@@ -735,6 +769,19 @@ function resolveMock(input: string, tasks: TaskSnapshot[]): ResolvedRoom | Comma
       anchorId: task?.anchorId ?? `uid-${roomId}`,
       anchorName: task?.anchorName ?? `B站主播 ${roomId}`,
       liveUrl: mockPlatforms.bilibili.roomUrl(roomId),
+    };
+  }
+  if (platform === "douyu") {
+    const match = /^\/(\d+)\/?$/.exec(path);
+    const roomId = match?.[1] ?? parsed.searchParams.get("rid");
+    if (!roomId || !/^\d+$/.test(roomId)) return { kind: "invalid_url", message: `无法从链接中找到斗鱼房间号：${url}` };
+    const task = known(roomId);
+    return {
+      ...base,
+      roomId,
+      anchorId: task?.anchorId ?? `dy-${roomId}`,
+      anchorName: task?.anchorName ?? `斗鱼主播 ${roomId}`,
+      liveUrl: mockPlatforms.douyu.roomUrl(roomId),
     };
   }
   if (host === "v.douyin.com") {
