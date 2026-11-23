@@ -181,29 +181,24 @@
 }
 
 /*
- * 焦点环宽度按平台调整。这是「不改 src/components/ui/」规则里唯一允许的样式覆盖。
+ * 焦点样式：三个平台统一，聚焦时只变边框颜色。这是「不改 src/components/ui/」规则里唯一允许的样式覆盖。
  *
- * Nova 控件获得焦点时：边框变成 --ring，再加 ring-3（3px、50% 不透明度的 --ring 光晕），叠在一起显得很粗。
- * Tailwind v4 的 ring-* 工具类只设置 --tw-ring-shadow，box-shadow 再引用它；下面是不分层的规则，
- * 优先于 utilities 层，只覆盖这个变量、只在 :focus-visible 时生效，非焦点状态和 aria-invalid 的红色光晕不受影响。
- * 只列出 Nova 里真正带 focus-visible:ring 的控件：对话框、菜单、下拉列表这些浮层用 ring-1 当外框，
- * 拿到焦点时也是 :focus-visible（例如键盘打开下拉后鼠标移出），不能被换成强调色粗环；shadow-* 工具类也引用
- * 这个变量，所以不用 [data-slot] 这种宽泛的写法。
- * - Windows（Fluent）：输入框没有外光晕，只有底部 2px 强调色（1px 边框 + 1px 内阴影）；其他控件是 1px 间隙
- *   加 2px 不透明强调色细环，在 Teal 主按钮上也看得清。
- * - Linux（Adwaita）：约 2px、半透明的强调色。
- * - macOS：系统焦点环本来就是约 3px 的半透明光晕，保持 Nova 默认。
- * 鼠标点击文本框时浏览器也会把它算作 :focus-visible（输入框的默认行为），所以输入框点击后也有焦点边框；
- * 按钮、开关、下拉框只在键盘操作时出现焦点环。
+ * Nova 控件获得焦点时：边框变成 --ring（focus-visible:border-ring），再加 ring-3（3px、50% 不透明度的 --ring
+ * 光晕），叠在一起显得很粗。Tailwind v4 的 ring-* 工具类只设置 --tw-ring-shadow，box-shadow 再引用它；下面是
+ * 不分层的规则，优先于 utilities 层，只覆盖这个变量、只在 :focus-visible 时生效。
+ * - 文本框和下拉框：去掉光晕，只保留 Teal 边框。鼠标点击文本框时浏览器也会把它算作 :focus-visible
+ *   （输入框的默认行为），所以点击后也是 Teal 边框。
+ * - 按钮、开关、复选框、toggle、badge：实心按钮和选中的开关、复选框本身就是 Teal，只改边框看不出焦点，
+ *   保留一圈 2px 实色 Teal 细环。它们只在键盘操作时 :focus-visible，鼠标点击不出现。
+ * 只列出 Nova 里真正带 focus-visible:ring 的控件：对话框、菜单、下拉列表这些浮层用 ring-1 当外框，拿到焦点时
+ * 也是 :focus-visible（例如键盘打开下拉后鼠标移出），不能被换掉；shadow-* 工具类也引用这个变量，
+ * 所以不用 [data-slot] 这种宽泛的写法。aria-invalid 的红色效果不受影响。
  */
-:root[data-platform="windows"] :is([data-slot="button"], [data-slot="input"], [data-slot="textarea"], [data-slot="select-trigger"], [data-slot="switch"], [data-slot="checkbox"], [data-slot="toggle"], [data-slot="toggle-group-item"], [data-slot="badge"]):focus-visible:not([aria-invalid="true"]) {
-  --tw-ring-shadow: 0 0 0 1px var(--background), 0 0 0 3px var(--ring);
+:is([data-slot="input"], [data-slot="textarea"], [data-slot="select-trigger"]):focus-visible:not([aria-invalid="true"]) {
+  --tw-ring-shadow: 0 0 #0000;
 }
-:root[data-platform="windows"] :is([data-slot="input"], [data-slot="textarea"]):focus-visible:not([aria-invalid="true"]) {
-  --tw-ring-shadow: inset 0 -1px 0 0 var(--ring);
-}
-:root[data-platform="linux"] :is([data-slot="button"], [data-slot="input"], [data-slot="textarea"], [data-slot="select-trigger"], [data-slot="switch"], [data-slot="checkbox"], [data-slot="toggle"], [data-slot="toggle-group-item"], [data-slot="badge"]):focus-visible:not([aria-invalid="true"]) {
-  --tw-ring-shadow: 0 0 0 2px color-mix(in srgb, var(--ring) 55%, transparent);
+:is([data-slot="button"], [data-slot="switch"], [data-slot="checkbox"], [data-slot="toggle"], [data-slot="toggle-group-item"], [data-slot="badge"]):focus-visible:not([aria-invalid="true"]) {
+  --tw-ring-shadow: 0 0 0 2px var(--ring);
 }
 
 /* 选中文字的颜色用 Teal */
