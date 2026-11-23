@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use rusqlite::{Connection, params, params_from_iter, types::Value as SqlValue};
+use rusqlite::{Connection, OpenFlags, params, params_from_iter, types::Value as SqlValue};
 use serde_json::{Map, Value};
 
 use super::activity::{
@@ -87,6 +87,32 @@ impl Store {
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
         let mut store = Store { conn };
         store.migrate()?;
+        Ok(store)
+    }
+
+    /// 只读打开，不建文件、不迁移、不写入。文件不存在时返回一个空的内存库；数据库版本与
+    /// 程序不一致（需要迁移）时报错。命令行程序在 `run` 没有运行时给只读命令用。
+    pub fn open_read_only(path: &Path) -> StoreResult<Store> {
+        if !path.exists() {
+            let mut store = Store {
+                conn: Connection::open_in_memory()?,
+            };
+            store.migrate()?;
+            return Ok(store);
+        }
+        let conn = Connection::open_with_flags(
+            path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )?;
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
+        let store = Store { conn };
+        let version = store.schema_version()?;
+        if version != MIGRATIONS.len() {
+            return Err(StoreError(format!(
+                "数据库版本 {version} 与当前程序的 {} 不一致，需要先以读写方式打开一次完成升级",
+                MIGRATIONS.len()
+            )));
+        }
         Ok(store)
     }
 

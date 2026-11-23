@@ -1,5 +1,5 @@
 // 发布前检查版本号是否一致：node scripts/check-version.mjs [v<x.y.z>]
-// 比较 Cargo workspace（[workspace.package]）、src-tauri/tauri.conf.json、package.json 和
+// 比较 Cargo workspace（[workspace.package]）、src-tauri/tauri.conf.json、package.json、package-lock.json 和
 // Cargo.lock 里录播宝各 crate 的版本；给出标签时还要求标签为 v<版本>。
 import { readFileSync } from "node:fs";
 
@@ -22,10 +22,19 @@ function lockVersions() {
   return found;
 }
 
+function lockfileVersions() {
+  const lock = JSON.parse(readFileSync("package-lock.json", "utf8"));
+  return {
+    "package-lock.json version": lock.version,
+    'package-lock.json packages[""].version': lock.packages?.[""]?.version ?? "（缺失）",
+  };
+}
+
 const versions = {
   "Cargo.toml [workspace.package]": workspaceVersion(),
   "src-tauri/tauri.conf.json": JSON.parse(readFileSync("src-tauri/tauri.conf.json", "utf8")).version,
   "package.json": JSON.parse(readFileSync("package.json", "utf8")).version,
+  ...lockfileVersions(),
   ...lockVersions(),
 };
 

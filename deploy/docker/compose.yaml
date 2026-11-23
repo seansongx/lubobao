@@ -13,8 +13,9 @@ services:
     volumes:
       - lubobao-data:/data
       - lubobao-recordings:/recordings
-      # 想把录像放在宿主机目录时改成下面这样，并先执行
-      # sudo mkdir -p ./recordings && sudo chown 65532:65532 ./recordings
+      # 想把数据或录像放在宿主机目录时改成下面这样，并先执行
+      # sudo mkdir -p ./data ./recordings && sudo chown 65532:65532 ./data ./recordings
+      # - ./data:/data
       # - ./recordings:/recordings
 
 volumes:

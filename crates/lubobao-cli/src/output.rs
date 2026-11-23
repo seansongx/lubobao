@@ -1,11 +1,40 @@
 //! 子命令的输出：结果写到 stdout，错误写到 stderr。`--json` 时输出原始 JSON。
 
+use std::io::Write;
 use std::process::ExitCode;
 
 use chrono::{Local, TimeZone};
 use serde_json::Value;
 
 use crate::protocol::{Failure, Request};
+
+/// 写一行到 stdout。下游已关闭（例如 `lubobao-cli list | head`）时安静地退出，不报错。
+fn emit(args: std::fmt::Arguments<'_>, newline: bool) {
+    let mut stdout = std::io::stdout().lock();
+    let result = stdout.write_fmt(args).and_then(|()| {
+        if newline {
+            stdout.write_all(b"\n")
+        } else {
+            Ok(())
+        }
+    });
+    if let Err(error) = result.and_then(|()| stdout.flush()) {
+        if error.kind() == std::io::ErrorKind::BrokenPipe {
+            std::process::exit(0);
+        }
+        eprintln!("无法写出结果：{error}");
+        std::process::exit(1);
+    }
+}
+
+macro_rules! outln {
+    () => { emit(format_args!(""), true) };
+    ($($arg:tt)*) => { emit(format_args!($($arg)*), true) };
+}
+
+macro_rules! out {
+    ($($arg:tt)*) => { emit(format_args!($($arg)*), false) };
+}
 
 fn text<'a>(value: &'a Value, key: &str) -> &'a str {
     value.get(key).and_then(Value::as_str).unwrap_or("")
@@ -40,7 +69,7 @@ fn print_task(task: &Value) {
     if task.get("notifyOnly").and_then(Value::as_bool) == Some(true) {
         flags.push_str(" 仅通知");
     }
-    println!(
+    outln!(
         "{id:>4}  {display:<4}  {:<6}  {:<16}  {:<3}{flags}  {}",
         text(task, "platformName"),
         text(task, "anchorName"),
@@ -51,20 +80,20 @@ fn print_task(task: &Value) {
     if let Some(path) = record.get("filePath").and_then(Value::as_str)
         && matches!(text(&record, "state"), "recording" | "finishing")
     {
-        println!("      正在写入 {path}");
+        outln!("      正在写入 {path}");
     }
     if let Some(reason) = task.get("displayReason").and_then(Value::as_str) {
-        println!("      {reason}");
+        outln!("      {reason}");
     }
 }
 
 fn print_tasks(list: &Value) {
     let tasks = list.as_array().cloned().unwrap_or_default();
     if tasks.is_empty() {
-        println!("还没有直播间，用 `lubobao-cli add <链接>` 添加");
+        outln!("还没有直播间，用 `lubobao-cli add <链接>` 添加");
         return;
     }
-    println!("  id  状态      平台    主播              画质  链接");
+    outln!("  id  状态      平台    主播              画质  链接");
     for task in &tasks {
         print_task(task);
     }
@@ -72,8 +101,8 @@ fn print_tasks(list: &Value) {
 
 fn print_value(value: &Value) {
     match value {
-        Value::String(text) => println!("{text}"),
-        other => println!("{other}"),
+        Value::String(text) => outln!("{text}"),
+        other => outln!("{other}"),
     }
 }
 
@@ -92,18 +121,18 @@ fn print_ffmpeg(value: &Value) {
             if let Some(error) = value.get("installError").and_then(Value::as_str) {
                 line.push_str(&format!("，新版本安装失败：{error}"));
             }
-            println!("{line}");
+            outln!("{line}");
         }
         "external" => match value.get("error").and_then(Value::as_str) {
-            Some(error) => println!("指定的 FFmpeg 无法运行（{}）：{error}", text(value, "path")),
-            None => println!(
+            Some(error) => outln!("指定的 FFmpeg 无法运行（{}）：{error}", text(value, "path")),
+            None => outln!(
                 "使用指定的 FFmpeg：{}（{}）",
                 text(value, "ffmpegVersion"),
                 text(value, "path")
             ),
         },
         "notInstalled" => {
-            println!("FFmpeg 未安装，运行 `lubobao-cli ffmpeg install` 或启动 run 时自动下载")
+            outln!("FFmpeg 未安装，运行 `lubobao-cli ffmpeg install` 或启动 run 时自动下载")
         }
         "downloading" => {
             let downloaded = value.get("downloaded").and_then(Value::as_u64).unwrap_or(0);
@@ -112,17 +141,17 @@ fn print_ffmpeg(value: &Value) {
                 .and_then(Value::as_u64)
                 .unwrap_or(0)
                 .max(1);
-            println!(
+            outln!(
                 "FFmpeg 正在从 {} 下载：{}%",
                 text(value, "source"),
                 downloaded * 100 / total
             );
         }
-        "failed" => println!("FFmpeg 不可用：{}", text(value, "reason")),
-        "checking" => println!("FFmpeg 正在检查"),
-        "verifying" => println!("FFmpeg 正在校验"),
-        "waiting" => println!("FFmpeg 正在由另一个进程安装"),
-        _ => println!("{value}"),
+        "failed" => outln!("FFmpeg 不可用：{}", text(value, "reason")),
+        "checking" => outln!("FFmpeg 正在检查"),
+        "verifying" => outln!("FFmpeg 正在校验"),
+        "waiting" => outln!("FFmpeg 正在由另一个进程安装"),
+        _ => outln!("{value}"),
     }
 }
 
@@ -135,17 +164,17 @@ fn print_status(value: &Value) {
             .and_then(Value::as_i64)
             .map(time_of)
             .unwrap_or_default();
-        println!("run：运行中（pid {pid}，{since} 启动）");
+        outln!("run：运行中（pid {pid}，{since} 启动）");
     } else {
-        println!("run：未运行");
+        outln!("run：未运行");
     }
-    println!("数据目录：{}", text(value, "dataDir"));
-    println!("录像目录：{}", text(value, "saveDir"));
-    print!("FFmpeg：");
+    outln!("数据目录：{}", text(value, "dataDir"));
+    outln!("录像目录：{}", text(value, "saveDir"));
+    out!("FFmpeg：");
     if let Some(ffmpeg) = value.get("ffmpeg") {
         print_ffmpeg(ffmpeg);
     } else {
-        println!();
+        outln!();
     }
     if let Some(scheduler) = value.get("scheduler").filter(|v| !v.is_null()) {
         let recording = scheduler
@@ -161,7 +190,7 @@ fn print_status(value: &Value) {
             .and_then(Value::as_i64)
             .map(time_of)
             .unwrap_or_else(|| "—".into());
-        println!("录制中：{recording}  检测中：{checking}  下次检测：{next}");
+        outln!("录制中：{recording}  检测中：{checking}  下次检测：{next}");
     }
     let tasks = value.get("tasks").cloned().unwrap_or(Value::Null);
     let total = tasks.get("total").and_then(Value::as_u64).unwrap_or(0);
@@ -172,9 +201,9 @@ fn print_status(value: &Value) {
         }
     }
     if parts.is_empty() {
-        println!("直播间：{total}");
+        outln!("直播间：{total}");
     } else {
-        println!("直播间：{total}（{}）", parts.join("，"));
+        outln!("直播间：{total}（{}）", parts.join("，"));
     }
 }
 
@@ -182,7 +211,7 @@ fn print_mutation(value: &Value) {
     match text(value, "result") {
         "added" => {
             let task = value.get("task").cloned().unwrap_or(Value::Null);
-            println!(
+            outln!(
                 "已添加 #{}：{} {}",
                 task.get("id").and_then(Value::as_i64).unwrap_or_default(),
                 text(&task, "platformName"),
@@ -201,31 +230,37 @@ fn print_mutation(value: &Value) {
                         .collect()
                 })
                 .unwrap_or_default();
-            println!(
+            outln!(
                 "{} {} 已在列表中（{}），确认仍要添加请加 --force",
                 text(&candidate, "platformName"),
                 text(&candidate, "anchorName"),
                 ids.join("、")
             );
         }
-        _ => println!("{value}"),
+        _ => outln!("{value}"),
     }
 }
 
 fn print_settings(value: &Value) {
     if let Value::Object(map) = value {
         for (key, value) in map {
-            println!("{key} = {value}");
+            outln!("{key} = {value}");
         }
+    }
+}
+
+/// 退出码：1 执行失败，2 参数或设置值无效，3 需要 `run` 但它没有运行。
+pub fn exit_code_for(kind: &str) -> u8 {
+    match kind {
+        "not_running" => 3,
+        "invalid_input" => 2,
+        _ => 1,
     }
 }
 
 fn print_failure(failure: &Failure) -> ExitCode {
     eprintln!("错误：{}", failure.message);
-    match failure.kind.as_str() {
-        "not_running" => ExitCode::from(3),
-        _ => ExitCode::FAILURE,
-    }
+    ExitCode::from(exit_code_for(&failure.kind))
 }
 
 pub fn print(request: &Request, json: bool, result: Result<Value, Failure>) -> ExitCode {
@@ -233,17 +268,23 @@ pub fn print(request: &Request, json: bool, result: Result<Value, Failure>) -> E
         Ok(value) => value,
         Err(failure) => return print_failure(&failure),
     };
+    // 重复添加没有写入，与不加 --json 时一样按失败退出。
+    let duplicate = matches!(request, Request::Add { .. }) && text(&value, "result") == "duplicate";
     if json {
-        println!(
+        outln!(
             "{}",
             serde_json::to_string_pretty(&value).unwrap_or_default()
         );
-        return ExitCode::SUCCESS;
+        return if duplicate {
+            ExitCode::FAILURE
+        } else {
+            ExitCode::SUCCESS
+        };
     }
     match request {
         Request::Add { .. } => {
             print_mutation(&value);
-            if text(&value, "result") == "duplicate" {
+            if duplicate {
                 return ExitCode::FAILURE;
             }
         }
@@ -255,15 +296,15 @@ pub fn print(request: &Request, json: bool, result: Result<Value, Failure>) -> E
             } else {
                 "暂停监控"
             };
-            println!("已{action} {count} 个直播间");
+            outln!("已{action} {count} 个直播间");
         }
         Request::Remove { .. } => {
             let count = value.as_array().map(Vec::len).unwrap_or(0);
-            println!("已删除 {count} 个直播间");
+            outln!("已删除 {count} 个直播间");
         }
         Request::Stop { .. } => {
             let tasks = value.as_array().cloned().unwrap_or_default();
-            println!("已请求停止录制，本次直播不再自动录制：");
+            outln!("已请求停止录制，本次直播不再自动录制：");
             for task in &tasks {
                 print_task(task);
             }
@@ -273,7 +314,20 @@ pub fn print(request: &Request, json: bool, result: Result<Value, Failure>) -> E
         Request::ConfigGet { .. } => print_value(&value),
         Request::ConfigSet { .. } => print_settings(&value),
         Request::FfmpegStatus | Request::FfmpegInstall => print_ffmpeg(&value),
-        Request::Shutdown => println!("run 正在收尾并退出"),
+        Request::Shutdown => outln!("run 正在收尾并退出"),
     }
     ExitCode::SUCCESS
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn exit_codes_match_the_documentation() {
+        assert_eq!(exit_code_for("not_running"), 3);
+        assert_eq!(exit_code_for("invalid_input"), 2);
+        assert_eq!(exit_code_for("recording_active"), 1);
+        assert_eq!(exit_code_for("network"), 1);
+    }
 }

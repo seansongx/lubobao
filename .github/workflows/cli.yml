@@ -2,7 +2,8 @@ name: CLI
 
 # Linux 命令行（musl 静态链接，x64 和 arm64）与 Docker 镜像。
 # - 推送分支、拉取请求、手动运行：构建、端到端测试、构建镜像并在镜像里跑端到端测试，不推送镜像。
-# - 由 release.yml 在推送 v* 标签时调用（publish-image: true）：另外把多架构镜像推送到 GHCR。
+# - 由 release.yml 在推送 v* 标签时调用（publish-image: true）：版本检查通过后，另外把多架构镜像
+#   以 `<版本>` 标签推送到 GHCR。`latest` 在人工发布 Release 后由 docker-latest.yml 加上。
 on:
   push:
     branches: ["**"]
@@ -48,7 +49,7 @@ jobs:
     env:
       TARGET: ${{ matrix.target }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       # rusqlite（bundled SQLite）和 aws-lc-sys（rustls）要编译 C 代码，用 musl-gcc。
       # musl-gcc 不搜索 /usr/include，把 Linux 内核头文件链接进 musl 的头文件目录。
@@ -77,12 +78,13 @@ jobs:
           version="$(cargo metadata --no-deps --format-version 1 | node -p 'JSON.parse(require("fs").readFileSync(0)).packages.find(p => p.name === "lubobao-cli").version')"
           echo "VERSION=$version" >> "$GITHUB_ENV"
 
+      # release-cli 与 release 相同，但 panic = "unwind"：单个任务出错不会中止整个进程。
       - name: Build release binary
-        run: cargo build --release --locked -p lubobao-cli --target "$TARGET"
+        run: cargo build --profile release-cli --locked -p lubobao-cli --target "$TARGET"
 
       - name: Check release binary
         run: |
-          bin="target/$TARGET/release/lubobao-cli"
+          bin="target/$TARGET/release-cli/lubobao-cli"
           file "$bin"
           file "$bin" | grep -Eq 'statically linked|static-pie linked' || { echo "::error::不是静态链接"; exit 1; }
           # 测试用平台适配器只在 feature e2e 下编译，发布版里不能有。
@@ -95,7 +97,7 @@ jobs:
       # 用发布版自己下载 FFmpeg：验证 musl 上 rustls 能读到系统证书，也给后面的测试用。
       - name: Install FFmpeg with the CLI
         run: |
-          bin="target/$TARGET/release/lubobao-cli"
+          bin="target/$TARGET/release-cli/lubobao-cli"
           data="$RUNNER_TEMP/cli-data"
           "$bin" --data-dir "$data" ffmpeg install
           "$bin" --data-dir "$data" ffmpeg status
@@ -111,7 +113,7 @@ jobs:
           name="lubobao-cli_${VERSION}_linux_${{ matrix.arch }}"
           stage="$RUNNER_TEMP/$name"
           mkdir -p "$stage" "$RUNNER_TEMP/dist"
-          cp "target/$TARGET/release/lubobao-cli" "$stage/"
+          cp "target/$TARGET/release-cli/lubobao-cli" "$stage/"
           cp LICENSE THIRD_PARTY_NOTICES.md "$stage/"
           cp docs/cli.md "$stage/README.md"
           cp deploy/systemd/lubobao.service "$stage/"
@@ -128,14 +130,14 @@ jobs:
           cp "target/$TARGET/debug/lubobao-cli" "$RUNNER_TEMP/e2e/lubobao-cli"
           tar -C "$RUNNER_TEMP/e2e" -czf "$RUNNER_TEMP/e2e-${{ matrix.arch }}.tar.gz" .
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: cli-linux-${{ matrix.arch }}
           path: ${{ runner.temp }}/dist/*.tar.gz
           if-no-files-found: error
           compression-level: 0
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: cli-e2e-${{ matrix.arch }}
           path: ${{ runner.temp }}/e2e-${{ matrix.arch }}.tar.gz
@@ -160,9 +162,9 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: cli-*-${{ matrix.arch }}
           path: artifacts
@@ -202,6 +204,19 @@ jobs:
           push: false
           tags: lubobao:e2e
 
+      # 内置的 FFmpeg 要能在镜像里直接运行（动态链接 glibc）。
+      - name: FFmpeg runs in image
+        run: |
+          docker run --rm --entrypoint /opt/ffmpeg/ffmpeg lubobao:ci -hide_banner -version | head -n 3
+          docker run --rm --entrypoint /opt/ffmpeg/ffmpeg lubobao:ci -hide_banner -f lavfi -i testsrc=duration=1:size=64x64 -c:v libx264 -f null -
+
+      # 端到端测试只连 127.0.0.1；另外在镜像里真实访问一次 HTTPS（npmmirror），验证 DNS 和
+      # CA 证书可用。LUBOBAO_FFMPEG 设为空即不用内置的 FFmpeg，改为自动下载。
+      - name: HTTPS from image
+        run: |
+          docker run --rm -e LUBOBAO_FFMPEG= lubobao:ci ffmpeg install
+          docker run --rm -e LUBOBAO_FFMPEG= lubobao:ci ffmpeg status --json
+
       - name: End-to-end test in image
         run: docker run --rm lubobao:e2e
 
@@ -239,7 +254,7 @@ jobs:
 
   publish-image:
     name: publish image
-    if: inputs.publish-image
+    if: inputs.publish-image && startsWith(github.ref, 'refs/tags/v')
     needs: [build, docker]
     runs-on: ubuntu-24.04
     permissions:
@@ -249,9 +264,9 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: cli-linux-*
           path: artifacts
@@ -269,13 +284,15 @@ jobs:
           cp deploy/docker/Dockerfile deploy/docker/fetch-ffmpeg.mjs "$ctx/"
           cp crates/lubobao-core/src/ffmpeg/manifest.json "$ctx/"
           version="$(ls artifacts/lubobao-cli_*_linux_x64.tar.gz | sed -E 's/.*lubobao-cli_(.*)_linux_x64\.tar\.gz/\1/')"
+          # 只为与版本号一致的 v* 标签推送；latest 等人工发布 Release 后再加（docker-latest.yml）。
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::标签 $GITHUB_REF_NAME 与 lubobao-cli 版本 $version 不一致，不推送镜像"
+            exit 1
+          fi
           image="ghcr.io/${GITHUB_REPOSITORY,,}"
-          tags="$image:$version"
-          # 预发布版本（带 -）不更新 latest。
-          case "$version" in *-*) ;; *) tags="$tags,$image:latest" ;; esac
           echo "CTX=$ctx" >> "$GITHUB_ENV"
-          echo "TAGS=$tags" >> "$GITHUB_ENV"
-          echo "镜像标签：$tags"
+          echo "TAGS=$image:$version" >> "$GITHUB_ENV"
+          echo "镜像标签：$image:$version"
 
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
@@ -299,5 +316,5 @@ jobs:
           {
             echo "## Docker 镜像"
             echo
-            for tag in ${TAGS//,/ }; do echo "- \`$tag\`"; done
+            echo "- \`$TAGS\`（\`latest\` 在发布 Release 后加上）"
           } >> "$GITHUB_STEP_SUMMARY"

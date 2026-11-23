@@ -2,7 +2,7 @@
 
 `lubobao-cli` 是录播宝的无界面版本，适合放在没有图形环境的 Linux 服务器、NAS 或容器里长期运行。它和桌面端用同一套核心（平台解析、调度、录制、录后转 MP4），设置项的键名、默认值和校验规则也完全相同，只是没有窗口、托盘和系统通知：开播、下播、录制开始和结束、需处理等事件都写进日志。
 
-- Linux（x64、arm64）：静态链接的单个可执行文件，不依赖 glibc 版本、GTK 或 WebKit。
+- Linux（x64、arm64）：静态链接的单个可执行文件，本身不依赖 glibc 版本、GTK 或 WebKit。自动下载的 FFmpeg（来自 BtbN 的构建）需要 glibc 2.28 及以上（Debian 10、Ubuntu 18.10、RHEL/Rocky 8 起）；Alpine（musl）、CentOS 7 等系统请装好系统的 ffmpeg，用 `--ffmpeg` 指定。
 - Docker：`ghcr.io/seansongx/lubobao`，amd64、arm64 多架构，内置已校验的 FFmpeg。
 - Windows、macOS 也能运行，主要用于开发和测试；桌面用户请用安装包。
 
@@ -31,7 +31,9 @@ lubobao-cli ffmpeg install
 lubobao-cli ffmpeg status
 ```
 
-想用系统里已有的 ffmpeg，用 `--ffmpeg <路径>` 或环境变量 `LUBOBAO_FFMPEG` 指定，此时不再下载：
+自动下载失败时，`run` 会在 1、5、15 分钟后重试，之后每 30 分钟一次，每次都写一行日志；也可以随时手动 `lubobao-cli ffmpeg install`。
+
+自动下载的 FFmpeg 需要 glibc 2.28 及以上。Alpine、CentOS 7 这类系统上请用包管理器装 ffmpeg（例如 `apk add ffmpeg`），再用 `--ffmpeg <路径>` 或环境变量 `LUBOBAO_FFMPEG` 指定，此时不再下载（设为空值等于没设置）：
 
 ```sh
 LUBOBAO_FFMPEG=/usr/bin/ffmpeg lubobao-cli run
@@ -52,7 +54,9 @@ lubobao-cli status
 
 `run` 运行时，其他子命令通过本地控制通道交给它执行，立刻生效。`run` 没有运行时，修改类命令（`add`、`pause`、`resume`、`remove`、`config set`）直接写数据库，下次 `run` 启动时生效；`stop`、`shutdown` 必须有 `run` 在运行，否则提示并以退出码 3 结束。
 
-按 Ctrl+C（或发送 SIGTERM）后，`run` 停止所有录制、等 FFmpeg 写完文件尾（最长约 30 秒）再退出，录好的文件可以直接播放。收尾期间再按一次 Ctrl+C 会立即退出。
+按 Ctrl+C（或发送 SIGTERM、SIGHUP）后，`run` 停止所有录制、等 FFmpeg 写完文件尾（最长约 30 秒）再退出，录好的文件可以直接播放。收尾期间再按一次 Ctrl+C 会立即退出。Windows 上直接关闭控制台窗口时，系统只给约 5 秒，收尾可能来不及，请先按 Ctrl+C 或运行 `lubobao-cli shutdown`。
+
+`run` 没有运行时，只读命令（`list`、`status`、`config list`、`config get`、`ffmpeg status`）以只读方式打开数据库，不会改动任何文件；`add` 先联网解析链接，再写入数据库。
 
 ## 数据目录与录像目录
 
@@ -62,7 +66,14 @@ lubobao-cli status
 | macOS | `~/Library/Application Support/lubobao-cli` |
 | Windows | `%LOCALAPPDATA%\lubobao-cli` |
 
-用 `--data-dir <目录>` 或 `LUBOBAO_DATA_DIR` 覆盖。数据目录里有任务数据库 `lubobao.db`、FFmpeg 组件、实例锁 `run.lock` 和控制通道（Linux、macOS 上是权限为 0600 的 `control.sock`；Windows 上是按数据目录命名的命名管道）。命令行和桌面端不共用数据目录，各自的直播间列表互不影响。
+用 `--data-dir <目录>` 或 `LUBOBAO_DATA_DIR` 覆盖。数据目录里有任务数据库 `lubobao.db`、FFmpeg 组件、实例锁 `run.lock` 和控制通道。`run` 启动时把数据目录权限收紧为 0700（里面有 Cookie 设置和控制通道）。命令行和桌面端不共用数据目录，各自的直播间列表互不影响。
+
+控制通道：
+
+- Linux、macOS：数据目录里权限为 0600 的 `control.sock`。数据目录路径太长（超过约 100 字节），或者数据目录放在不支持 Unix socket 的网络盘上（NAS 挂载的 CIFS/SMB、NFS 等）时，自动改用 `$XDG_RUNTIME_DIR/lubobao-<哈希>.sock`（没有 `XDG_RUNTIME_DIR` 时用临时目录）。也可以用 `--control <路径>` 或 `LUBOBAO_CONTROL` 指定，`run` 和其他子命令要用同一个值。
+- Windows：按数据目录命名的命名管道，只允许当前用户访问；子命令连接时会确认 `run` 属于同一个用户。
+
+数据目录在 NAS 上时，建议把数据目录放在本地磁盘、只把录像目录（`live_save_path`）放到 NAS 上；SQLite 数据库在网络文件系统上也容易出现锁的问题。
 
 同一个数据目录同时只能运行一个 `run`，第二个会报错退出。要同时跑几套互不相关的配置，给每套指定不同的数据目录。
 
@@ -72,11 +83,11 @@ lubobao-cli status
 lubobao-cli config set live_save_path /srv/recordings
 ```
 
-`--save-dir` / `LUBOBAO_SAVE_DIR` 改的是这个设置的缺省值（Docker 镜像里是 `/recordings`）；用 `config set` 改过之后以设置为准。
+`config set live_save_path` 的相对路径按执行命令时的当前目录转成绝对路径；空值会被拒绝。`--save-dir` / `LUBOBAO_SAVE_DIR` 改的是这个设置的缺省值（Docker 镜像里是 `/recordings`）；用 `config set` 改过之后以设置为准。
 
 ## 子命令
 
-全局选项可以放在子命令前后：`--data-dir`、`--ffmpeg`、`--save-dir`。
+全局选项可以放在子命令前后：`--data-dir`、`--ffmpeg`、`--save-dir`、`--control`。
 
 | 子命令 | 作用 |
 | --- | --- |
@@ -95,7 +106,7 @@ lubobao-cli config set live_save_path /srv/recordings
 | `ffmpeg install` | 下载并安装 FFmpeg；已安装时重新检查 |
 | `shutdown` | 让正在运行的 `run` 收尾并退出（与 SIGTERM 相同，Windows 上没有 SIGTERM 时用它） |
 
-退出码：0 成功；1 失败（错误信息写到 stderr）；2 参数错误；3 需要 `run` 但它没有运行。
+退出码：0 成功；1 执行失败，包括重复添加（加不加 `--json` 都一样），错误信息写到 stderr；2 参数或设置值无效；3 需要 `run` 但它没有运行。
 
 ### 常用设置
 
@@ -139,7 +150,7 @@ sudo systemctl enable --now lubobao
 journalctl -u lubobao -f
 ```
 
-管理直播间时用服务的用户和数据目录，命令会交给正在运行的服务执行：
+管理直播间时一定要用服务的用户和数据目录（`sudo -u lubobao`），命令会交给正在运行的服务执行。用 root 或自己的账号操作服务的数据目录，可能留下服务用户无法读写的文件：
 
 ```sh
 alias lbb='sudo -u lubobao LUBOBAO_DATA_DIR=/var/lib/lubobao lubobao-cli'
@@ -151,12 +162,13 @@ lbb list
 
 ## Docker
 
-镜像 `ghcr.io/seansongx/lubobao`（标签为版本号和 `latest`）：
+镜像 `ghcr.io/seansongx/lubobao`：推送版本标签时发布 `<版本>`，Release 人工发布后再把同一个镜像标为 `latest`。
 
 - 内置 FFmpeg（`/opt/ffmpeg/ffmpeg`），构建时从 `@seankit/ffmpeg` 下载并按清单的 SHA-256 校验；
 - 以非 root 用户（`nonroot`，uid 65532）运行；
 - 数据卷 `/data`，录像卷 `/recordings`；
-- 带 ca-certificates 和 tzdata，用 `TZ` 设置时区（默认 `Asia/Shanghai`，影响文件名里的时间）；
+- 基于 `gcr.io/distroless/cc-debian12`（glibc 2.36，没有 shell），带 ca-certificates 和 tzdata，用 `TZ` 设置时区（默认 `Asia/Shanghai`，影响文件名里的时间）；
+- 内含的 FFmpeg 为 GPL-3.0-or-later，许可证和源码位置在 `/opt/ffmpeg/LICENSE`、`/opt/ffmpeg/README.md`；
 - `STOPSIGNAL SIGTERM`。
 
 ```sh
@@ -172,12 +184,15 @@ docker logs -f lubobao
 
 **停止容器时请留够收尾时间**：录制收尾最长约 30 秒，而 `docker stop` 默认只等 10 秒，超时后强制结束会让最后一段文件缺少文件尾。用 `docker stop -t 45 lubobao`，或者像上面那样创建容器时加 `--stop-timeout 45`。
 
-录像想放在宿主机目录时，目录要让 uid 65532 可写：
+录像或数据想放在宿主机目录（绑定挂载）时，`/data` 和 `/recordings` 对应的目录都要让 uid 65532 可写：
 
 ```sh
-sudo mkdir -p /srv/recordings && sudo chown 65532:65532 /srv/recordings
-docker run … -v /srv/recordings:/recordings …
+sudo mkdir -p /srv/lubobao/data /srv/recordings
+sudo chown 65532:65532 /srv/lubobao/data /srv/recordings
+docker run … -v /srv/lubobao/data:/data -v /srv/recordings:/recordings …
 ```
+
+镜像内置 FFmpeg（`LUBOBAO_FFMPEG=/opt/ffmpeg/ffmpeg`）。想改为自动下载到 `/data`，加 `-e LUBOBAO_FFMPEG=`。
 
 ### Docker Compose
 

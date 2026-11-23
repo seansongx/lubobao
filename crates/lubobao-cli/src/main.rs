@@ -12,6 +12,8 @@ mod ops;
 mod output;
 mod paths;
 mod protocol;
+#[cfg(windows)]
+mod winsec;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -52,6 +54,29 @@ pub struct GlobalOpts {
     /// 用 `config set live_save_path …` 改过的以设置为准
     #[arg(long, env = "LUBOBAO_SAVE_DIR", global = true, value_name = "DIR")]
     pub save_dir: Option<PathBuf>,
+
+    /// 控制通道的位置（Unix socket 路径；Windows 上为命名管道名）。默认在数据目录里，
+    /// 数据目录在网络盘上或路径太长时改用 $XDG_RUNTIME_DIR
+    #[arg(long, env = "LUBOBAO_CONTROL", global = true, value_name = "PATH")]
+    pub control: Option<PathBuf>,
+}
+
+/// 这些环境变量设为空值时视为没有设置（例如在 Docker 里用 `-e LUBOBAO_FFMPEG=` 关掉内置的
+/// FFmpeg，改为自动下载）。
+const PATH_ENV_VARS: [&str; 4] = [
+    "LUBOBAO_DATA_DIR",
+    "LUBOBAO_FFMPEG",
+    "LUBOBAO_SAVE_DIR",
+    "LUBOBAO_CONTROL",
+];
+
+fn clear_empty_env() {
+    for name in PATH_ENV_VARS {
+        if std::env::var_os(name).is_some_and(|value| value.is_empty()) {
+            // SAFETY: 在 main 开头、启动任何线程之前调用。
+            unsafe { std::env::remove_var(name) };
+        }
+    }
 }
 
 #[derive(Subcommand)]
@@ -172,6 +197,17 @@ fn parse_target(values: &[String]) -> Result<Target, String> {
         .map(Target::Ids)
 }
 
+/// 录像目录按执行命令时的当前目录转成绝对路径再提交，`run` 的工作目录不影响结果。
+fn absolute_save_path(value: &str) -> Result<String, String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err("录像目录不能为空".into());
+    }
+    std::path::absolute(trimmed)
+        .map(|path| path.to_string_lossy().into_owned())
+        .map_err(|error| format!("录像目录无效 {trimmed}：{error}"))
+}
+
 /// 一个子命令要发出的请求和输出方式。
 struct Invocation {
     request: Request,
@@ -224,7 +260,14 @@ fn invocation(command: Command) -> Result<Invocation, String> {
                 json,
             },
             ConfigAction::Get { key } => plain(Request::ConfigGet { key }),
-            ConfigAction::Set { key, value } => plain(Request::ConfigSet { key, value }),
+            ConfigAction::Set { key, value } => {
+                let value = if key == ops::SAVE_PATH_KEY {
+                    absolute_save_path(&value)?
+                } else {
+                    value
+                };
+                plain(Request::ConfigSet { key, value })
+            }
         },
         Command::Ffmpeg { action } => match action {
             FfmpegAction::Status { json } => Invocation {
@@ -238,6 +281,7 @@ fn invocation(command: Command) -> Result<Invocation, String> {
 }
 
 fn main() -> ExitCode {
+    clear_empty_env();
     let cli = Cli::parse();
     let runtime = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -274,4 +318,46 @@ fn main() -> ExitCode {
     };
     let result = runtime.block_on(ops::dispatch(&dirs, &cli.global, &invocation.request));
     output::print(&invocation.request, invocation.json, result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn strings(values: &[&str]) -> Vec<String> {
+        values.iter().map(|value| value.to_string()).collect()
+    }
+
+    #[test]
+    fn targets_parse_ids_or_all() {
+        assert_eq!(parse_target(&strings(&["all"])), Ok(Target::All));
+        assert_eq!(parse_target(&strings(&["ALL"])), Ok(Target::All));
+        assert_eq!(
+            parse_target(&strings(&["3", "1"])),
+            Ok(Target::Ids(vec![3, 1]))
+        );
+        assert!(parse_target(&strings(&["1", "all"])).is_err());
+        assert!(parse_target(&strings(&["x"])).is_err());
+    }
+
+    #[test]
+    fn qualities_accept_codes_and_labels() {
+        assert_eq!(parse_quality("hd"), Ok(Quality::Hd));
+        assert_eq!(parse_quality("原画"), Ok(Quality::Od));
+        assert!(parse_quality("4k").is_err());
+    }
+
+    #[test]
+    fn save_path_becomes_absolute_and_rejects_empty() {
+        let value = absolute_save_path("videos").unwrap();
+        assert!(std::path::Path::new(&value).is_absolute());
+        assert!(value.ends_with("videos"));
+        assert!(absolute_save_path("   ").is_err());
+    }
+
+    #[test]
+    fn command_line_parses() {
+        use clap::CommandFactory;
+        Cli::command().debug_assert();
+    }
 }

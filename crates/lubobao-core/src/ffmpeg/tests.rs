@@ -1397,3 +1397,51 @@ async fn reverify_while_install_runs_returns_current_status() {
         "{events:?}"
     );
 }
+
+#[tokio::test]
+async fn check_local_reports_not_installed_without_network() {
+    let tgz = sample_tgz();
+    let server = TestServer::start(vec![("/pkg.tgz", Route::File(tgz.clone()))]).await;
+    let harness = Harness::new();
+    let manager = harness.manager(component_for(&tgz, vec![server.url("/pkg.tgz")]));
+
+    let status = manager.check_local().await;
+
+    assert_eq!(status, FfmpegStatus::NotInstalled);
+    assert!(
+        server.requests().is_empty(),
+        "check_local must not download"
+    );
+    assert!(!harness.installed().exists());
+}
+
+#[tokio::test]
+async fn check_local_finds_current_and_older_versions() {
+    let tgz = sample_tgz();
+    let server = TestServer::start(vec![("/pkg.tgz", Route::File(tgz.clone()))]).await;
+    let harness = Harness::new();
+    let old = with_versions(
+        component_for(&tgz, vec![server.url("/pkg.tgz")]),
+        "9.0.1",
+        "9.0.0",
+    );
+    assert!(harness.manager(old).ensure().await.is_ready());
+    let requests = server.requests().len();
+
+    // 只有旧版本：报告旧版本可用（outdated），不下载新版本。
+    let current = component_for(&tgz, vec![server.url("/pkg.tgz")]);
+    let status = harness.manager(current.clone()).check_local().await;
+    assert!(
+        matches!(&status, FfmpegStatus::Ready { outdated: true, ffmpeg_version, .. } if ffmpeg_version == "9.0.1"),
+        "{status:?}"
+    );
+    assert_eq!(server.requests().len(), requests);
+
+    // 装好当前版本后报告当前版本。
+    assert!(harness.manager(current.clone()).ensure().await.is_ready());
+    let status = harness.manager(current).check_local().await;
+    assert!(
+        matches!(&status, FfmpegStatus::Ready { outdated: false, path, .. } if path == &harness.installed()),
+        "{status:?}"
+    );
+}

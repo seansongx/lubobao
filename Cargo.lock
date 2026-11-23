@@ -2479,6 +2479,7 @@ dependencies = [
  "lubobao-core",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tempfile",
  "tokio",
  "windows-sys 0.61.2",

@@ -936,3 +936,57 @@ fn rejects_unknown_values_for_enum_settings() {
     let settings = manager.update_settings(values).unwrap();
     assert_eq!(settings["video_format"], json!("MKV"));
 }
+
+#[test]
+fn read_only_open_leaves_interrupted_recordings_and_database_untouched() {
+    let dir = tempfile::tempdir().unwrap();
+    let id = {
+        let (manager, _) = open(dir.path());
+        let id = added(
+            manager
+                .add_resolved(
+                    add_input("https://live.douyin.com/1"),
+                    &info("1", Some("sec-1"), "主播"),
+                )
+                .unwrap(),
+        )
+        .id;
+        manager
+            .set_record_state(
+                id,
+                RecordState::Recording {
+                    file_path: PathBuf::from("a.ts"),
+                    started_at: 1,
+                    bytes_written: 10,
+                    bitrate_kbps: 1.0,
+                },
+            )
+            .unwrap();
+        id
+    };
+
+    // 只读打开：看得到任务和录制状态，不写「异常中断」，写操作失败。
+    let manager = open_read_only_in(dir.path(), &dir.path().join("videos")).unwrap();
+    assert!(manager.get(id).unwrap().record.is_active());
+    assert!(
+        manager
+            .update_settings(Map::from_iter([("loop_time_seconds".into(), json!(60))]))
+            .is_err()
+    );
+    let page = manager.list_activity(&ActivityQuery::default()).unwrap();
+    assert!(page.items.iter().all(|e| e.message != INTERRUPTED_REASON));
+    drop(manager);
+
+    // 之后正常打开时才处理中断。
+    let (manager, _) = open(dir.path());
+    assert_eq!(manager.get(id).unwrap().record, RecordState::Idle);
+}
+
+#[test]
+fn read_only_open_of_missing_database_is_empty_and_creates_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let manager = open_read_only_in(dir.path(), &dir.path().join("videos")).unwrap();
+    assert!(manager.list().is_empty());
+    assert_eq!(manager.settings()["loop_time_seconds"], json!(180));
+    assert!(!dir.path().join(DB_FILE).exists());
+}

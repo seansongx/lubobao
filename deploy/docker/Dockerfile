@@ -6,23 +6,27 @@
 #   manifest.json                   FFmpeg 组件清单，与应用内置的 crates/lubobao-core/src/ffmpeg/manifest.json 相同
 #   fetch-ffmpeg.mjs
 #
-# 目标平台上没有 RUN 步骤，构建多架构镜像不需要 QEMU。
+# 目标平台上没有 RUN 步骤，构建多架构镜像不需要 QEMU。基础镜像按 digest 固定，升级时一起更新：
+#   node:22-slim                          （多架构索引）
+#   gcr.io/distroless/cc-debian12:nonroot （多架构索引）
 
 # FFmpeg 在构建机上下载并按清单校验 SHA-256。
-FROM --platform=$BUILDPLATFORM node:22-slim AS ffmpeg
+FROM --platform=$BUILDPLATFORM node:22-slim@sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8ba3ab21ee AS ffmpeg
 ARG TARGETARCH
 WORKDIR /work
 COPY manifest.json fetch-ffmpeg.mjs ./
 RUN node fetch-ffmpeg.mjs manifest.json "$TARGETARCH" /out/opt/ffmpeg \
  && mkdir -p /out/data /out/recordings
 
-# distroless static：只含 ca-certificates、tzdata 和 nonroot 用户（uid 65532），没有 shell。
-FROM gcr.io/distroless/static-debian12:nonroot AS runtime
+# distroless cc：glibc 2.36、libgcc、ca-certificates、tzdata 和 nonroot 用户（uid 65532），没有 shell。
+# @seankit/ffmpeg 的 Linux 版（BtbN 构建）动态链接 glibc 2.28 及以上，所以不能用 distroless static；
+# lubobao-cli 本身是 musl 静态链接，不依赖这些库。
+FROM gcr.io/distroless/cc-debian12:nonroot@sha256:9dac0a79194e45a7da0158a9c6da57b217585af0786db3845d1f0ec1a0dd182f AS runtime
 ARG TARGETARCH
 LABEL org.opencontainers.image.source="https://github.com/seansongx/lubobao" \
       org.opencontainers.image.title="录播宝命令行" \
-      org.opencontainers.image.description="录播宝：开播自动录，不用再蹲直播（无界面命令行版）" \
-      org.opencontainers.image.licenses="MIT"
+      org.opencontainers.image.description="录播宝：开播自动录，不用再蹲直播（无界面命令行版）。lubobao-cli 为 MIT 许可；内含的 FFmpeg（/opt/ffmpeg）为 GPL-3.0-or-later，许可证和源码位置见 /opt/ffmpeg/LICENSE、README.md" \
+      org.opencontainers.image.licenses="MIT AND GPL-3.0-or-later"
 COPY --from=ffmpeg /out/opt/ffmpeg /opt/ffmpeg
 COPY --from=ffmpeg --chown=65532:65532 /out/data /data
 COPY --from=ffmpeg --chown=65532:65532 /out/recordings /recordings

@@ -230,6 +230,22 @@ fn user_action(task: &Task, message: &str, detail: Option<Value>) -> NewActivity
 impl TaskManager {
     /// 读出任务。无法识别的行跳过并记日志；上次未正常结束的录制各写一条动态，任务回到空闲。
     pub fn open(store: Store, save_dir: &Path, listener: Listener) -> CommandResult<TaskManager> {
+        let manager = Self::load(store, save_dir, listener)?;
+        manager.recover_interrupted()?;
+        Ok(manager)
+    }
+
+    /// 读出任务，不处理上次异常中断的录制，不写数据库。配合 [`Store::open_read_only`]
+    /// 给只读查询用；之后的写操作会失败。
+    pub fn open_read_only(
+        store: Store,
+        save_dir: &Path,
+        listener: Listener,
+    ) -> CommandResult<TaskManager> {
+        Self::load(store, save_dir, listener)
+    }
+
+    fn load(store: Store, save_dir: &Path, listener: Listener) -> CommandResult<TaskManager> {
         let (tasks, skipped) = store.db().load_tasks()?;
         for row in &skipped {
             eprintln!("跳过无法读取的任务 #{}：{}", row.id, row.reason);
@@ -245,7 +261,6 @@ impl TaskManager {
             listener,
             hook: OnceLock::new(),
         };
-        manager.recover_interrupted()?;
         Ok(manager)
     }
 
@@ -928,6 +943,27 @@ impl TaskManager {
 
 fn not_found(id: TaskId) -> CommandError {
     CommandError::new(ErrorKind::NotFound, format!("任务 {id} 不存在"))
+}
+
+/// 只读打开 `data_dir/lubobao.db` 并读出任务：不创建文件、不迁移、不处理异常中断的录制。
+/// 数据库不存在时视为没有任务、全部为默认设置。
+pub fn open_read_only_in(data_dir: &Path, save_dir: &Path) -> Result<TaskManager, String> {
+    let db_path = data_dir.join(DB_FILE);
+    let store = Store::open_read_only(&db_path).map_err(|error| {
+        format!(
+            "{error}
+数据库：{}",
+            db_path.display()
+        )
+    })?;
+    TaskManager::open_read_only(store, save_dir, Box::new(|_| {})).map_err(|error| {
+        format!(
+            "{}
+数据库：{}",
+            error.message,
+            db_path.display()
+        )
+    })
 }
 
 /// 数据库文件名，位于数据目录下。

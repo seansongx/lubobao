@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use lubobao_core::ffmpeg::FfmpegStatus;
+use lubobao_core::platforms::LiveInfo;
 use lubobao_core::scheduler::Scheduler;
 use lubobao_core::tasks::{self, AddTaskInput, DisplayStatus, TaskId, TaskManager, TaskSnapshot};
 use serde_json::{Map, Value, json};
@@ -99,6 +100,22 @@ pub fn parse_setting(
     }
 }
 
+/// 录像目录的设置项。
+pub const SAVE_PATH_KEY: &str = "live_save_path";
+
+/// 录像目录必须是非空的绝对路径。相对路径由客户端按自己的当前目录转换后再提交
+/// （见 `main.rs`），这里兜底拒绝，避免按 `run` 的工作目录解释。
+fn check_save_path(value: &Value) -> Result<(), Failure> {
+    let path = value.as_str().unwrap_or_default().trim();
+    if path.is_empty() {
+        return Err(invalid("录像目录不能为空"));
+    }
+    if !std::path::Path::new(path).is_absolute() {
+        return Err(invalid(format!("录像目录需要绝对路径：{path}")));
+    }
+    Ok(())
+}
+
 async fn ffmpeg_status(ctx_ffmpeg: &FfmpegSource, running: bool) -> Value {
     match ctx_ffmpeg {
         FfmpegSource::Managed(manager) if !running => {
@@ -132,24 +149,7 @@ pub async fn execute(ctx: &Ctx, request: &Request) -> Result<Value, Failure> {
     let tasks = &ctx.tasks;
     let running = ctx.scheduler.is_some();
     match request {
-        Request::Add {
-            url,
-            quality,
-            notify_only,
-            note,
-            force,
-        } => {
-            let result = tasks
-                .add_task(AddTaskInput {
-                    url: url.clone(),
-                    quality: *quality,
-                    notify_only: *notify_only,
-                    note: note.clone(),
-                    force: *force,
-                })
-                .await?;
-            to_value(result)
-        }
+        Request::Add { .. } => to_value(tasks.add_task(add_input(request)).await?),
         Request::List => to_value(tasks.list()),
         Request::SetMonitoring { target, enabled } => {
             let ids = ids_of(tasks, target);
@@ -191,6 +191,9 @@ pub async fn execute(ctx: &Ctx, request: &Request) -> Result<Value, Failure> {
         },
         Request::ConfigSet { key, value } => {
             let parsed = parse_setting(tasks.defaults(), key, value)?;
+            if key == SAVE_PATH_KEY {
+                check_save_path(&parsed)?;
+            }
             let mut values = Map::new();
             values.insert(key.clone(), parsed);
             let settings = tasks.update_settings(values)?;
@@ -208,18 +211,42 @@ pub async fn execute(ctx: &Ctx, request: &Request) -> Result<Value, Failure> {
     }
 }
 
-/// `run` 正在启动或另一个命令正在操作数据库时，最多等这么久。
+/// `run` 正在启动或另一个命令正在写数据库时，最多等这么久。
 const BUSY_WAIT: Duration = Duration::from_secs(15);
 
-/// 子命令入口：`run` 在运行时交给它；否则直接执行（持有实例锁，避免与刚启动的 `run` 同时写）。
+/// 等 `run` 应答的时限。`add` 要请求平台（单次 20 秒，可能还要跟随跳转），
+/// `ffmpeg install` 要下载几十 MB，放宽。
+fn response_timeout(request: &Request) -> Duration {
+    match request {
+        Request::FfmpegInstall => Duration::from_secs(60 * 60),
+        Request::Add { .. } => Duration::from_secs(120),
+        _ => Duration::from_secs(30),
+    }
+}
+
+/// `run` 不在时只读数据库的请求：不取实例锁，不处理上次异常中断的录制。
+fn is_read_only(request: &Request) -> bool {
+    matches!(
+        request,
+        Request::List | Request::Status | Request::ConfigList | Request::ConfigGet { .. }
+    )
+}
+
+fn storage(message: String) -> Failure {
+    Failure::new("storage", message)
+}
+
+/// 子命令入口：`run` 在运行时交给它；否则直接执行。写数据库时持有实例锁，避免与刚启动的
+/// `run` 同时写；`add` 先联网解析（不持锁），再加锁写入。
 pub async fn dispatch(
     dirs: &Dirs,
     global: &GlobalOpts,
     request: &Request,
 ) -> Result<Value, Failure> {
     let deadline = Instant::now() + BUSY_WAIT;
+    let mut resolved: Option<LiveInfo> = None;
     loop {
-        match control::send(dirs, request).await {
+        match control::send(dirs, request, response_timeout(request)).await {
             Ok(response) => return response.into(),
             Err(SendError::NotRunning) => {}
             Err(SendError::Failed(message)) => return Err(Failure::new("protocol", message)),
@@ -233,14 +260,33 @@ pub async fn dispatch(
                 _ => Ok(ffmpeg_status(&source, false).await),
             };
         }
-        let lock = dirs
-            .try_lock()
-            .map_err(|message| Failure::new("storage", message))?;
+        if is_read_only(request) {
+            let manager =
+                tasks::open_read_only_in(&dirs.data_dir, &dirs.save_dir).map_err(storage)?;
+            return execute(&offline_ctx(dirs, global, manager), request).await;
+        }
+        if let (Request::Add { url, quality, .. }, None) = (request, &resolved) {
+            let manager =
+                tasks::open_read_only_in(&dirs.data_dir, &dirs.save_dir).map_err(storage)?;
+            let quality = quality.unwrap_or_else(|| manager.default_quality());
+            resolved = Some(TaskManager::resolve(url, quality, &manager.settings()).await?);
+            // 解析期间 run 可能已经启动，回到开头重新尝试连接。
+            continue;
+        }
+        let lock = dirs.try_lock().map_err(storage)?;
         if let Some(lock) = lock {
             if request.needs_daemon() {
                 return Err(not_running(dirs));
             }
-            let result = offline(dirs, global, request).await;
+            let manager = tasks::open_in(&dirs.data_dir, &dirs.save_dir, Box::new(|_| {}))
+                .map_err(storage)?;
+            let ctx = offline_ctx(dirs, global, manager);
+            let result = match (request, &resolved) {
+                (Request::Add { .. }, Some(info)) => {
+                    to_value(ctx.tasks.add_resolved(add_input(request), info)?)
+                }
+                _ => execute(&ctx, request).await,
+            };
             drop(lock);
             return result;
         }
@@ -258,18 +304,34 @@ pub async fn dispatch(
     }
 }
 
-async fn offline(dirs: &Dirs, global: &GlobalOpts, request: &Request) -> Result<Value, Failure> {
-    let manager = tasks::open_in(&dirs.data_dir, &dirs.save_dir, Box::new(|_| {}))
-        .map_err(|message| Failure::new("storage", message))?;
-    let ctx = Ctx {
+fn offline_ctx(dirs: &Dirs, global: &GlobalOpts, manager: TaskManager) -> Ctx {
+    Ctx {
         tasks: Arc::new(manager),
         scheduler: None,
         ffmpeg: FfmpegSource::new(dirs, global.ffmpeg.as_ref(), Box::new(|_| {})),
         dirs: dirs.clone(),
         shutdown: None,
         started_at: None,
-    };
-    execute(&ctx, request).await
+    }
+}
+
+fn add_input(request: &Request) -> AddTaskInput {
+    match request {
+        Request::Add {
+            url,
+            quality,
+            notify_only,
+            note,
+            force,
+        } => AddTaskInput {
+            url: url.clone(),
+            quality: *quality,
+            notify_only: *notify_only,
+            note: note.clone(),
+            force: *force,
+        },
+        _ => AddTaskInput::default(),
+    }
 }
 
 #[cfg(test)]
@@ -307,6 +369,41 @@ mod tests {
                 .kind,
             "invalid_input"
         );
+    }
+
+    #[test]
+    fn save_path_must_be_absolute_and_non_empty() {
+        assert_eq!(
+            check_save_path(&json!("")).unwrap_err().kind,
+            "invalid_input"
+        );
+        assert_eq!(
+            check_save_path(&json!("  ")).unwrap_err().kind,
+            "invalid_input"
+        );
+        assert_eq!(
+            check_save_path(&json!("videos")).unwrap_err().kind,
+            "invalid_input"
+        );
+        let absolute = std::env::temp_dir().join("lubobao-videos");
+        assert!(check_save_path(&json!(absolute.to_string_lossy())).is_ok());
+    }
+
+    #[test]
+    fn read_only_requests_do_not_take_the_lock() {
+        assert!(is_read_only(&Request::List));
+        assert!(is_read_only(&Request::ConfigGet { key: "x".into() }));
+        assert!(!is_read_only(&Request::ConfigSet {
+            key: "x".into(),
+            value: "1".into()
+        }));
+        assert!(!is_read_only(&Request::Remove { ids: vec![1] }));
+    }
+
+    #[test]
+    fn long_requests_get_longer_timeouts() {
+        assert!(response_timeout(&Request::FfmpegInstall) > response_timeout(&Request::List));
+        assert_eq!(response_timeout(&Request::Status), Duration::from_secs(30));
     }
 
     #[test]
