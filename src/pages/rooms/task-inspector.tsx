@@ -101,7 +101,7 @@ function Section({ title, action, children }: { title: string; action?: ReactNod
   return (
     <section>
       <div className="mb-2 flex items-center gap-2">
-        <h3 className="m-0 flex-1 text-xs font-semibold text-muted-foreground win:text-(length:--text-dense) win:text-foreground">{title}</h3>
+        <h3 className="m-0 flex-1 text-xs font-semibold text-muted-foreground">{title}</h3>
         {action}
       </div>
       {children}
@@ -111,7 +111,7 @@ function Section({ title, action, children }: { title: string; action?: ReactNod
 
 function StateCell({ label, value, reason }: { label: string; value: string; reason: string | null }) {
   return (
-    <div className="min-w-0 rounded-md border border-black/5 bg-card px-2.5 py-1.5 dark:border-white/5 linux:rounded-lg">
+    <div className="min-w-0 rounded-md border border-black/5 bg-card px-2.5 py-1.5 dark:border-white/5">
       <small className="block text-xs text-muted-foreground">{label}</small>
       <b className="block truncate text-[12.5px] font-medium">{value}</b>
       {reason && <span className="mt-0.5 block text-xs leading-snug break-words text-muted-foreground">{reason}</span>}
@@ -164,10 +164,10 @@ export const TaskInspector = memo(function TaskInspector({ task, onClose, onEdit
 
   return (
     <aside
-      className="flex w-[300px] shrink-0 flex-col border-l text-(length:--text-dense) xl:w-[340px] linux:bg-sidebar/50"
+      className="flex w-[300px] shrink-0 flex-col border-l text-(length:--text-dense) xl:w-[340px]"
       aria-label={`${task.anchorName} 详情`}
     >
-      <header className="flex items-center gap-2.5 px-4 pt-4 pb-3 mac:h-(--header-h) mac:border-b mac:py-0">
+      <header className="flex items-center gap-2.5 h-(--header-h) shrink-0 border-b px-4">
         <AnchorAvatar task={task} className="size-[34px] text-sm" />
         <div className="min-w-0 flex-1">
           <div className="truncate text-(length:--text-ui) font-semibold" title={task.anchorName}>
@@ -186,7 +186,7 @@ export const TaskInspector = memo(function TaskInspector({ task, onClose, onEdit
         </IconAction>
       </header>
 
-      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 pt-1 pb-3.5 mac:pt-3.5">
+      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 py-3.5">
         <div className="flex items-center justify-between gap-2">
           <TaskStatus task={task} />
         </div>

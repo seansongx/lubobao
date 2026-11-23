@@ -10,17 +10,18 @@ interface AppSidebarProps {
 }
 
 /**
- * 左侧导航。Windows 落在 Mica 上，选中项左侧有 Teal 竖条；macOS 透出侧栏 vibrancy，顶部留给红绿灯；
- * Linux 是平涂灰色侧栏。三个平台都不放品牌标识（标题栏或菜单栏已经显示应用名）。
+ * 左侧导航，三个平台样子相同。材质生效时侧栏透明（Windows 11 落在 Mica 上，macOS 透出 vibrancy）。
+ * macOS 用 Overlay 标题栏，顶部留出工具栏高度给红绿灯；Windows 和 Linux 有系统标题栏，不留。
+ * 三个平台都不放品牌标识（标题栏或菜单栏已经显示应用名）。
  */
 export function AppSidebar({ current, onNavigate, recordingCount }: AppSidebarProps) {
   return (
     <aside
       {...dragRegion}
       className={cn(
-        "flex min-h-0 flex-col gap-0.5 bg-sidebar px-1.5 pt-1 pb-2 text-sidebar-foreground",
-        "mac:border-r mac:border-sidebar-border mac:px-2.5 mac:pt-(--header-h)",
-        "linux:border-r linux:border-sidebar-border linux:px-2 linux:pt-2",
+        "flex min-h-0 flex-col gap-0.5 border-r border-sidebar-border bg-sidebar px-2.5 pt-2.5 pb-2 text-sidebar-foreground",
+        // 外壳差异：macOS 的红绿灯落在侧栏顶部
+        "mac:pt-(--header-h)",
       )}
     >
       <nav className="flex flex-col gap-0.5" aria-label="主导航">
@@ -34,15 +35,12 @@ export function AppSidebar({ current, onNavigate, recordingCount }: AppSidebarPr
               aria-current={active ? "page" : undefined}
               onClick={() => onNavigate(page.id)}
               className={cn(
-                "relative flex h-(--nav-item-h) items-center gap-3 rounded-md px-3 text-left text-(length:--text-ui) outline-none transition-colors",
+                "relative flex h-(--nav-item-h) items-center gap-2 rounded-md px-2 text-left text-(length:--text-ui) outline-none transition-colors",
                 "hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-ring",
-                "mac:gap-2 mac:px-2",
-                active && "bg-sidebar-accent linux:font-semibold",
-                active &&
-                  "win:selection-bar",
+                active && "bg-sidebar-accent",
               )}
             >
-              <Icon className="size-4 shrink-0 mac:text-primary" aria-hidden />
+              <Icon className="size-4 shrink-0 text-primary" aria-hidden />
               {page.label}
               {page.id === "rooms" && recordingCount > 0 && (
                 <span

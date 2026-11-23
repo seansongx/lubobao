@@ -13,20 +13,19 @@ interface PageHeaderProps {
 }
 
 /**
- * 页面标题行。Windows 和 Linux 是内容区顶部的大标题；macOS 是 52px 的统一工具栏，
- * 整条可拖动窗口（拖拽区只作用于带属性的这几层，按钮和输入框照常响应）。
+ * 页面标题行：三个平台都是 52px 的工具栏（标题和摘要上下排列，右侧是操作）。macOS 用 Overlay 标题栏，
+ * 整条可拖动窗口（拖拽区只作用于带属性的这几层，按钮和输入框照常响应）；Windows 和 Linux 有系统标题栏，不设拖拽区。
  */
 export function PageHeader({ title, summary, actions, className }: PageHeaderProps) {
   return (
     <header
       {...dragRegion}
       className={cn(
-        "flex min-w-0 shrink-0 items-center gap-3 px-(--page-pad) pt-5 linux:pt-4",
-        "mac:h-(--header-h) mac:gap-2 mac:border-b mac:pt-0 mac:pr-3.5",
+        "flex h-(--header-h) min-w-0 shrink-0 items-center gap-2 border-b pr-3.5 pl-(--page-pad)",
         className,
       )}
     >
-      <div {...dragRegion} className="flex min-w-0 items-baseline gap-3 mac:flex-col mac:gap-0">
+      <div {...dragRegion} className="flex min-w-0 flex-col">
         <h1 {...dragRegion} className="m-0 shrink-0 text-(length:--text-title) leading-tight font-(--weight-title)">
           {title}
         </h1>

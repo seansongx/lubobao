@@ -33,15 +33,15 @@ export function SettingsCard({ title, description, onReset, children }: Settings
     <section aria-labelledby={headingId} className="mb-6 max-w-(--settings-width) text-card-foreground">
       <header className="flex min-h-8 items-center gap-3 pb-2 pl-1">
         <div className="min-w-0 flex-1">
-          <h2 id={headingId} className="m-0 text-(length:--text-ui) font-semibold mac:font-bold linux:font-bold">
+          <h2 id={headingId} className="m-0 text-(length:--text-ui) font-bold">
             {title}
           </h2>
           {description ? <p className="m-0 mt-0.5 text-xs text-muted-foreground">{description}</p> : null}
         </div>
         {onReset ? <ResetButton onConfirm={onReset} /> : null}
       </header>
-      {/* Windows：每行一张设置卡片；macOS：圆角分组表单；Linux：Adwaita 分组列表 */}
-      <div className="flex flex-col gap-[3px] mac:gap-0 mac:divide-y mac:rounded-xl mac:border mac:border-black/5 mac:bg-card mac:dark:border-white/5 linux:gap-0 linux:divide-y linux:overflow-hidden linux:rounded-xl linux:border linux:bg-card linux:shadow-xs">
+      {/* 圆角分组表单，三个平台相同 */}
+      <div className="flex flex-col divide-y rounded-xl border border-black/5 bg-card dark:border-white/5">
         {children}
       </div>
     </section>
@@ -96,7 +96,7 @@ export function FieldRow({ label, description, htmlFor, error, errorId, disabled
   return (
     <div
       className={cn(
-        "px-4 py-3.5 win:flex win:min-h-[68px] win:flex-col win:justify-center win:rounded-lg win:border win:border-black/5 win:bg-card win:dark:border-black/15 mac:px-3 mac:py-2.5 linux:px-3.5 linux:py-3",
+        "px-3 py-2.5",
         disabled && "opacity-60",
       )}
     >

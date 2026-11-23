@@ -122,7 +122,7 @@ export function SettingsPage({ focusGroup }: SettingsPageProps) {
     <section className="flex min-h-0 min-w-0 flex-1 flex-col">
       <PageHeader title="设置" summary="修改后自动保存" />
       <div className="flex min-h-0 flex-1">
-        <nav aria-label="设置分组" className="flex w-[168px] shrink-0 flex-col gap-0.5 py-3.5 pr-2.5 pl-(--page-pad) mac:pl-3">
+        <nav aria-label="设置分组" className="flex w-[168px] shrink-0 flex-col gap-0.5 py-3.5 pr-2.5 pl-3">
           {groups.map((item) => (
             <button
               key={item.id}
@@ -130,9 +130,8 @@ export function SettingsPage({ focusGroup }: SettingsPageProps) {
               aria-current={group === item.id ? "page" : undefined}
               onClick={() => setGroup(item.id)}
               className={cn(
-                "relative h-[calc(var(--nav-item-h)-4px)] rounded-md px-3 text-left text-(length:--text-ui) outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring mac:px-2",
-                group === item.id &&
-                  "bg-accent linux:font-semibold win:selection-bar",
+                "relative h-[calc(var(--nav-item-h)-4px)] rounded-md px-2 text-left text-(length:--text-ui) outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring",
+                group === item.id && "bg-accent",
               )}
             >
               {item.label}

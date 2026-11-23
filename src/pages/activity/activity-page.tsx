@@ -276,7 +276,7 @@ export function ActivityPage({ onNavigate, focusTask }: ActivityPageProps) {
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col">
       <PageHeader title="动态" />
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-(--page-pad) pt-3.5 mac:pt-2.5">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-(--page-pad) pt-2.5">
         <ToggleGroup
           type="single"
           size="sm"
@@ -335,7 +335,7 @@ export function ActivityPage({ onNavigate, focusTask }: ActivityPageProps) {
 
       <div
         ref={scrollRef}
-        className="mx-3 mt-3 mb-2 flex min-h-0 flex-1 flex-col overflow-y-auto text-(length:--text-dense) mac:mx-2.5 linux:mx-(--page-pad) linux:mb-3 linux:rounded-xl linux:border linux:bg-card linux:shadow-xs"
+        className="mx-2.5 mt-3 mb-2 flex min-h-0 flex-1 flex-col overflow-y-auto text-(length:--text-dense)"
       >
         {state === "loading" && items.length === 0 ? (
           <CenterNote>
@@ -350,7 +350,7 @@ export function ActivityPage({ onNavigate, focusTask }: ActivityPageProps) {
           <>
             {days.map((group) => (
               <div key={group.key}>
-                <div className="sticky top-0 z-10 border-b bg-content px-3.5 py-2 text-xs font-semibold text-muted-foreground backdrop-blur-xl linux:bg-card">
+                <div className="sticky top-0 z-10 border-b bg-content px-3.5 py-2 text-xs font-semibold text-muted-foreground backdrop-blur-xl">
                   {formatDay(group.day)}
                 </div>
                 {group.entries.map((entry) => (

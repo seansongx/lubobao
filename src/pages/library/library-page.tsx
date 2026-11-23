@@ -356,7 +356,7 @@ export function LibraryPage({ onNavigate }: LibraryPageProps) {
         }
       />
 
-      <div className="flex min-w-0 items-center gap-1.5 px-(--page-pad) pt-3 pb-2 mac:pt-2.5">
+      <div className="flex min-w-0 items-center gap-1.5 px-(--page-pad) pt-2.5 pb-2">
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
@@ -403,7 +403,7 @@ export function LibraryPage({ onNavigate }: LibraryPageProps) {
         </div>
       )}
 
-      <div className="mx-3 mb-2 flex min-h-0 flex-1 flex-col overflow-hidden text-(length:--text-dense) mac:mx-2.5 linux:mx-(--page-pad) linux:mb-3 linux:rounded-xl linux:border linux:bg-card linux:shadow-xs">
+      <div className="mx-2.5 mb-2 flex min-h-0 flex-1 flex-col overflow-hidden text-(length:--text-dense)">
         {load.state === "error" ? (
           <LibraryErrorView
             error={load.error}
@@ -421,7 +421,7 @@ export function LibraryPage({ onNavigate }: LibraryPageProps) {
           <EmptyFolder atRoot={listing.path === ""} root={listing.root} />
         ) : (
           <>
-            <div className="grid h-8 grid-cols-[minmax(0,1fr)_88px_112px_64px] items-center gap-3 border-b px-3 text-xs text-muted-foreground mac:h-7 mac:font-medium linux:font-semibold">
+            <div className="grid h-7 grid-cols-[minmax(0,1fr)_88px_112px_64px] items-center gap-3 border-b px-3 text-xs font-medium text-muted-foreground">
               <span>名称</span>
               <span className="text-right">大小</span>
               <span>修改时间</span>

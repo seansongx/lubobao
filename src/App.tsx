@@ -85,11 +85,11 @@ export default function App() {
 
   return (
     <TooltipProvider delayDuration={400}>
-      {/* 侧栏占满高度；右侧是内容层和状态栏。Windows 的内容层是 Mica 上的 Fluent Layer（左上圆角加描边）。 */}
+      {/* 侧栏占满高度；右侧是内容层和状态栏。 */}
       <div className="grid h-screen grid-cols-[var(--sidebar-width)_minmax(0,1fr)] bg-window">
         <AppSidebar current={current} onNavigate={navigate} recordingCount={recordingCount} />
         <div className="flex min-h-0 min-w-0 flex-col">
-          <main className="relative flex min-h-0 min-w-0 flex-1 bg-content win:rounded-tl-xl win:border-t win:border-l win:border-content-border">
+          <main className="relative flex min-h-0 min-w-0 flex-1 bg-content">
             {pages
               .filter((page) => visited.has(page.id))
               .map((page) => (

@@ -1,71 +1,70 @@
 /*
  * 录播宝桌面主题。说明见 docs/design/native-ui.md。
  *
- * 控件一律用 shadcn/ui Nova 默认实现（src/components/ui/ 不改），平台差异只写在这里：
- * - 根节点 data-platform 选择平台：windows（Windows 11，默认）、macos、linux（GNOME/Adwaita 风格）。
- *   平台改的是 shadcn 语义变量（--radius、--background、--card、--popover、--muted、--border、--input、
- *   --sidebar 等）和字体、字号；组件跟着变。
+ * 内容区三个平台统一（2026-11-23 起统一为原 macOS 的样子），外壳和行为随平台：
+ * - 控件一律用 shadcn/ui Nova 默认实现（src/components/ui/ 不改），这里只设 shadcn 语义变量（--radius、
+ *   --background、--card、--popover、--muted、--border、--input、--sidebar 等）和字号，组件跟着变。
+ *   圆角、字号、尺寸和配色三个平台共用一组值。
+ * - 根节点 data-platform（windows、macos、linux）只选字体族：各平台用自己的系统字体。
  * - 根节点 data-material 表示窗口材质是否生效：mica（Windows 11）、vibrancy（macOS）、none。
  *   材质生效时窗口底和侧栏透明，露出系统材质；none 时一律画不透明底色（Windows 10、Linux、浏览器预览）。
  * - 另有少量页面布局用的变量：--window（窗口底）、--content（内容层）、--selection（选中行）、
  *   --statusbar，以及字号、导航项高度、内容边距、侧栏宽度、工具栏高度。
- * - 浅色/深色跟随 prefers-color-scheme。主色固定为 Teal（浅色 teal-700、深色 teal-400），状态色三个平台相同。
+ * - 浅色/深色跟随 prefers-color-scheme。主色固定为 Teal（浅色 teal-700、深色 teal-400）。
  */
 
-/* ================= Windows 11（默认） ================= */
+/* ================= 共用（浅色） ================= */
 :root {
   color-scheme: light;
 
+  /* 字体族随平台（见下方平台块），默认按 Windows */
   --font-ui: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI", sans-serif;
-  --text-ui: 14px; /* 正文、导航、设置、对话框（Tailwind text-sm） */
+  --text-ui: 13px; /* 正文、导航、设置、对话框（Tailwind text-sm） */
   --text-dense: 13px; /* 任务表、详情、录像库、动态 */
-  --text-small: 12px; /* 说明文字（Tailwind text-xs） */
-  --text-title: 20px;
-  --weight-title: 600;
-  --nav-item-h: 36px;
-  --page-pad: 24px;
-  --sidebar-width: 216px;
-  --header-h: auto;
-  --dialog-width: 520px; /* 添加、编辑直播间和更新对话框，三平台相同 */
-  --settings-width: 760px; /* 设置页内容最大宽度，三平台相同 */
-  --selection-bar-width: 3px; /* Windows 选中竖条（selection-bar，左侧导航和设置分组），三平台相同 */
-  --selection-bar-height: 16px;
-  --radius: 4px;
+  --text-small: 11px; /* 说明文字（Tailwind text-xs） */
+  --text-title: 15px;
+  --weight-title: 700;
+  --nav-item-h: 28px;
+  --page-pad: 20px;
+  --sidebar-width: 208px;
+  --header-h: 52px; /* 页面顶部工具栏；macOS 的红绿灯与之垂直居中 */
+  --dialog-width: 520px; /* 添加、编辑直播间和更新对话框 */
+  --settings-width: 760px; /* 设置页内容最大宽度 */
+  --radius: 6px;
 
-  --window: #f3f3f3;
-  --content: #f9f9f9;
-  --content-border: rgb(0 0 0 / 0.06);
-  --statusbar: var(--window);
+  --window: #ececec;
+  --content: #ffffff;
+  --statusbar: #f6f6f6;
   --selection: rgb(15 118 110 / 0.1); /* 选中行 */
 
-  --background: #fdfdfd; /* 控件内部（次级按钮、开关滑块）用，保持不透明 */
-  --foreground: rgb(0 0 0 / 0.896);
-  --card: rgb(255 255 255 / 0.7);
+  --background: #ffffff; /* 控件内部（次级按钮、开关滑块）用，保持不透明 */
+  --foreground: rgb(0 0 0 / 0.85);
+  --card: rgb(0 0 0 / 0.025);
   --card-foreground: var(--foreground);
-  --popover: #f9f9f9;
+  --popover: rgb(246 246 246 / 0.97);
   --popover-foreground: var(--foreground);
 
   --primary: #0f766e; /* teal-700 */
   --primary-foreground: #ffffff;
-  --secondary: rgb(0 0 0 / 0.04);
+  --secondary: rgb(0 0 0 / 0.05);
   --secondary-foreground: var(--foreground);
-  --muted: rgb(0 0 0 / 0.04);
-  --muted-foreground: rgb(0 0 0 / 0.606);
-  --accent: rgb(0 0 0 / 0.037); /* 悬停 */
+  --muted: rgb(0 0 0 / 0.05);
+  --muted-foreground: rgb(0 0 0 / 0.5);
+  --accent: rgb(0 0 0 / 0.05); /* 悬停 */
   --accent-foreground: var(--foreground);
-  --destructive: #c42b1c;
+  --destructive: #dc2626;
 
-  --border: rgb(0 0 0 / 0.08);
-  --input: rgb(0 0 0 / 0.16);
+  --border: rgb(0 0 0 / 0.1);
+  --input: rgb(0 0 0 / 0.15);
   --ring: var(--primary);
 
-  --sidebar: var(--window);
+  --sidebar: #e8e8eb;
   --sidebar-foreground: var(--foreground);
   --sidebar-primary: var(--primary);
   --sidebar-primary-foreground: var(--primary-foreground);
-  --sidebar-accent: rgb(0 0 0 / 0.045);
+  --sidebar-accent: rgb(0 0 0 / 0.08);
   --sidebar-accent-foreground: var(--foreground);
-  --sidebar-border: transparent;
+  --sidebar-border: rgb(0 0 0 / 0.1);
   --sidebar-ring: var(--primary);
 
   /* 任务状态：颜色之外必须同时显示文字或图标 */
@@ -75,121 +74,61 @@
   --status-retrying: #b45309; /* amber-700，保证小字对比度 */
   --status-notify: var(--primary); /* 已开播 · 仅通知 */
   --status-recording-soft: rgb(220 38 38 / 0.07); /* 出错提示的淡红底 */
-
 }
 
-/* Mica 生效：窗口底透明，内容层半透明（Fluent Layer） */
+/* ================= 平台：只有字体族不同 ================= */
+:root[data-platform="macos"] {
+  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue", sans-serif;
+}
+
+:root[data-platform="linux"] {
+  --font-ui: "Adwaita Sans", Cantarell, "Noto Sans CJK SC", "Ubuntu", system-ui, sans-serif;
+}
+
+/* ================= 窗口材质 ================= */
+/* Mica 生效（Windows 11）：窗口底、侧栏和状态栏透明，内容层半透明（Fluent Layer） */
 :root[data-material="mica"] {
   --window: transparent;
+  --sidebar: transparent;
+  --statusbar: transparent;
   --content: rgb(255 255 255 / 0.5);
 }
 
-/* ================= macOS ================= */
-:root[data-platform="macos"] {
-  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue", sans-serif;
-  --text-ui: 13px;
-  --text-dense: 13px;
-  --text-small: 11px;
-  --text-title: 15px;
-  --weight-title: 700;
-  --nav-item-h: 28px;
-  --page-pad: 20px;
-  --sidebar-width: 208px;
-  --header-h: 52px; /* 统一工具栏，红绿灯与之垂直居中 */
-  --radius: 6px;
-
-  --window: #ececec;
-  --content: #ffffff;
-  --content-border: rgb(0 0 0 / 0.1);
-  --statusbar: #f6f6f6;
-
-  --background: #ffffff;
-  --foreground: rgb(0 0 0 / 0.85);
-  --card: rgb(0 0 0 / 0.025);
-  --popover: rgb(246 246 246 / 0.97);
-  --secondary: rgb(0 0 0 / 0.05);
-  --muted: rgb(0 0 0 / 0.05);
-  --muted-foreground: rgb(0 0 0 / 0.5);
-  --accent: rgb(0 0 0 / 0.05);
-  --destructive: #dc2626;
-  --border: rgb(0 0 0 / 0.1);
-  --input: rgb(0 0 0 / 0.15);
-
-  --sidebar: #e8e8eb;
-  --sidebar-accent: rgb(0 0 0 / 0.08);
-  --sidebar-border: rgb(0 0 0 / 0.1);
-}
-
-:root[data-platform="macos"][data-material="vibrancy"] {
-  --sidebar: transparent;
+/* vibrancy 生效（macOS）：侧栏透出系统材质，内容区不透明 */
+:root[data-material="vibrancy"] {
   --window: transparent;
+  --sidebar: transparent;
 }
 
-/* ================= Linux（Adwaita 风格） ================= */
-:root[data-platform="linux"] {
-  --font-ui: "Adwaita Sans", Cantarell, "Noto Sans CJK SC", "Ubuntu", system-ui, sans-serif;
-  --text-ui: 14px;
-  --text-dense: 13px;
-  --text-small: 12px;
-  --text-title: 18px;
-  --weight-title: 700;
-  --nav-item-h: 38px;
-  --page-pad: 18px;
-  --sidebar-width: 216px;
-  --radius: 8px;
-
-  --window: #fafafb;
-  --content: #fafafb;
-  --content-border: rgb(0 0 6 / 0.07);
-  --statusbar: #ebebed;
-
-  --background: #ffffff;
-  --foreground: rgb(0 0 6 / 0.8);
-  --card: #ffffff;
-  --popover: #ffffff;
-  --secondary: rgb(0 0 6 / 0.08);
-  --muted: rgb(0 0 6 / 0.05);
-  --muted-foreground: rgb(0 0 6 / 0.55);
-  --accent: rgb(0 0 6 / 0.05);
-  --destructive: #c01c28;
-  --border: rgb(0 0 6 / 0.1);
-  --input: rgb(0 0 6 / 0.15);
-
-  --sidebar: #ebebed;
-  --sidebar-accent: rgb(0 0 6 / 0.1);
-  --sidebar-border: rgb(0 0 6 / 0.07);
-}
-
-/*
- * ================= 深色 =================
- * 浅色的平台块选择器更具体，所以各平台的深色块要把浅色块里设过的颜色全部重写一遍。
- */
+/* ================= 深色 ================= */
 @media (prefers-color-scheme: dark) {
   :root {
     color-scheme: dark;
 
-    --window: #202020;
-    --content: #272727;
-    --content-border: rgb(255 255 255 / 0.06);
+    --window: #2b2b2d;
+    --content: #1e1e1e;
+    --statusbar: #252525;
     --selection: rgb(45 212 191 / 0.13);
 
-    --background: #2d2d2d;
-    --foreground: #ffffff;
-    --card: rgb(255 255 255 / 0.05);
-    --popover: #2c2c2c;
+    --background: #1e1e1e;
+    --foreground: rgb(255 255 255 / 0.85);
+    --card: rgb(255 255 255 / 0.04);
+    --popover: rgb(40 40 42 / 0.97);
 
     --primary: #2dd4bf; /* teal-400 */
     --primary-foreground: #042f2e; /* teal-950 */
-    --secondary: rgb(255 255 255 / 0.06);
-    --muted: rgb(255 255 255 / 0.06);
-    --muted-foreground: rgb(255 255 255 / 0.786);
+    --secondary: rgb(255 255 255 / 0.08);
+    --muted: rgb(255 255 255 / 0.08);
+    --muted-foreground: rgb(255 255 255 / 0.55);
     --accent: rgb(255 255 255 / 0.06);
-    --destructive: #ff99a4;
+    --destructive: #f87171;
 
-    --border: rgb(255 255 255 / 0.08);
-    --input: rgb(255 255 255 / 0.14);
+    --border: rgb(255 255 255 / 0.1);
+    --input: rgb(255 255 255 / 0.16);
 
-    --sidebar-accent: rgb(255 255 255 / 0.06);
+    --sidebar: #2a2a2d;
+    --sidebar-accent: rgb(255 255 255 / 0.1);
+    --sidebar-border: rgb(0 0 0 / 0.5);
 
     --status-recording: #f87171; /* red-400 */
     --status-waiting: #64748b; /* slate-500 */
@@ -200,60 +139,20 @@
 
   :root[data-material="mica"] {
     --window: transparent;
+    --sidebar: transparent;
+    --statusbar: transparent;
     --content: rgb(58 58 58 / 0.3);
   }
 
-  :root[data-platform="macos"] {
-    --window: #2b2b2d;
-    --content: #1e1e1e;
-    --content-border: rgb(0 0 0 / 0.6);
-    --statusbar: #252525;
-    --background: #1e1e1e;
-    --foreground: rgb(255 255 255 / 0.85);
-    --card: rgb(255 255 255 / 0.04);
-    --popover: rgb(40 40 42 / 0.97);
-    --secondary: rgb(255 255 255 / 0.08);
-    --muted: rgb(255 255 255 / 0.08);
-    --muted-foreground: rgb(255 255 255 / 0.55);
-    --accent: rgb(255 255 255 / 0.06);
-    --destructive: #f87171;
-    --border: rgb(255 255 255 / 0.1);
-    --input: rgb(255 255 255 / 0.16);
-    --sidebar: #2a2a2d;
-    --sidebar-accent: rgb(255 255 255 / 0.1);
-    --sidebar-border: rgb(0 0 0 / 0.5);
-  }
-
-  :root[data-platform="macos"][data-material="vibrancy"] {
-    --sidebar: transparent;
+  :root[data-material="vibrancy"] {
     --window: transparent;
-  }
-
-  :root[data-platform="linux"] {
-    --window: #222226;
-    --content: #222226;
-    --content-border: rgb(0 0 0 / 0.36);
-    --statusbar: #2e2e32;
-    --background: #2a2a2e;
-    --foreground: #ffffff;
-    --card: #2a2a2e;
-    --popover: #36363a;
-    --secondary: rgb(255 255 255 / 0.1);
-    --muted: rgb(255 255 255 / 0.06);
-    --muted-foreground: rgb(255 255 255 / 0.6);
-    --accent: rgb(255 255 255 / 0.06);
-    --destructive: #ff7b63;
-    --border: rgb(255 255 255 / 0.1);
-    --input: rgb(255 255 255 / 0.16);
-    --sidebar: #2e2e32;
-    --sidebar-accent: rgb(255 255 255 / 0.1);
-    --sidebar-border: rgb(0 0 0 / 0.36);
+    --sidebar: transparent;
   }
 }
 
 /* 高对比度（Windows 强制颜色）：窗口和内容层用系统 Canvas，避免透明底在系统配色下变黑 */
 @media (forced-colors: active) {
-  /* !important：要盖过各平台、各材质组合里更具体的选择器 */
+  /* !important：要盖过各材质组合里更具体的选择器 */
   :root {
     --window: Canvas !important;
     --content: Canvas !important;

@@ -6,7 +6,8 @@
 /*
  * Tailwind 主题映射到 src/tokens.css 中的变量，不另设颜色。
  * dark: 变体沿用 Tailwind v4 默认的 prefers-color-scheme，与 tokens.css 一致。
- * win: / mac: / linux: 变体按根节点 data-platform 选择平台，只用于页面布局（src/components/ui/ 里不用）。
+ * win: / mac: / linux: 变体按根节点 data-platform 选择平台，只用于外壳差异（例如 macOS 为红绿灯留出侧栏顶部），
+ * 不用来做视觉风格：内容区三个平台统一。src/components/ui/ 里不用。
  */
 @custom-variant win (&:where([data-platform="windows"] *));
 @custom-variant mac (&:where([data-platform="macos"] *));
@@ -14,7 +15,7 @@
 
 @theme inline {
   --font-sans: var(--font-ui);
-  /* 字号随平台：text-sm 为正文（Windows、Linux 14px，macOS 13px），text-xs 为说明文字 */
+  /* 字号三个平台相同：text-sm 为正文（13px），text-xs 为说明文字（11px） */
   --text-sm: var(--text-ui);
   --text-xs: var(--text-small);
 
@@ -39,7 +40,6 @@
 
   --color-window: var(--window);
   --color-content: var(--content);
-  --color-content-border: var(--content-border);
   --color-selection: var(--selection);
   --color-statusbar: var(--statusbar);
 
@@ -59,7 +59,7 @@
   --color-status-notify: var(--status-notify);
   --color-status-recording-soft: var(--status-recording-soft);
 
-  /* 与 shadcn/ui 约定一致：rounded-lg 即 --radius，随平台变化（Windows 4px、macOS 6px、Linux 8px） */
+  /* 与 shadcn/ui 约定一致：rounded-lg 即 --radius（6px，三个平台相同） */
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -215,24 +215,6 @@
   outline: 2px solid var(--ring);
   outline-offset: 0;
   border-radius: calc(var(--radius) - 2px);
-}
-
-/*
- * Windows 选中竖条：左侧导航和设置分组共用，只配 win: 变体使用（win:selection-bar）。画在 ::before 上，
- * 宿主元素需要 relative。
- */
-@utility selection-bar {
-  &::before {
-    content: "";
-    position: absolute;
-    top: 50%;
-    left: 0;
-    width: var(--selection-bar-width);
-    height: var(--selection-bar-height);
-    translate: 0 -50%;
-    border-radius: calc(infinity * 1px);
-    background-color: var(--color-primary);
-  }
 }
 
 /*

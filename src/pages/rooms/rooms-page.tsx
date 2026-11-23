@@ -24,7 +24,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { TaskId, TaskSnapshot } from "@/lib/api";
 import { useAppCommand } from "@/lib/app-commands";
-import { isMac, withShortcut } from "@/lib/platform";
+import { withShortcut } from "@/lib/platform";
 import type { TaskList } from "@/lib/use-backend";
 import { cn } from "@/lib/utils";
 import { AddTaskDialog } from "@/pages/rooms/add-task-dialog";
@@ -238,7 +238,7 @@ export function RoomsPage({ taskList, view, onViewChange, focusTask, onNavigate 
       <section className="flex min-h-0 min-w-0 flex-1 flex-col">
         <PageHeader
           title="直播间"
-          summary={isMac && taskList.tasks ? roomsSummary(tasks.length, counts.recording) : undefined}
+          summary={taskList.tasks ? roomsSummary(tasks.length, counts.recording) : undefined}
           actions={
             <>
               {tasks.length > 0 && (
@@ -246,16 +246,9 @@ export function RoomsPage({ taskList, view, onViewChange, focusTask, onNavigate 
               )}
               <Tooltip>
                 <TooltipTrigger asChild>
-                  {isMac ? (
-                    <Button variant="ghost" size="icon" onClick={openAdd} aria-label="添加直播间">
-                      <Plus className="size-[17px]" aria-hidden />
-                    </Button>
-                  ) : (
-                    <Button onClick={openAdd}>
-                      <Plus aria-hidden />
-                      添加直播间
-                    </Button>
-                  )}
+                  <Button variant="ghost" size="icon" onClick={openAdd} aria-label="添加直播间">
+                    <Plus className="size-[17px]" aria-hidden />
+                  </Button>
                 </TooltipTrigger>
                 <TooltipContent>{withShortcut("添加直播间", "N")}</TooltipContent>
               </Tooltip>
@@ -276,7 +269,7 @@ export function RoomsPage({ taskList, view, onViewChange, focusTask, onNavigate 
           <EmptyState onAdd={openAdd} />
         ) : (
           <>
-            <div className="flex flex-wrap items-center gap-2 px-(--page-pad) pt-3.5 pb-2.5 mac:pt-2.5 mac:pb-2">
+            <div className="flex flex-wrap items-center gap-2 px-(--page-pad) pt-2.5 pb-2">
               <StatusFilter value={view.group} counts={counts} onChange={(group) => patch({ group })} />
               <div className="ml-auto flex items-center gap-2">
                 {filtered && (
@@ -334,10 +327,10 @@ export function RoomsPage({ taskList, view, onViewChange, focusTask, onNavigate 
               </div>
             </div>
 
-            <div className="relative mx-3 mb-2 flex min-h-0 flex-1 flex-col mac:mx-2.5 linux:mx-(--page-pad) linux:mb-3">
+            <div className="relative mx-2.5 mb-2 flex min-h-0 flex-1 flex-col">
               <div
                 className={cn(
-                  "@container min-h-0 flex-1 overflow-auto linux:rounded-xl linux:border linux:bg-card linux:shadow-xs",
+                  "@container min-h-0 flex-1 overflow-auto",
                   // 批量操作条浮在表格底部，留出空间让最后一行可以滚动出来。
                   selected.length > 0 && "pb-16",
                 )}
@@ -451,7 +444,7 @@ export function RoomsPage({ taskList, view, onViewChange, focusTask, onNavigate 
 function LoadError({ error, onRetry }: { error: unknown; onRetry: () => void }) {
   const view = describeError(error);
   return (
-    <div className="mx-(--page-pad) mt-3.5 mb-4 flex flex-1 items-center justify-center linux:rounded-xl linux:border linux:bg-card">
+    <div className="mx-(--page-pad) mt-3.5 mb-4 flex flex-1 items-center justify-center">
       <div className="flex max-w-sm flex-col items-center gap-2 px-6 py-14 text-center" role="alert">
         <span className="mb-1 grid size-10 place-items-center rounded-full bg-status-recording-soft text-status-recording">
           <AlertTriangle className="size-5" aria-hidden />
@@ -468,7 +461,7 @@ function LoadError({ error, onRetry }: { error: unknown; onRetry: () => void }) 
 
 function EmptyState({ onAdd }: { onAdd: () => void }) {
   return (
-    <div className="mx-(--page-pad) mt-3.5 mb-4 flex flex-1 items-center justify-center linux:rounded-xl linux:border linux:bg-card">
+    <div className="mx-(--page-pad) mt-3.5 mb-4 flex flex-1 items-center justify-center">
       <div className="flex max-w-sm flex-col items-center gap-2 px-6 py-14 text-center">
         <span className="mb-1 grid size-10 place-items-center rounded-full bg-muted text-muted-foreground">
           <Radio className="size-5" aria-hidden />
@@ -500,7 +493,7 @@ function SearchBox({
   onChange: (value: string) => void;
 }) {
   return (
-    <InputGroup className="w-[220px] min-w-[140px] shrink mac:w-[200px]">
+    <InputGroup className="w-[200px] min-w-[140px] shrink">
       <InputGroupAddon>
         <Search aria-hidden />
       </InputGroupAddon>

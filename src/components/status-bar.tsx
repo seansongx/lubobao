@@ -198,7 +198,7 @@ export function StatusBar() {
   );
 
   return (
-    <footer className="flex h-7 shrink-0 items-center gap-3 bg-statusbar px-3 text-(length:--text-small) text-muted-foreground mac:h-6 mac:border-t linux:border-t">
+    <footer className="flex h-6 shrink-0 items-center gap-3 border-t bg-statusbar px-3 text-(length:--text-small) text-muted-foreground">
       <FfmpegItem />
       <Separator orientation="vertical" />
       <StatusItem hint="正在录制的任务数">
