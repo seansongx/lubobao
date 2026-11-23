@@ -33,7 +33,7 @@ main() {
 
     [ "$(uname -s)" = Linux ] || die "这个脚本只用于 Linux。桌面版请到 https://lubobao.xiaofany.com/#download 下载。"
     for cmd in curl tar gzip uname mktemp; do
-        command -v "$cmd" >/dev/null 2>&1 || die "缺少命令 $cmd，请先安装。"
+        command -v "$cmd" >/dev/null 2>&1 || die "缺少命令 ${cmd}，请先安装。"
     done
     if command -v sha256sum >/dev/null 2>&1; then
         sha_cmd="sha256sum"
@@ -47,7 +47,7 @@ main() {
     case $machine in
         x86_64 | amd64) arch=x64 ;;
         aarch64 | arm64) arch=arm64 ;;
-        *) die "暂不支持这种 CPU 架构：$machine（只提供 x64 和 arm64）。" ;;
+        *) die "暂不支持这种 CPU 架构：${machine}（只提供 x64 和 arm64）。" ;;
     esac
 
     query="platform=linux&arch=$arch&format=tar.gz"
@@ -61,7 +61,7 @@ main() {
     # 先确认能写入安装目录，免得下载完才发现没有权限
     check_writable
 
-    say "正在查询 lubobao-cli${version:+ v$version}（Linux · $arch）……"
+    say "正在查询 lubobao-cli${version:+ v$version}（Linux · ${arch}）……"
     fetch_info "$api_base/api/v1/products/lubobao/asset?$query"
 
     asset_version=$(info_get version)
@@ -86,7 +86,7 @@ main() {
     tmp=$(mktemp -d "${TMPDIR:-/tmp}/lubobao-cli-install.XXXXXX")
     archive="$tmp/$name"
 
-    say "正在下载 $name（v$asset_version）……"
+    say "正在下载 ${name}（v${asset_version}）……"
     curl -fL --retry 3 --connect-timeout 20 --progress-bar -o "$archive" "$url" \
         || die "下载失败，请检查网络后重试。"
 
@@ -112,9 +112,9 @@ main() {
     dest="$install_dir/lubobao-cli"
     # 先复制到同一目录下的临时文件，再改名替换：正在运行的旧版本不受影响。
     staging="$install_dir/.lubobao-cli.installing.$$"
-    cp "$bin" "$staging" || die "无法写入 $install_dir。"
+    cp "$bin" "$staging" || die "无法写入 ${install_dir}。"
     chmod 755 "$staging"
-    mv -f "$staging" "$dest" || die "无法安装到 $dest。"
+    mv -f "$staging" "$dest" || die "无法安装到 ${dest}。"
     staging=""
 
     installed=$("$dest" --version 2>/dev/null || true)
@@ -166,11 +166,11 @@ fetch_info() {
     status=$(printf '%s\n' "$response" | tail -n 1)
     info=$(printf '%s\n' "$response" | sed '$d' | tr -d '\r')
     if [ "$status" = 404 ]; then
-        die "没有找到可下载的文件${version:+（版本 $version）}。lubobao-cli 可能还没有发布这个版本。
+        die "没有找到可下载的文件${version:+（版本 ${version}）}。lubobao-cli 可能还没有发布这个版本。
 ${info:+分发平台说明：$info
 }可以到 https://github.com/seansongx/lubobao/releases 查看。"
     fi
-    [ "$status" = 200 ] || die "分发平台返回错误（HTTP $status），请稍后重试。"
+    [ "$status" = 200 ] || die "分发平台返回错误（HTTP ${status}），请稍后重试。"
 }
 
 info_get() {

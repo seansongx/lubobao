@@ -53,7 +53,7 @@ main() {
         say "用户 $SITE_USER 已存在。"
     else
         useradd --system --home-dir "$SITE_HOME" --no-create-home --shell /bin/sh "$SITE_USER"
-        say "已创建用户 $SITE_USER。"
+        say "已创建用户 ${SITE_USER}。"
     fi
     usermod --shell /bin/sh --home "$SITE_HOME" "$SITE_USER"
     usermod -p '*' "$SITE_USER"

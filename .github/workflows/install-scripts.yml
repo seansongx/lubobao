@@ -64,7 +64,7 @@ jobs:
               fi
               sleep 0.5
             done
-            echo "假服务器已就绪：$base（pid $server_pid）"
+            echo "假服务器已就绪：${base}（pid ${server_pid}）"
             trap 'rc=$?; if [ "$rc" -ne 0 ]; then echo "--- http.log ---"; cat "$work/http.log"; fi; kill "$server_pid" 2>/dev/null || true' EXIT
           }
           mkdir -p "$work/src" "$www/api/v1/products/lubobao" "$www/dl"
@@ -111,22 +111,36 @@ jobs:
             if hdiutil info | grep -q lubobao-install; then hdiutil info; fail "dmg 没有卸载"; fi
           }
 
+          # 用 macOS 自带的 /bin/sh（bash 3.2）运行，与用户执行 curl … | sh 时相同，不用 Homebrew 的新版 bash。
+          /bin/sh --version | head -n 1
+          # 主流程在两种 locale 下各跑一次：bash 3.2 在 UTF-8 locale 下会把紧跟在 $var 后的中文字节算进变量名。
+          # runner 上没有 zh_CN.UTF-8 时改用 en_US.UTF-8（同样是多字节 locale）。
+          utf8_locale=zh_CN.UTF-8
+          if ! locale -a | grep -qx 'zh_CN.UTF-8'; then
+            echo "runner 上没有 zh_CN.UTF-8，改用 en_US.UTF-8"
+            utf8_locale=en_US.UTF-8
+          fi
           # 先下载再从标准输入执行：与 curl | sh 一样由 sh 从 stdin 读脚本，但下载失败会单独报错
-          echo "::group::正常安装（脚本从标准输入读取）"
-          dir="$work/Applications"
-          mkdir -p "$dir"
           alive
           curl -fsSL "$base/install.sh" -o "$work/install-piped.sh"
-          LUBOBAO_INSTALL_DIR="$dir" sh < "$work/install-piped.sh"
-          [ -x "$dir/录播宝.app/Contents/MacOS/lubobao" ] || fail "app 没有安装到 $dir"
-          [ "$(ls -A "$dir")" = "录播宝.app" ] || { ls -la "$dir"; fail "安装目录里有多余文件"; }
-          no_quarantine "$dir/录播宝.app"
-          no_mounts
-          echo "::endgroup::"
+          for loc in C "$utf8_locale"; do
+            echo "::group::正常安装（LC_ALL=${loc}，脚本从标准输入读取）"
+            dir="$work/Applications-$loc"
+            mkdir -p "$dir"
+            LC_ALL="$loc" LUBOBAO_INSTALL_DIR="$dir" /bin/sh < "$work/install-piped.sh" 2>&1 | tee "$work/ok-$loc.log"
+            [ -x "$dir/录播宝.app/Contents/MacOS/lubobao" ] || fail "LC_ALL=${loc}：app 没有安装到 $dir"
+            [ "$(ls -A "$dir")" = "录播宝.app" ] || { ls -la "$dir"; fail "LC_ALL=${loc}：安装目录里有多余文件"; }
+            grep -q "已安装录播宝 v9.9.9 到 $dir/录播宝.app" "$work/ok-$loc.log" || fail "LC_ALL=${loc}：中文输出不完整"
+            if grep -q "unbound variable" "$work/ok-$loc.log"; then fail "LC_ALL=${loc}：变量名解析出错"; fi
+            no_quarantine "$dir/录播宝.app"
+            no_mounts
+            echo "::endgroup::"
+          done
+          dir="$work/Applications-$utf8_locale"
 
           echo "::group::覆盖安装"
           touch "$dir/录播宝.app/Contents/old-marker"
-          LUBOBAO_INSTALL_DIR="$dir" LUBOBAO_VERSION=v9.9.9 sh website/install.sh
+          LUBOBAO_INSTALL_DIR="$dir" LUBOBAO_VERSION=v9.9.9 /bin/sh website/install.sh
           [ ! -e "$dir/录播宝.app/Contents/old-marker" ] || fail "旧版本没有被替换"
           [ -x "$dir/录播宝.app/Contents/MacOS/lubobao" ] || fail "覆盖安装后 app 不完整"
           no_quarantine "$dir/录播宝.app"
@@ -134,7 +148,7 @@ jobs:
           echo "::endgroup::"
 
           echo "::group::安装到默认的 /Applications"
-          sh website/install.sh
+          /bin/sh website/install.sh
           [ -x "/Applications/录播宝.app/Contents/MacOS/lubobao" ] || fail "app 没有安装到 /Applications"
           no_quarantine "/Applications/录播宝.app"
           rm -rf "/Applications/录播宝.app"
@@ -144,7 +158,7 @@ jobs:
           write_asset "0000000000000000000000000000000000000000000000000000000000000000"
           dir="$work/Applications-bad"
           mkdir -p "$dir"
-          if LUBOBAO_INSTALL_DIR="$dir" sh website/install.sh > "$work/bad.log" 2>&1; then
+          if LUBOBAO_INSTALL_DIR="$dir" /bin/sh website/install.sh > "$work/bad.log" 2>&1; then
             cat "$work/bad.log"; fail "校验值错误时脚本没有中止"
           fi
           cat "$work/bad.log"
@@ -158,7 +172,7 @@ jobs:
           dir="$work/Applications-ro"
           mkdir -p "$dir"
           chmod 555 "$dir"
-          if LUBOBAO_INSTALL_DIR="$dir" sh website/install.sh > "$work/ro.log" 2>&1; then
+          if LUBOBAO_INSTALL_DIR="$dir" /bin/sh website/install.sh > "$work/ro.log" 2>&1; then
             cat "$work/ro.log"; fail "目录不可写时脚本没有报错"
           fi
           cat "$work/ro.log"
@@ -169,7 +183,7 @@ jobs:
 
           echo "::group::尚未发布（404）"
           rm "$www/api/v1/products/lubobao/asset"
-          if LUBOBAO_INSTALL_DIR="$work/Applications" sh website/install.sh > "$work/404.log" 2>&1; then
+          if LUBOBAO_INSTALL_DIR="$work/Applications" /bin/sh website/install.sh > "$work/404.log" 2>&1; then
             cat "$work/404.log"; fail "404 时脚本没有报错"
           fi
           cat "$work/404.log"
@@ -177,7 +191,7 @@ jobs:
           echo "::endgroup::"
 
           echo "::group::无效的版本号"
-          if LUBOBAO_VERSION='1.0;rm' sh website/install.sh > "$work/ver.log" 2>&1; then fail "无效版本号没有被拒绝"; fi
+          if LUBOBAO_VERSION='1.0;rm' /bin/sh website/install.sh > "$work/ver.log" 2>&1; then fail "无效版本号没有被拒绝"; fi
           grep -q "不是有效的版本号" "$work/ver.log" || { cat "$work/ver.log"; fail "无效版本号没有提示"; }
           echo "::endgroup::"
 
@@ -201,6 +215,16 @@ jobs:
           # /bin/sh 是 dash：确认脚本只用了 POSIX 语法
           for f in website/install.sh website/install-cli.sh deploy/site-setup.sh; do dash -n "$f"; done
 
+      # macOS 的 /bin/sh 是 bash 3.2：$var 后面直接跟中文时，会把中文的第一个字节算进变量名
+      # （例如变量 base 后面紧跟全角括号时报 unbound variable）。这类位置一律写成 ${var}。
+      - name: Check $var followed by non-ASCII
+        run: |
+          pattern='\$[A-Za-z_][A-Za-z0-9_]*(?=[^\x00-\x7F])'
+          if grep -nP "$pattern" website/install.sh website/install-cli.sh deploy/site-setup.sh .github/workflows/*.yml; then
+            echo "::error::上面这些行的 \$变量 后面直接跟着非 ASCII 字符，请改成 \${变量}"
+            exit 1
+          fi
+
       - name: Test install-cli.sh
         run: |
           set -euo pipefail
@@ -223,7 +247,7 @@ jobs:
               fi
               sleep 0.5
             done
-            echo "假服务器已就绪：$base（pid $server_pid）"
+            echo "假服务器已就绪：${base}（pid ${server_pid}）"
             trap 'rc=$?; if [ "$rc" -ne 0 ]; then echo "--- http.log ---"; cat "$work/http.log"; fi; kill "$server_pid" 2>/dev/null || true' EXIT
           }
           mkdir -p "$www/api/v1/products/lubobao" "$www/dl"

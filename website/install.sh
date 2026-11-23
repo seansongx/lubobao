@@ -34,7 +34,7 @@ main() {
 
     [ "$(uname -s)" = Darwin ] || die "这个脚本只用于 macOS。Windows 和 Linux 请到 https://lubobao.xiaofany.com/#download 下载。"
     for cmd in curl shasum hdiutil ditto xattr sw_vers sysctl; do
-        command -v "$cmd" >/dev/null 2>&1 || die "缺少命令 $cmd。"
+        command -v "$cmd" >/dev/null 2>&1 || die "缺少命令 ${cmd}。"
     done
 
     check_macos_version
@@ -56,7 +56,7 @@ main() {
         query="$query&version=$version"
     fi
 
-    say "正在查询录播宝${version:+ v$version}（macOS · $arch_label）……"
+    say "正在查询录播宝${version:+ v$version}（macOS · ${arch_label}）……"
     fetch_info "$api_base/api/v1/products/lubobao/asset?$query"
 
     asset_version=$(info_get version)
@@ -81,7 +81,7 @@ main() {
     tmp=$(mktemp -d "${TMPDIR:-/tmp}/lubobao-install.XXXXXX")
     dmg="$tmp/$name"
 
-    say "正在下载 $name（v$asset_version）……"
+    say "正在下载 ${name}（v${asset_version}）……"
     curl -fL --retry 3 --connect-timeout 20 --progress-bar -o "$dmg" "$url" \
         || die "下载失败，请检查网络后重试。"
 
@@ -121,9 +121,9 @@ main() {
     ditto "$app_src" "$staging" || die "复制应用失败。"
     xattr -dr com.apple.quarantine "$staging" 2>/dev/null || true
     if [ -e "$dest" ] || [ -L "$dest" ]; then
-        rm -rf "$dest" || die "无法替换已安装的 $dest。"
+        rm -rf "$dest" || die "无法替换已安装的 ${dest}。"
     fi
-    mv "$staging" "$dest" || die "无法安装到 $dest。"
+    mv "$staging" "$dest" || die "无法安装到 ${dest}。"
     staging=""
     # 再执行一次，确保最终位置上没有隔离标记
     xattr -dr com.apple.quarantine "$dest" 2>/dev/null || true
@@ -168,7 +168,7 @@ check_macos_version() {
         *[!0-9]*) die "无法识别系统版本：$product_version" ;;
     esac
     if [ "$major" -lt 10 ] || { [ "$major" -eq 10 ] && [ "$minor" -lt 15 ]; }; then
-        die "录播宝需要 macOS 10.15 或以后的版本，当前是 $product_version。"
+        die "录播宝需要 macOS 10.15 或以后的版本，当前是 ${product_version}。"
     fi
 }
 
@@ -179,11 +179,11 @@ fetch_info() {
     status=$(printf '%s\n' "$response" | tail -n 1)
     info=$(printf '%s\n' "$response" | sed '$d' | tr -d '\r')
     if [ "$status" = 404 ]; then
-        die "没有找到可下载的文件${version:+（版本 $version）}。录播宝可能还没有发布这个版本。
+        die "没有找到可下载的文件${version:+（版本 ${version}）}。录播宝可能还没有发布这个版本。
 ${info:+分发平台说明：$info
 }可以到 https://github.com/seansongx/lubobao/releases 查看。"
     fi
-    [ "$status" = 200 ] || die "分发平台返回错误（HTTP $status），请稍后重试。"
+    [ "$status" = 200 ] || die "分发平台返回错误（HTTP ${status}），请稍后重试。"
 }
 
 info_get() {
@@ -211,7 +211,7 @@ check_writable() {
         if [ "$install_dir" = /Applications ]; then
             die "/Applications 不存在。"
         fi
-        mkdir -p "$install_dir" 2>/dev/null || die "无法创建安装目录 $install_dir。"
+        mkdir -p "$install_dir" 2>/dev/null || die "无法创建安装目录 ${install_dir}。"
     fi
     if [ ! -w "$install_dir" ] || { [ -e "$dest" ] && [ ! -w "$dest" ]; }; then
         die "没有写入 $install_dir 的权限（普通用户账户不能写「应用程序」文件夹）。可以：

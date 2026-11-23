@@ -48,7 +48,7 @@ jobs:
           [[ -n "$SSH_KEY" ]] || missing="$missing SITE_DEPLOY_SSH_KEY"
           [[ -n "$KNOWN_HOSTS" ]] || missing="$missing SITE_DEPLOY_KNOWN_HOSTS"
           if [[ -n "$missing" ]]; then
-            echo "::notice title=跳过官网部署::未配置 Secret:$missing。配置方法见 docs/website-deploy.md。"
+            echo "::notice title=跳过官网部署::未配置 Secret:${missing}。配置方法见 docs/website-deploy.md。"
             echo "ready=false" >> "$GITHUB_OUTPUT"
           else
             echo "ready=true" >> "$GITHUB_OUTPUT"
@@ -116,9 +116,9 @@ jobs:
             ctype="$(curl -fsS --retry 5 --retry-delay 5 --retry-all-errors -m 20 -o "$body" -w '%{content_type}' "$SITE_URL$path")" \
               || { echo "::error::无法访问 $SITE_URL$path"; return 1; }
             grep -q -- "$expect" "$body" \
-              || { echo "::error::$SITE_URL$path 的内容与本次部署不符（没有找到「$expect」）"; return 1; }
+              || { echo "::error::$SITE_URL$path 的内容与本次部署不符（没有找到「${expect}」）"; return 1; }
             [[ "$ctype" == "$type"* ]] \
-              || { echo "::error::$SITE_URL$path 的 Content-Type 是「$ctype」，应为 $type"; return 1; }
+              || { echo "::error::$SITE_URL$path 的 Content-Type 是「${ctype}」，应为 $type"; return 1; }
             echo "OK $SITE_URL$path ($ctype)"
           }
           check / "鲁ICP备17049248号-1" "text/html"
