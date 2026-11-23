@@ -16,6 +16,7 @@ on:
     paths:
       - "website/**"
       - ".github/workflows/deploy-site.yml"
+      - "scripts/version-site-assets.mjs"
   workflow_dispatch:
 
 permissions:
@@ -67,6 +68,12 @@ jobs:
           done
           bash -n website/install.sh
           bash -n website/install-cli.sh
+
+      # 给 index.html 引用的 CSS、JS 和图片加上内容版本号（?v=SHA-256 前 10 位），文件变了地址才变，
+      # 老访客不会拿到新 HTML 配旧样式。只改这次 checkout 里的副本，仓库里的文件不变。
+      - name: Version site assets
+        if: steps.config.outputs.ready == 'true'
+        run: node scripts/version-site-assets.mjs website
 
       - name: Configure SSH
         if: steps.config.outputs.ready == 'true'
@@ -122,5 +129,6 @@ jobs:
             echo "OK $SITE_URL$path ($ctype)"
           }
           check / "鲁ICP备17049248号-1" "text/html"
+          check / "styles.css?v=" "text/html"
           check /install.sh "lubobao.xiaofany.com/install.sh" "text/plain"
           check /install-cli.sh "lubobao.xiaofany.com/install-cli.sh" "text/plain"

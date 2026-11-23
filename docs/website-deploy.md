@@ -163,7 +163,7 @@ gh workflow run deploy-site.yml --ref main
 gh run watch
 ```
 
-workflow 会依次核对私钥能否读取、known_hosts 里有没有与 `SITE_DEPLOY_HOST` 对应的记录（不对时直接指出是哪一项），然后：
+workflow 会依次核对私钥能否读取、known_hosts 里有没有与 `SITE_DEPLOY_HOST` 对应的记录（不对时直接指出是哪一项），再用 `scripts/version-site-assets.mjs` 给 `index.html` 里引用的 CSS、JS 和图片加上内容版本号（`styles.css?v=1a2b3c4d5e`，取文件 SHA-256 前 10 位；只改 workflow 里的副本），免得老访客在缓存过期前拿到新页面配旧样式，然后：
 
 ```sh
 rsync -rlz --checksum --delete --delay-updates --chmod=D755,F644 -p --exclude='.*' website/ lubobao-site@你的服务器:./

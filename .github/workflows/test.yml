@@ -53,7 +53,7 @@ jobs:
 
       # 发布脚本的本地检查（GitHub 兜底更新清单 latest.json）。
       - name: Release script tests
-        run: node --test scripts/updater-latest-json.test.mjs
+        run: node --test scripts/updater-latest-json.test.mjs scripts/version-site-assets.test.mjs
 
       - name: Install test FFmpeg
         run: |
