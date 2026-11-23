@@ -105,7 +105,9 @@ main() {
     if [ ! -f "$bin" ]; then
         bin=$(find "$tmp/x" -type f -name lubobao-cli | head -n 1)
     fi
-    [ -n "$bin" ] && [ -f "$bin" ] || die "压缩包里没有找到 lubobao-cli。"
+    if [ -z "$bin" ] || [ ! -f "$bin" ]; then
+        die "压缩包里没有找到 lubobao-cli。"
+    fi
 
     dest="$install_dir/lubobao-cli"
     # 先复制到同一目录下的临时文件，再改名替换：正在运行的旧版本不受影响。

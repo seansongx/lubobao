@@ -103,7 +103,9 @@ main() {
 
     app_src=""
     for candidate in "$mnt"/*.app; do
-        [ -d "$candidate" ] && [ ! -L "$candidate" ] || continue
+        if [ ! -d "$candidate" ] || [ -L "$candidate" ]; then
+            continue
+        fi
         [ -z "$app_src" ] || die "dmg 里有不止一个应用，已中止。"
         app_src=$candidate
     done

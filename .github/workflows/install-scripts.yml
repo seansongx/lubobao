@@ -49,6 +49,24 @@ jobs:
           www="$work/www"
           port=8765
           base="http://127.0.0.1:$port"
+          # 假服务器只绑定 127.0.0.1。启动后轮询到能正常请求（最多 30 秒）再开始测试；
+          # 进程提前退出或超时都直接报错并打印日志。测试中任何一步失败也会打印日志。
+          start_server() {
+            python3 -m http.server "$port" --bind 127.0.0.1 --directory "$www" > "$work/http.log" 2>&1 &
+            server_pid=$!
+            deadline=$((SECONDS + 30))
+            until curl -fsS -m 2 -o /dev/null "$1" 2>/dev/null; do
+              if ! kill -0 "$server_pid" 2>/dev/null; then
+                echo "::error::假服务器提前退出"; cat "$work/http.log"; exit 1
+              fi
+              if [ "$SECONDS" -ge "$deadline" ]; then
+                echo "::error::假服务器 30 秒内没有就绪：$1"; cat "$work/http.log"; exit 1
+              fi
+              sleep 0.5
+            done
+            echo "假服务器已就绪：$base（pid $server_pid）"
+            trap 'rc=$?; if [ "$rc" -ne 0 ]; then echo "--- http.log ---"; cat "$work/http.log"; fi; kill "$server_pid" 2>/dev/null || true' EXIT
+          }
           mkdir -p "$work/src" "$www/api/v1/products/lubobao" "$www/dl"
           cp website/install.sh "$www/install.sh"
 
@@ -81,11 +99,11 @@ jobs:
           }
           write_asset "$sha"
 
-          python3 -m http.server "$port" --bind 127.0.0.1 --directory "$www" > "$work/http.log" 2>&1 &
-          for _ in $(seq 1 30); do curl -fsS -o /dev/null "$base/install.sh" && break; sleep 1; done
+          start_server "$base/install.sh"
 
           export LUBOBAO_API_BASE="$base"
           fail() { echo "::error::$*"; exit 1; }
+          alive() { kill -0 "$server_pid" 2>/dev/null || fail "假服务器已退出"; }
           no_quarantine() {
             if xattr -r -l "$1" | grep -q com.apple.quarantine; then fail "$1 仍有 quarantine 属性"; fi
           }
@@ -93,10 +111,13 @@ jobs:
             if hdiutil info | grep -q lubobao-install; then hdiutil info; fail "dmg 没有卸载"; fi
           }
 
-          echo "::group::正常安装（curl | sh）"
+          # 先下载再从标准输入执行：与 curl | sh 一样由 sh 从 stdin 读脚本，但下载失败会单独报错
+          echo "::group::正常安装（脚本从标准输入读取）"
           dir="$work/Applications"
           mkdir -p "$dir"
-          curl -fsSL "$base/install.sh" | LUBOBAO_INSTALL_DIR="$dir" sh
+          alive
+          curl -fsSL "$base/install.sh" -o "$work/install-piped.sh"
+          LUBOBAO_INSTALL_DIR="$dir" sh < "$work/install-piped.sh"
           [ -x "$dir/录播宝.app/Contents/MacOS/lubobao" ] || fail "app 没有安装到 $dir"
           [ "$(ls -A "$dir")" = "录播宝.app" ] || { ls -la "$dir"; fail "安装目录里有多余文件"; }
           no_quarantine "$dir/录播宝.app"
@@ -187,6 +208,24 @@ jobs:
           www="$work/www"
           port=8765
           base="http://127.0.0.1:$port"
+          # 假服务器只绑定 127.0.0.1。启动后轮询到能正常请求（最多 30 秒）再开始测试；
+          # 进程提前退出或超时都直接报错并打印日志。测试中任何一步失败也会打印日志。
+          start_server() {
+            python3 -m http.server "$port" --bind 127.0.0.1 --directory "$www" > "$work/http.log" 2>&1 &
+            server_pid=$!
+            deadline=$((SECONDS + 30))
+            until curl -fsS -m 2 -o /dev/null "$1" 2>/dev/null; do
+              if ! kill -0 "$server_pid" 2>/dev/null; then
+                echo "::error::假服务器提前退出"; cat "$work/http.log"; exit 1
+              fi
+              if [ "$SECONDS" -ge "$deadline" ]; then
+                echo "::error::假服务器 30 秒内没有就绪：$1"; cat "$work/http.log"; exit 1
+              fi
+              sleep 0.5
+            done
+            echo "假服务器已就绪：$base（pid $server_pid）"
+            trap 'rc=$?; if [ "$rc" -ne 0 ]; then echo "--- http.log ---"; cat "$work/http.log"; fi; kill "$server_pid" 2>/dev/null || true' EXIT
+          }
           mkdir -p "$www/api/v1/products/lubobao" "$www/dl"
           cp website/install-cli.sh "$www/install-cli.sh"
 
@@ -207,14 +246,15 @@ jobs:
           }
           write_asset "$sha"
 
-          python3 -m http.server "$port" --bind 127.0.0.1 --directory "$www" > "$work/http.log" 2>&1 &
-          for _ in $(seq 1 30); do curl -fsS -o /dev/null "$base/install-cli.sh" && break; sleep 1; done
+          start_server "$base/install-cli.sh"
 
           export LUBOBAO_API_BASE="$base"
           fail() { echo "::error::$*"; exit 1; }
+          alive() { kill -0 "$server_pid" 2>/dev/null || fail "假服务器已退出"; }
 
           echo "::group::正常安装（curl | sh）"
           dir="$work/bin"
+          alive
           curl -fsSL "$base/install-cli.sh" | LUBOBAO_INSTALL_DIR="$dir" sh | tee "$work/ok.log"
           [ "$("$dir/lubobao-cli" --version)" = "lubobao-cli 9.9.9" ] || fail "lubobao-cli 没有正确安装"
           [ "$(ls -A "$dir")" = "lubobao-cli" ] || { ls -la "$dir"; fail "安装目录里有多余文件"; }
