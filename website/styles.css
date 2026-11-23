@@ -316,7 +316,11 @@ section[id], [id^="first-run-"], .dl-card { scroll-margin-top: 72px; }
 }
 .dl-soon-title { font-weight: 600; }
 .dl-notes summary { cursor: pointer; font-weight: 500; }
-#dl-notes-text { margin-top: 8px; color: var(--ink-2); white-space: pre-line; }
+.dl-notes-body { display: grid; gap: 8px; margin-top: 10px; color: var(--ink-2); }
+.dl-notes-body p, .dl-notes-body li { white-space: pre-line; }
+.dl-notes-body h4 { margin: 6px 0 0; color: var(--ink); font-size: 14px; font-weight: 600; }
+.dl-notes-body ul { display: grid; gap: 4px; margin: 0; padding-left: 1.3em; }
+.dl-notes-body strong { color: var(--ink); font-weight: 600; }
 
 /* 命令框 */
 .cmd-box {
