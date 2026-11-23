@@ -1,8 +1,8 @@
 //! 调度与 Tauri 之间的胶水：`setup` 中启动、退出时收尾、推送事件、命令。
 //! 调度本身见上级模块，不依赖 Tauri。
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use tauri::{Emitter, Manager};
@@ -34,16 +34,24 @@ pub fn init(app: &tauri::AppHandle) -> tauri::Result<()> {
 
 static EXIT_STARTED: AtomicBool = AtomicBool::new(false);
 static EXIT_READY: AtomicBool = AtomicBool::new(false);
+/// 安装更新前收尾期间被拦下的退出请求（退出码）。收尾由 [`finish_before_update`] 进行、
+/// 它不会退出，所以要记下来，收尾后由调用方补发。
+static PENDING_EXIT: Mutex<Option<i32>> = Mutex::new(None);
 
 /// 处理 `RunEvent::ExitRequested`：第一次先阻止退出，调用 [`Scheduler::shutdown`] 等录制
 /// 收尾后再退出，退出码沿用这次请求的 `code`（例如数据库打不开时的 1）；收尾完成后的
-/// 退出请求直接放行。
+/// 退出请求直接放行。收尾进行中又来的请求记在 [`PENDING_EXIT`]：退出的收尾结束后本来就会
+/// 退出；更新的收尾结束后由 [`finish_before_update`] 交给调用方补发。
 pub fn on_exit_requested(app: &tauri::AppHandle, code: Option<i32>, api: &tauri::ExitRequestApi) {
     if EXIT_READY.load(Ordering::SeqCst) {
         return;
     }
     api.prevent_exit();
     if EXIT_STARTED.swap(true, Ordering::SeqCst) {
+        let mut pending = PENDING_EXIT
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        pending.get_or_insert(code.unwrap_or(0));
         return;
     }
     let app = app.clone();
@@ -57,6 +65,35 @@ pub fn on_exit_requested(app: &tauri::AppHandle, code: Option<i32>, api: &tauri:
         EXIT_READY.store(true, Ordering::SeqCst);
         app.exit(code.unwrap_or(0));
     });
+}
+
+/// 安装更新前收尾：与退出相同地停止调度和全部录制、等文件收尾（[`Scheduler::shutdown`]），
+/// 但不退出。收尾已经开始时只等它完成。完成后的退出、重启请求直接放行，不会重复收尾。
+///
+/// 返回收尾期间被拦下的退出请求的退出码：调用方应放弃安装，改为 `app.exit(code)`。
+pub async fn finish_before_update(app: &tauri::AppHandle) -> Option<i32> {
+    if EXIT_STARTED.swap(true, Ordering::SeqCst) {
+        while !EXIT_READY.load(Ordering::SeqCst) {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    } else {
+        match app.try_state::<Arc<Scheduler>>() {
+            Some(scheduler) => scheduler.shutdown().await,
+            None => {
+                crate::recorder::stop_all().await;
+            }
+        }
+        EXIT_READY.store(true, Ordering::SeqCst);
+    }
+    PENDING_EXIT
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .take()
+}
+
+/// 录制是否已经收尾完毕（调度已停止）。安装更新失败后只在这之后才允许重启。
+pub fn finished() -> bool {
+    EXIT_READY.load(Ordering::SeqCst)
 }
 
 /// 系统直接结束进程时的收尾时限，短于注销、关机的宽限时间（Windows 约 5 秒起）。

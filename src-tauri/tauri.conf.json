@@ -33,6 +33,7 @@
       "appimage",
       "deb"
     ],
+    "createUpdaterArtifacts": true,
     "publisher": "Song",
     "copyright": "Copyright © 2026 Song. Released under the MIT License.",
     "license": "MIT",
@@ -63,6 +64,18 @@
     "linux": {
       "deb": {
         "section": "video"
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQwMzVFMTYzRDBEMjU2MDIKUldRQ1Z0TFFZK0UxUURzVWR2VU4rM2I5Y2RiS3ZNazJNK05mNyt6eTg4dEpGQzFFWE1YVHhFaDkK",
+      "endpoints": [
+        "https://xiaofany.com/api/update/lubobao/tauri/{{target}}/{{arch}}/{{current_version}}"
+      ],
+      "requireSignedVersion": true,
+      "windows": {
+        "installMode": "passive"
       }
     }
   }

@@ -263,6 +263,8 @@ export interface Settings {
   stream_end_notification_enabled: boolean;
   /** 关闭主窗口时：ask 每次询问（默认），tray 隐藏到托盘，quit 退出。托盘不可用时一律退出。 */
   close_window_action: CloseWindowAction;
+  /** 启动约 10 秒后自动检查一次更新（默认开）。 */
+  auto_check_update: boolean;
 }
 
 // ---- 调度（src-tauri/src/scheduler/mod.rs） ----
@@ -303,11 +305,64 @@ export interface PauseAllPrompt {
   recording: number;
 }
 
+/** 收尾的原因：退出应用，或安装更新（收尾后安装并重启）。 */
+export type QuitPurpose = "quit" | "update";
+
 /** 退出状态，变化时通过 quit-state 事件推送。 */
 export interface QuitState {
   phase: QuitPhase;
   /** 正在录制（含启动中、收尾中）的任务数。 */
   recording: number;
+  purpose: QuitPurpose;
+}
+
+// ---- 应用内更新（src-tauri/src/desktop/update.rs） ----
+
+/** 官网，手动下载新版本用。 */
+export const WEBSITE_URL = "https://lubobao.xiaofany.com";
+
+/**
+ * not_configured：这个构建没有更新公钥（开发构建）；network：连不上更新服务器或下载中断；
+ * signature：签名校验失败，已拒绝安装；unsupported：系统或安装方式不支持；busy：正在检查、
+ * 下载、安装或退出；not_ready：还没检查或下载；install：安装失败（此时录制已停止，需要重启）。
+ */
+export type UpdateErrorKind =
+  | "not_configured"
+  | "network"
+  | "signature"
+  | "unsupported"
+  | "busy"
+  | "not_ready"
+  | "install";
+
+/** 更新命令失败时 Promise 以此对象 reject。 */
+export interface UpdateError {
+  kind: UpdateErrorKind;
+  message: string;
+}
+
+export interface UpdateInfo {
+  version: string;
+  currentVersion: string;
+  /** 更新说明，纯文本或简单的 Markdown。 */
+  notes: string | null;
+  /** RFC 3339。 */
+  pubDate: string | null;
+  /** 服务端标记的重要更新：醒目提示，但不强制。 */
+  mandatory: boolean;
+}
+
+/** auto：可以应用内下载安装；manual：只能到官网下载（Linux deb 等）。 */
+export type UpdateInstallMode = "auto" | "manual";
+
+export type UpdateCheck =
+  | { status: "upToDate"; currentVersion: string }
+  | { status: "available"; update: UpdateInfo; install: UpdateInstallMode };
+
+/** 下载进度，update-progress 事件。total 为 null 时服务器没给长度。 */
+export interface UpdateProgress {
+  downloaded: number;
+  total: number | null;
 }
 
 // ---- 录像库（src-tauri/src/library） ----
@@ -431,6 +486,19 @@ export interface Backend {
   /** 在系统文件管理器中显示并选中；path 为 "" 时打开根目录。 */
   revealLibraryItem(path: string): Promise<void>;
 
+  /** 检查更新。发现新版本时后端记下，供 downloadUpdate 使用。失败时以 UpdateError reject。 */
+  checkUpdate(): Promise<UpdateCheck>;
+  /** 下载并校验签名，进度走 onUpdateProgress。签名不符时以 kind "signature" reject。 */
+  downloadUpdate(): Promise<void>;
+  /**
+   * 停止调度和全部录制、等文件收尾（quit-state 为 finishing、purpose 为 update），再安装并重启。
+   * 有录制时调用前先确认。成功时应用随即退出；失败时以 kind "install" reject。
+   */
+  installUpdate(): Promise<void>;
+  /** 安装失败后重启录播宝（录制已收尾时才允许，Rust 命令 restart_after_failed_update）。 */
+  restartAfterFailedUpdate(): Promise<void>;
+  onUpdateProgress(handler: (progress: UpdateProgress) => void): Promise<UnlistenFn>;
+
   /** 应用版本号（tauri.conf.json 的 version）。 */
   getAppVersion(): Promise<string>;
   /** 弹出系统目录选择框，取消时返回 null。 */
@@ -479,6 +547,12 @@ const tauriBackend: Backend = {
   openLibraryFile: (path) => invoke("open_library_file", { path }),
   openLibraryFolder: (path) => invoke("open_library_folder", { path }),
   revealLibraryItem: (path) => invoke("reveal_library_item", { path }),
+
+  checkUpdate: () => invoke("check_update"),
+  downloadUpdate: () => invoke("download_update"),
+  installUpdate: () => invoke("install_update"),
+  restartAfterFailedUpdate: () => invoke("restart_after_failed_update"),
+  onUpdateProgress: (handler) => on("update-progress", handler),
 
   getAppVersion: () => getVersion(),
   async pickDirectory(options) {

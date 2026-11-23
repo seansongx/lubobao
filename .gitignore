@@ -25,3 +25,6 @@ dist-ssr
 
 # Cargo workspace build output
 /target/
+
+# xiaofany.com 发布脚本的续传记录（含预签名上传地址）
+.release-state.json

@@ -1,0 +1,181 @@
+name: Publish to xiaofany.com
+
+# GitHub Release 人工发布后，把同一批文件发布到 xiaofany.com（R2 + 下载接口 + 应用内更新接口），
+# GitHub Release 登记为备用线路。手动触发只用于已经正式发布的 Release（草稿的 GitHub 下载地址
+# 是 404，备用线路会失效），草稿一律拒绝。发布脚本 scripts/publish-xiaofany.mjs 拷自 xiaofany.com。
+# 没有 Secret RELEASE_TOKEN 时（例如 fork）给出 notice 后跳过。流程见 docs/release.md。
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 要发布的 tag（如 v0.1.0），只能是已正式发布的 Release
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-xiaofany-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      # 通过环境变量传入，不在脚本里直接展开 ${{ }}。
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      RELEASE_API: https://xiaofany.com
+      RELEASE_SLUG: lubobao
+    steps:
+      - name: Check token
+        id: token
+        env:
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          if [ -z "$RELEASE_TOKEN" ]; then
+            echo "::notice::没有设置 Secret RELEASE_TOKEN，跳过发布到 xiaofany.com。"
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        if: steps.token.outputs.enabled == 'true'
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        if: steps.token.outputs.enabled == 'true'
+        with:
+          node-version: 22
+
+      # Release 的状态、渠道和更新说明一律从 GitHub 重新读取（手动触发时没有事件载荷）。
+      - name: Read release
+        id: release
+        if: steps.token.outputs.enabled == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! printf '%s' "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::tag 必须是 v<版本号>：$TAG"
+            exit 1
+          fi
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,isPrerelease,body > "$RUNNER_TEMP/release.json"
+          if [ "$(jq -r .isDraft "$RUNNER_TEMP/release.json")" = "true" ]; then
+            echo "::error::$TAG 还是草稿：请先在 GitHub 上发布 Release，发布后会自动触发本 workflow。"
+            exit 1
+          fi
+          if [ "$(jq -r .isPrerelease "$RUNNER_TEMP/release.json")" = "true" ]; then
+            echo "channel=beta" >> "$GITHUB_OUTPUT"
+          else
+            echo "channel=stable" >> "$GITHUB_OUTPUT"
+          fi
+          # 更新说明：Release 正文里「<!-- 以上为应用内更新说明 -->」之前的部分（release.yml 生成的
+          # 草稿带这行）。没有这行时失败：整个正文是安装说明，不能当更新说明发给应用。占位句没换掉时
+          # 也失败，免得用户看到一句提示语。
+          jq -r '.body // ""' "$RUNNER_TEMP/release.json" | tr -d '\r' > "$RUNNER_TEMP/body.md"
+          if ! grep -q '<!-- 以上为应用内更新说明 -->' "$RUNNER_TEMP/body.md"; then
+            echo "::error::Release 正文里没有「<!-- 以上为应用内更新说明 -->」这一行：在更新内容和安装说明之间加上它，再手动运行本 workflow（tag 填 ${TAG}）。"
+            exit 1
+          fi
+          sed '/<!-- 以上为应用内更新说明 -->/,$d' "$RUNNER_TEMP/body.md" > "$RUNNER_TEMP/notes.md"
+          if grep -q '发布前把这里换成本版本的变化' "$RUNNER_TEMP/notes.md"; then
+            echo "::error::Release 正文里的「更新内容」还是占位句：编辑 Release 写好更新内容后，手动运行本 workflow（tag 填 ${TAG}）。"
+            exit 1
+          fi
+          # 去掉开头的「## 更新内容」标题，应用的更新对话框里已经有标题。
+          sed -i '1{/^## 更新内容[[:space:]]*$/d}' "$RUNNER_TEMP/notes.md"
+          sed -i '/./,$!d' "$RUNNER_TEMP/notes.md"
+          if [ -n "$(tr -d '[:space:]' < "$RUNNER_TEMP/notes.md")" ]; then
+            echo "has_notes=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::更新说明是空的，应用的更新对话框里不会显示变化内容。"
+            echo "has_notes=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download release assets
+        if: steps.token.outputs.enabled == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          dist="$RUNNER_TEMP/dist"
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir "$dist" --pattern 'lubobao*' --pattern SHA256SUMS.txt
+          cd "$dist"
+          sha256sum -c --strict SHA256SUMS.txt
+          # 下载到的每个文件都要在 SHA256SUMS.txt 里。
+          for f in lubobao*; do
+            grep -q "  $f\$" SHA256SUMS.txt || { echo "::error::$f 不在 SHA256SUMS.txt 里"; exit 1; }
+          done
+          ls -l
+
+      - name: Build manifest
+        if: steps.token.outputs.enabled == 'true'
+        run: |
+          node scripts/xiaofany-manifest.mjs --dir "$RUNNER_TEMP/dist" --tag "$TAG" \
+            --upstream-base "https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG"
+
+      - name: Publish
+        if: steps.token.outputs.enabled == 'true'
+        env:
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          CHANNEL: ${{ steps.release.outputs.channel }}
+          HAS_NOTES: ${{ steps.release.outputs.has_notes }}
+        run: |
+          notes_args=()
+          if [ "$HAS_NOTES" = "true" ]; then
+            # 必须写成 --notes=…：说明通常以「- 」开头，分开写会被 parseArgs 当成另一个选项而报错。
+            notes_args=("--notes=$(cat "$RUNNER_TEMP/notes.md")")
+          fi
+          # --skip-existing：版本已发布时视为成功（重跑安全）；--force：覆盖上次中途失败留下的草稿。
+          # 续传记录含预签名上传地址，放在工作区外，不上传为 artifact。
+          node scripts/publish-xiaofany.mjs \
+            --manifest "$RUNNER_TEMP/dist/xiaofany-release.json" \
+            --channel "$CHANNEL" "${notes_args[@]}" \
+            --skip-existing --force \
+            --state-file "$RUNNER_TEMP/xiaofany-release-state.json"
+
+      # 发布后核对：版本接口的版本号；Tauri 升级接口对旧版本返回这个版本，签名与 Release 上的 .sig
+      # 一致，下载地址的文件名也对得上（接口有 60 秒缓存，重试几次）。
+      - name: Verify
+        if: steps.token.outputs.enabled == 'true'
+        env:
+          CHANNEL: ${{ steps.release.outputs.channel }}
+        run: |
+          version="${TAG#v}"
+          query=""
+          [ "$CHANNEL" = "beta" ] && query="?channel=beta"
+          check() {
+            latest="$(curl -fsS "$RELEASE_API/api/v1/products/$RELEASE_SLUG/latest$query" | jq -r .version)" || return 1
+            [ "$latest" = "$version" ] || { echo "latest 接口返回 ${latest}，应为 $version"; return 1; }
+            for target in windows/x86_64 darwin/aarch64 darwin/x86_64 linux/x86_64; do
+              case "$target" in
+                windows/x86_64) file="lubobao_${version}_windows_x64-setup.exe" ;;
+                darwin/aarch64) file="lubobao_${version}_macos_arm64.app.tar.gz" ;;
+                darwin/x86_64) file="lubobao_${version}_macos_x64.app.tar.gz" ;;
+                linux/x86_64) file="lubobao_${version}_linux_amd64.AppImage" ;;
+              esac
+              body="$RUNNER_TEMP/update.json"
+              status="$(curl -sS -o "$body" -w '%{http_code}' "$RELEASE_API/api/update/$RELEASE_SLUG/tauri/$target/0.0.0$query")"
+              [ "$status" = "200" ] || { echo "$target 返回 HTTP $status"; return 1; }
+              got="$(jq -r .version "$body")"
+              [ "$got" = "$version" ] || { echo "$target 返回版本 ${got}，应为 $version"; return 1; }
+              expected="$(tr -d '\r\n' < "$RUNNER_TEMP/dist/$file.sig")"
+              [ "$(jq -r '.signature // empty' "$body")" = "$expected" ] || { echo "$target 的签名与 $file.sig 不一致"; return 1; }
+              name="$(jq -r '.url // empty' "$body" | sed 's/[?#].*//; s|.*/||')"
+              [ "$name" = "$file" ] || { echo "$target 的下载地址指向 ${name}，应为 $file"; return 1; }
+              echo "✓ $target → $got"
+            done
+          }
+          for attempt in 1 2 3 4 5 6; do
+            if check; then
+              echo "- xiaofany.com：\`$RELEASE_SLUG $version\`（${CHANNEL}），版本接口和应用内更新接口都已核对" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            echo "第 $attempt 次核对未通过，30 秒后重试"
+            sleep 30
+          done
+          echo "::error::发布后核对失败：xiaofany.com 的版本接口或应用内更新接口没有返回 $version"
+          exit 1

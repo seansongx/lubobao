@@ -34,7 +34,7 @@ export function DesktopDialogs() {
  * 收尾后退出。
  */
 function QuitDialog() {
-  const [state, setState] = useState<QuitState>({ phase: "idle", recording: 0 });
+  const [state, setState] = useState<QuitState>({ phase: "idle", recording: 0, purpose: "quit" });
 
   useEffect(() => {
     let disposed = false;
@@ -73,7 +73,8 @@ function QuitDialog() {
 
   return (
     <AlertDialog
-      open={state.phase !== "idle"}
+      // 安装更新前的收尾由更新对话框显示。
+      open={state.phase !== "idle" && state.purpose !== "update"}
       onOpenChange={(open) => {
         if (!open) cancel();
       }}
