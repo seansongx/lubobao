@@ -35,7 +35,7 @@ export function AppSidebar({ current, onNavigate, recordingCount }: AppSidebarPr
               aria-current={active ? "page" : undefined}
               onClick={() => onNavigate(page.id)}
               className={cn(
-                "relative flex h-(--nav-item-h) items-center gap-2 rounded-md px-2 text-left text-(length:--text-ui) outline-none transition-colors",
+                "relative flex h-(--nav-item-h) items-center gap-2 rounded-md px-2 text-left text-(length:--text-nav) outline-none transition-colors",
                 "hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-ring",
                 active && "bg-sidebar-accent",
               )}

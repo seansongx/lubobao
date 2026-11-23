@@ -19,12 +19,13 @@
 
   /* 字体族随平台（见下方平台块），默认按 Windows */
   --font-ui: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI", sans-serif;
-  --text-ui: 13px; /* 正文、导航、设置、对话框（Tailwind text-sm） */
+  --text-ui: 13px; /* 正文、设置、对话框（Tailwind text-sm） */
+  --text-nav: 14px; /* 左侧导航 */
   --text-dense: 13px; /* 任务表、详情、录像库、动态 */
   --text-small: 11px; /* 说明文字（Tailwind text-xs） */
   --text-title: 15px;
   --weight-title: 700;
-  --nav-item-h: 28px;
+  --nav-item-h: 32px;
   --page-pad: 20px;
   --sidebar-width: 208px;
   --header-h: 52px; /* 页面顶部工具栏；macOS 的红绿灯与之垂直居中 */

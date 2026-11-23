@@ -18,8 +18,8 @@
 | 项 | 值 |
 |---|---|
 | 圆角 | `--radius` 6px（shadcn 刻度由它推出：`rounded-md` 4px、`rounded-lg` 6px、`rounded-xl` 10px） |
-| 字号 | 正文、导航、设置、对话框 13px（`--text-ui`），任务表、详情、录像库、动态 13px（`--text-dense`），说明 11px（`--text-small`），页面标题 15px 粗体（`--text-title`、`--weight-title`）；行高 1.43 |
-| 尺寸 | 导航项 28px（`--nav-item-h`），内容边距 20px（`--page-pad`），侧栏 208px（`--sidebar-width`），顶部工具栏 52px（`--header-h`），状态栏 24px |
+| 字号 | 正文、设置、对话框 13px（`--text-ui`），左侧导航 14px（`--text-nav`），任务表、详情、录像库、动态 13px（`--text-dense`），说明 11px（`--text-small`），页面标题 15px 粗体（`--text-title`、`--weight-title`）；行高 1.43 |
+| 尺寸 | 导航项 32px（`--nav-item-h`，设置页左侧分组比它矮 4px），内容边距 20px（`--page-pad`），侧栏 208px（`--sidebar-width`），顶部工具栏 52px（`--header-h`），状态栏 24px |
 | 配色（浅色） | 窗口 `#ececec`，侧栏 `#e8e8eb`，内容层 `#ffffff`，状态栏 `#f6f6f6`，浮层 `rgb(246 246 246 / .97)`，边框 `rgb(0 0 0 / .1)` |
 | 配色（深色） | 窗口 `#2b2b2d`，侧栏 `#2a2a2d`，内容层 `#1e1e1e`，状态栏 `#252525`，浮层 `rgb(40 40 42 / .97)`，边框 `rgb(255 255 255 / .1)`（中性石墨，不偏蓝） |
 | 工具栏 | 每页顶部 52px，下方一条分隔线；标题和摘要（数量、占用空间等）上下排列，右侧是搜索框和操作；「添加直播间」是无框「+」图标按钮。右侧详情的头部也是 52px，与工具栏对齐 |
