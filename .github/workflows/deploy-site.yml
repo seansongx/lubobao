@@ -1,0 +1,126 @@
+# 把 website/ 同步到官网服务器（lubobao.xiaofany.com）。
+#
+# 只在 main 分支 website/ 有改动时或手动运行，不响应 PR。用服务器上的受限用户 lubobao-site：
+# 它的密钥在 authorized_keys 里被限定为 command="rrsync /var/www/lubobao",restrict，
+# 只能在这个目录里同步文件，不能登录 shell 或做别的事。服务器准备和 Secret 设置见 docs/website-deploy.md。
+#
+# 需要的 Secret：SITE_DEPLOY_HOST、SITE_DEPLOY_USER、SITE_DEPLOY_SSH_KEY、SITE_DEPLOY_KNOWN_HOSTS；
+# 可选变量：SITE_DEPLOY_PORT（默认 22）、SITE_URL（默认 https://lubobao.xiaofany.com）。
+# 没有配置 Secret 时只输出提示，任务照常成功。
+
+name: Deploy website
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "website/**"
+      - ".github/workflows/deploy-site.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# 同一时间只部署一次；排队中的部署不取消，保证最后一次提交最终生效。
+concurrency:
+  group: deploy-site
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      SITE_URL: ${{ vars.SITE_URL || 'https://lubobao.xiaofany.com' }}
+    steps:
+      - name: Check configuration
+        id: config
+        env:
+          DEPLOY_HOST: ${{ secrets.SITE_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.SITE_DEPLOY_USER }}
+          SSH_KEY: ${{ secrets.SITE_DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.SITE_DEPLOY_KNOWN_HOSTS }}
+        run: |
+          missing=""
+          [[ -n "$DEPLOY_HOST" ]] || missing="$missing SITE_DEPLOY_HOST"
+          [[ -n "$DEPLOY_USER" ]] || missing="$missing SITE_DEPLOY_USER"
+          [[ -n "$SSH_KEY" ]] || missing="$missing SITE_DEPLOY_SSH_KEY"
+          [[ -n "$KNOWN_HOSTS" ]] || missing="$missing SITE_DEPLOY_KNOWN_HOSTS"
+          if [[ -n "$missing" ]]; then
+            echo "::notice title=跳过官网部署::未配置 Secret:${missing}。配置方法见 docs/website-deploy.md。"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - if: steps.config.outputs.ready == 'true'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Check site files
+        if: steps.config.outputs.ready == 'true'
+        run: |
+          for f in index.html styles.css site.js install.sh install-cli.sh; do
+            [[ -s "website/$f" ]] || { echo "::error::website/$f 不存在或为空"; exit 1; }
+          done
+          bash -n website/install.sh
+          bash -n website/install-cli.sh
+
+      - name: Configure SSH
+        if: steps.config.outputs.ready == 'true'
+        env:
+          DEPLOY_HOST: ${{ secrets.SITE_DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ vars.SITE_DEPLOY_PORT || '22' }}
+          SSH_KEY: ${{ secrets.SITE_DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.SITE_DEPLOY_KNOWN_HOSTS }}
+        run: |
+          [[ "$DEPLOY_PORT" =~ ^[0-9]{1,5}$ ]] || { echo "::error::变量 SITE_DEPLOY_PORT 不是有效端口：$DEPLOY_PORT"; exit 1; }
+          install -d -m 700 ~/.ssh
+          # 在 Windows 上生成或复制的值可能带 \r，ssh 会因此认不出私钥或主机记录
+          printf '%s\n' "$SSH_KEY" | tr -d '\r' > ~/.ssh/site_deploy_key
+          chmod 600 ~/.ssh/site_deploy_key
+          printf '%s\n' "$KNOWN_HOSTS" | tr -d '\r' > ~/.ssh/site_known_hosts
+          chmod 600 ~/.ssh/site_known_hosts
+          # 连接前先核对，失败时直接指出是哪一项配错了
+          ssh-keygen -y -f ~/.ssh/site_deploy_key > /dev/null \
+            || { echo "::error::SITE_DEPLOY_SSH_KEY 不是可用的私钥（需要完整的 OpenSSH 私钥文件内容，且没有密码）"; exit 1; }
+          echo "SITE_DEPLOY_KNOWN_HOSTS 中的主机密钥："
+          ssh-keygen -lf ~/.ssh/site_known_hosts || echo "（无法解析：每行应为「主机 类型 公钥」）"
+          host="$DEPLOY_HOST"; [[ "$DEPLOY_PORT" == 22 ]] || host="[$DEPLOY_HOST]:$DEPLOY_PORT"
+          ssh-keygen -F "$host" -f ~/.ssh/site_known_hosts > /dev/null \
+            || { echo "::error::SITE_DEPLOY_KNOWN_HOSTS 里没有与 SITE_DEPLOY_HOST 对应的记录：每行开头的主机名要与 SITE_DEPLOY_HOST 完全一致（IP 对 IP、域名对域名；端口不是 22 时写成 [主机]:端口）"; exit 1; }
+
+      # 服务器端由 rrsync 把路径限定在 /var/www/lubobao，这里的目标 "./" 就是该目录。
+      # --checksum 只传内容变化的文件；--delay-updates 先传到临时文件，全部传完再一起换上。
+      - name: Sync website
+        if: steps.config.outputs.ready == 'true'
+        env:
+          DEPLOY_HOST: ${{ secrets.SITE_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.SITE_DEPLOY_USER }}
+          DEPLOY_PORT: ${{ vars.SITE_DEPLOY_PORT || '22' }}
+        run: |
+          rsync -rlz --checksum --delete --delay-updates --chmod=D755,F644 -p \
+            --exclude='.*' \
+            -e "ssh -i $HOME/.ssh/site_deploy_key -p $DEPLOY_PORT -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/site_known_hosts -o ConnectTimeout=20" \
+            --itemize-changes \
+            website/ "$DEPLOY_USER@$DEPLOY_HOST:./"
+
+      - name: Check live site
+        if: steps.config.outputs.ready == 'true'
+        run: |
+          check() {
+            local path="$1" expect="$2" type="$3" body ctype
+            body="$(mktemp)"
+            ctype="$(curl -fsS --retry 5 --retry-delay 5 --retry-all-errors -m 20 -o "$body" -w '%{content_type}' "$SITE_URL$path")" \
+              || { echo "::error::无法访问 $SITE_URL$path"; return 1; }
+            grep -q -- "$expect" "$body" \
+              || { echo "::error::$SITE_URL$path 的内容与本次部署不符（没有找到「${expect}」）"; return 1; }
+            [[ "$ctype" == "$type"* ]] \
+              || { echo "::error::$SITE_URL$path 的 Content-Type 是「${ctype}」，应为 $type"; return 1; }
+            echo "OK $SITE_URL$path ($ctype)"
+          }
+          check / "鲁ICP备17049248号-1" "text/html"
+          check /install.sh "lubobao.xiaofany.com/install.sh" "text/plain"
+          check /install-cli.sh "lubobao.xiaofany.com/install-cli.sh" "text/plain"
