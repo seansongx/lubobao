@@ -3,3 +3,5 @@
 *.conf text eol=lf
 *.service text eol=lf
 Dockerfile text eol=lf
+# 测试样本按仓库里的字节原样检出：测试里会按 "\n" 改写样本内容，Windows 上转成 CRLF 后会对不上。
+crates/*/tests/fixtures/** text eol=lf
