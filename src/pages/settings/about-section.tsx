@@ -53,19 +53,19 @@ export function AboutSection({ ctx }: { ctx: SettingsController | null }) {
           onChange={(value) => void ctx?.save({ auto_check_update: value })}
         />
         <FieldRow label="官网">
-          <Button type="button" variant="link" className="h-auto px-0" onClick={() => void api.openUrl(WEBSITE_URL)}>
+          <Button type="button" variant="link" onClick={() => void api.openUrl(WEBSITE_URL)}>
             lubobao.xiaofany.com
             <ExternalLink aria-hidden />
           </Button>
         </FieldRow>
         <FieldRow label="许可证" description="可自由使用、修改和分发，需保留版权声明">
-          <Button type="button" variant="link" className="h-auto px-0" onClick={() => void api.openUrl(LICENSE_URL)}>
+          <Button type="button" variant="link" onClick={() => void api.openUrl(LICENSE_URL)}>
             MIT License
             <ExternalLink aria-hidden />
           </Button>
         </FieldRow>
         <FieldRow label="源代码">
-          <Button type="button" variant="link" className="h-auto px-0" onClick={() => void api.openUrl(REPO_URL)}>
+          <Button type="button" variant="link" onClick={() => void api.openUrl(REPO_URL)}>
             github.com/seansongx/lubobao
             <ExternalLink aria-hidden />
           </Button>

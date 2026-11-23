@@ -15,7 +15,7 @@ import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { TaskId, TaskSnapshot } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { AnchorAvatar, PlatformTag } from "@/pages/rooms/anchor";
@@ -40,7 +40,7 @@ const helper = createColumnHelper<typeof features, TaskSnapshot>();
 // 列定义只负责表头、排序取值和宽度；单元格由 TaskRow 渲染，便于按任务引用跳过重渲染。
 // 窄窗口（详情面板打开、1024 宽）时按容器宽度隐藏次要列。
 const columnClass = {
-  select: "w-10 pl-3 pr-0",
+  select: "w-10",
   anchor: "min-w-0",
   status: "w-[136px]",
   quality: "hidden w-[64px] @[620px]:table-cell",
@@ -109,27 +109,16 @@ interface TaskRowProps {
 
 /** 按 task 引用比较：进度事件只让对应的一行重渲染。 */
 const TaskRow = memo(function TaskRow({ task, selected, active, onSelect, onActivate }: TaskRowProps) {
-  const needsAction = task.display === "needsAction";
   return (
     <TableRow
-      data-state={selected ? "selected" : undefined}
+      // 勾选的行和详情面板正在显示的当前行都用 TableRow 自带的选中样式。
+      data-state={selected || active ? "selected" : undefined}
       data-task-id={task.id}
       aria-current={active ? "true" : undefined}
       onClick={() => onActivate(task.id)}
-      className={cn(
-        "h-task-row cursor-default",
-        // 需处理行始终保留淡红底，勾选不覆盖；当前行为淡 Teal 底（各平台一致，状态色保持可读），
-        // Windows 另在左侧画 Fluent 的 Teal 竖条。
-        needsAction
-          ? "bg-status-recording-soft hover:bg-status-recording-soft data-[state=selected]:bg-status-recording-soft"
-          : active && "bg-selection hover:bg-selection data-[state=selected]:bg-selection",
-        active &&
-          "win:[&>td:first-child]:relative win:[&>td:first-child]:selection-bar",
-        active && needsAction && "linux:shadow-[inset_3px_0_0_var(--primary)] mac:shadow-[inset_3px_0_0_var(--primary)]",
-        task.display === "paused" && "[&>td:not(:first-child)]:opacity-55",
-      )}
+      className="cursor-default"
     >
-      <TableCell className={cn("h-task-row px-2.5 py-0", columnClass.select)}>
+      <TableCell className={columnClass.select}>
         <Checkbox
           aria-label={`选择 ${task.anchorName}`}
           checked={selected}
@@ -137,13 +126,13 @@ const TaskRow = memo(function TaskRow({ task, selected, active, onSelect, onActi
           onClick={(event) => event.stopPropagation()}
         />
       </TableCell>
-      <TableCell className={cn("h-task-row px-2.5 py-0", columnClass.anchor)}>
+      <TableCell className={columnClass.anchor}>
         <div className="flex min-w-0 items-center gap-2.5">
           <AnchorAvatar task={task} />
           <div className="min-w-0">
             <Button
               variant="link"
-              className="h-auto max-w-full min-w-0 shrink justify-start p-0"
+              className="max-w-full min-w-0 shrink justify-start"
               onClick={(event) => {
                 event.stopPropagation();
                 onActivate(task.id);
@@ -159,19 +148,19 @@ const TaskRow = memo(function TaskRow({ task, selected, active, onSelect, onActi
           </div>
         </div>
       </TableCell>
-      <TableCell className={cn("h-task-row px-2.5 py-0", columnClass.status)}>
+      <TableCell className={columnClass.status}>
         <TaskStatus task={task} />
       </TableCell>
-      <TableCell className={cn("h-task-row px-2.5 py-0", columnClass.quality)}>
+      <TableCell className={columnClass.quality}>
         <span className="text-muted-foreground">
           {qualityLabels[task.quality]}
           {task.notifyOnly && <span className="sr-only">，仅通知</span>}
         </span>
       </TableCell>
-      <TableCell className={cn("h-task-row px-2.5 py-0", columnClass.timing)}>
+      <TableCell className={columnClass.timing}>
         <TimingCell task={task} />
       </TableCell>
-      <TableCell className={cn("h-task-row px-2.5 py-0", columnClass.size)}>
+      <TableCell className={columnClass.size}>
         {task.record.state === "recording" ? (
           <span className="tabular-nums">
             {formatBytes(task.record.bytesWritten)}
@@ -242,10 +231,10 @@ export function TaskTable({
     onRowSelectionChange(() => (value ? Object.fromEntries(rows.map((row) => [row.id, true as const])) : {}));
 
   return (
-    <table className="w-full table-fixed border-collapse text-(length:--text-dense)">
-      <TableHeader className="sticky top-0 z-[1] bg-content backdrop-blur-xl linux:bg-card">
+    <Table className="table-fixed">
+      <TableHeader className="sticky top-0 z-[1]">
         {table.getHeaderGroups().map((group) => (
-          <TableRow key={group.id} className="hover:bg-transparent">
+          <TableRow key={group.id}>
             {group.headers.map((header) => {
               const meta = header.column.columnDef.meta;
               const sorted = header.column.getIsSorted();
@@ -254,7 +243,7 @@ export function TaskTable({
               return (
                 <TableHead
                   key={header.id}
-                  className={cn("h-8 px-2.5 text-xs font-normal text-muted-foreground mac:h-7 mac:font-medium linux:font-semibold", meta?.className)}
+                  className={meta?.className}
                   aria-sort={sorted === "asc" ? "ascending" : sorted === "desc" ? "descending" : undefined}
                 >
                   {isSelect ? (
@@ -301,6 +290,6 @@ export function TaskTable({
           />
         ))}
       </TableBody>
-    </table>
+    </Table>
   );
 }

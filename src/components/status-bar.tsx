@@ -119,7 +119,7 @@ function FfmpegItem() {
         <span className="max-w-[22rem] truncate">{view.label}</span>
       </StatusItem>
       {view.retry && (
-        <Button variant="ghost" size="xs" className="h-5 px-1.5" onClick={retry} disabled={retrying}>
+        <Button variant="ghost" size="xs" onClick={retry} disabled={retrying}>
           <RotateCw aria-hidden />
           重试
         </Button>
@@ -200,17 +200,17 @@ export function StatusBar() {
   return (
     <footer className="flex h-7 shrink-0 items-center gap-3 bg-statusbar px-3 text-(length:--text-small) text-muted-foreground mac:h-6 mac:border-t linux:border-t">
       <FfmpegItem />
-      <Separator orientation="vertical" className="h-3.5!" />
+      <Separator orientation="vertical" />
       <StatusItem hint="正在录制的任务数">
         <span className="size-[7px] rounded-full bg-status-recording" aria-hidden />
         录制中 <span className="tabular-nums">{recording.length}</span>
       </StatusItem>
-      <Separator orientation="vertical" className="h-3.5!" />
+      <Separator orientation="vertical" />
       <StatusItem hint="所有录制任务的总码率">
         <Wifi className="size-3.5" aria-hidden />
         <span className="tabular-nums">{(bitrateKbps / 1000).toFixed(1)} Mbps</span>
       </StatusItem>
-      <Separator orientation="vertical" className="h-3.5!" />
+      <Separator orientation="vertical" />
       <DiskItem />
       <NextCheckItem />
     </footer>

@@ -310,7 +310,7 @@ export function NumberField({
       <Input
         id={id}
         inputMode={integer ? "numeric" : "decimal"}
-        className="w-28 text-right tabular-nums"
+        className="w-28"
         disabled={disabled}
         aria-invalid={error ? true : undefined}
         aria-describedby={error ? `${id}-error` : undefined}
@@ -382,7 +382,7 @@ export function TextField({
           id={id}
           rows={2}
           placeholder={placeholder}
-          className={cn("min-h-0 flex-1 resize-none", className)}
+          className={cn("flex-1", className)}
           disabled={disabled}
           spellCheck={false}
           aria-invalid={error ? true : undefined}

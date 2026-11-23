@@ -243,7 +243,7 @@ export const TaskInspector = memo(function TaskInspector({ task, onClose, onEdit
           title="最近动态"
           action={
             onShowActivity && (
-              <Button variant="link" size="xs" className="h-auto p-0" onClick={() => onShowActivity(task.id)}>
+              <Button variant="link" size="xs" onClick={() => onShowActivity(task.id)}>
                 全部动态
               </Button>
             )
@@ -314,7 +314,7 @@ export const TaskInspector = memo(function TaskInspector({ task, onClose, onEdit
         <IconAction
           label="删除"
           hint={withShortcut("删除", "Delete", false)}
-          className="text-destructive hover:text-destructive"
+          variant="destructive"
           onClick={() => onDelete([task])}
         >
           <Trash2 aria-hidden />
@@ -328,14 +328,14 @@ export const TaskInspector = memo(function TaskInspector({ task, onClose, onEdit
 function IconAction({
   label,
   hint,
-  className,
+  variant = "ghost",
   disabled,
   onClick,
   children,
 }: {
   label: string;
   hint?: string;
-  className?: string;
+  variant?: "ghost" | "destructive";
   disabled?: boolean;
   onClick: () => void;
   children: ReactNode;
@@ -343,7 +343,7 @@ function IconAction({
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Button variant="ghost" size="icon" aria-label={label} className={className} disabled={disabled} onClick={onClick}>
+        <Button variant={variant} size="icon" aria-label={label} disabled={disabled} onClick={onClick}>
           {children}
         </Button>
       </TooltipTrigger>

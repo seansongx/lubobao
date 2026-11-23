@@ -8,7 +8,6 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { api, isCommandError, type FfmpegStatus } from "@/lib/api";
 import { useFfmpegStatus } from "@/lib/use-backend";
-import { cn } from "@/lib/utils";
 import { FieldRow, SettingsCard } from "@/pages/settings/fields";
 
 type Tone = "busy" | "ok" | "warning" | "error";
@@ -100,11 +99,11 @@ const toneIcon: Record<Tone, typeof Loader2> = {
   error: XCircle,
 };
 
-const toneClass: Record<Tone, string> = {
-  busy: "border-border bg-muted text-muted-foreground",
-  ok: "border-transparent bg-primary/10 text-primary",
-  warning: "border-transparent bg-status-retrying/10 text-status-retrying",
-  error: "border-transparent bg-destructive/10 text-destructive",
+const toneVariant: Record<Tone, "secondary" | "default" | "outline" | "destructive"> = {
+  busy: "secondary",
+  ok: "default",
+  warning: "outline",
+  error: "destructive",
 };
 
 export function ComponentsSection() {
@@ -127,8 +126,8 @@ export function ComponentsSection() {
   return (
     <SettingsCard title="FFmpeg" description="录制使用的组件，从国内镜像下载，备用源提供相同文件">
       <FieldRow label="状态" description={<span aria-live="polite">{view.detail}</span>}>
-        <Badge variant="outline" className={cn("h-6 gap-1 px-2 text-xs", toneClass[view.tone])}>
-          <Icon className={cn("size-3.5", view.tone === "busy" && "animate-spin")} aria-hidden />
+        <Badge variant={toneVariant[view.tone]}>
+          <Icon className={view.tone === "busy" ? "animate-spin" : undefined} aria-hidden />
           {view.label}
         </Badge>
       </FieldRow>

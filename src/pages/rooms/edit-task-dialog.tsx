@@ -119,7 +119,6 @@ export function EditTaskDialog({ task, open, onOpenChange }: EditTaskDialogProps
               value={note}
               onChange={(event) => setNote(event.target.value)}
               placeholder="只在录播宝内显示"
-              className="min-h-16"
               readOnly={saving}
             />
           </div>

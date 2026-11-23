@@ -5,8 +5,8 @@ import { Eye, EyeOff, FolderOpen, FolderSearch } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Toggle } from "@/components/ui/toggle";
 import { api, isCommandError, type Platform, type Settings } from "@/lib/api";
-import { cn } from "@/lib/utils";
 import { FieldRow, NumberField, SelectField, SettingsCard, SwitchField, TextField, type SelectOption } from "@/pages/settings/fields";
 import type { SettingKey, SettingsController } from "@/pages/settings/use-settings";
 
@@ -115,7 +115,7 @@ export function RecordSection({ ctx }: SectionProps) {
           value={settings.live_save_path}
           aria-label="当前保存目录"
           title={settings.live_save_path}
-          className="min-w-0 flex-1 font-mono text-xs"
+          className="min-w-0 flex-1"
         />
         <Button type="button" variant="outline" onClick={() => void pick()}>
           <FolderSearch aria-hidden />
@@ -338,7 +338,6 @@ export function NetworkSection({ ctx }: SectionProps) {
         error={platforms.error}
         stacked
         multiline
-        className="font-mono text-xs"
         normalize={normalizePlatforms}
         onError={platforms.onError}
         onCommit={platforms.save}
@@ -347,19 +346,17 @@ export function NetworkSection({ ctx }: SectionProps) {
           {supportedPlatforms.map((platform) => {
             const on = listed.includes(platform.key);
             return (
-              <Button
+              <Toggle
                 key={platform.key}
-                type="button"
                 variant="outline"
                 size="sm"
-                aria-pressed={on}
+                pressed={on}
                 disabled={!settings.enable_proxy}
-                className={cn(on && "border-primary text-primary")}
-                onClick={() => toggle(platform.key)}
+                onPressedChange={() => toggle(platform.key)}
               >
                 {platform.name}
                 {on ? "：走代理" : "：直连"}
-              </Button>
+              </Toggle>
             );
           })}
         </div>
@@ -416,7 +413,7 @@ function CookieField({
         type={visible ? "text" : "password"}
         value={draft}
         placeholder="从浏览器开发者工具复制整段 Cookie"
-        className="min-w-0 flex-1 font-mono text-xs"
+        className="min-w-0 flex-1"
         spellCheck={false}
         autoComplete="off"
         aria-invalid={error ? true : undefined}

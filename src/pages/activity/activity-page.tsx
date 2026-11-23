@@ -288,14 +288,13 @@ export function ActivityPage({ onNavigate, focusTask }: ActivityPageProps) {
           }
           aria-label="按类型筛选"
         >
-          <ToggleGroupItem value="all" className="data-[state=on]:bg-primary/10 data-[state=on]:text-primary">
+          <ToggleGroupItem value="all">
             全部
           </ToggleGroupItem>
           {KIND_FILTERS.map((option) => (
             <ToggleGroupItem
               key={option.value}
               value={option.value}
-              className="data-[state=on]:bg-primary/10 data-[state=on]:text-primary"
             >
               {option.label}
             </ToggleGroupItem>
@@ -428,7 +427,7 @@ function ActivityRow({ entry, task, fresh, onNavigate }: ActivityRowProps) {
       <div className="min-w-0">
         <div className="truncate">
           {open ? (
-            <Button variant="link" className="h-auto p-0" onClick={open} title="在直播间中查看">
+            <Button variant="link" onClick={open} title="在直播间中查看">
               {name}
             </Button>
           ) : (

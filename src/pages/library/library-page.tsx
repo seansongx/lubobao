@@ -372,7 +372,7 @@ export function LibraryPage({ onNavigate }: LibraryPageProps) {
           <TooltipContent>返回上级（Backspace）</TooltipContent>
         </Tooltip>
         <Breadcrumb className="min-w-0">
-          <BreadcrumbList className="flex-nowrap text-(length:--text-dense)">
+          <BreadcrumbList className="flex-nowrap">
             <BreadcrumbItem className="min-w-0">
               <CrumbButton current={parts.length === 0} title={root} onClick={() => go("")}>
                 {root || "录像目录"}
@@ -535,14 +535,14 @@ function LibrarySummary(props: {
 function CrumbButton(props: { current: boolean; title?: string; onClick: () => void; children: string }) {
   if (props.current) {
     return (
-      <BreadcrumbPage className="block max-w-[28rem] truncate px-1.5" title={props.title}>
+      <BreadcrumbPage className="block max-w-[28rem] truncate" title={props.title}>
         {props.children}
       </BreadcrumbPage>
     );
   }
   return (
     <BreadcrumbLink asChild>
-      <button type="button" title={props.title} onClick={props.onClick} className="block max-w-[16rem] truncate px-1.5">
+      <button type="button" title={props.title} onClick={props.onClick} className="block max-w-[16rem] truncate">
         {props.children}
       </button>
     </BreadcrumbLink>

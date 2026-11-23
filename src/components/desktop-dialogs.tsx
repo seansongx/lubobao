@@ -156,7 +156,7 @@ function CloseDialog() {
         </AlertDialogHeader>
         <div className="flex items-center gap-2">
           <Checkbox id={rememberId} checked={remember} onCheckedChange={(value) => setRemember(value === true)} />
-          <Label htmlFor={rememberId} className="text-sm font-normal">
+          <Label htmlFor={rememberId}>
             记住我的选择
           </Label>
         </div>

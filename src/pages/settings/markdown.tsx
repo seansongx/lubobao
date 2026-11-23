@@ -3,6 +3,7 @@
 
 import type { ReactNode } from "react";
 
+import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 
 const REPO_BLOB = "https://github.com/seansongx/lubobao/blob/main/";
@@ -84,16 +85,17 @@ function Link({ href, restrict, children }: { href: string; restrict: boolean; c
     return <span>{children}</span>;
   }
   return (
-    <a
-      href={url}
-      className="text-primary underline-offset-2 hover:underline"
-      onClick={(event) => {
-        event.preventDefault();
-        void api.openUrl(url);
-      }}
-    >
-      {children}
-    </a>
+    <Button variant="link" asChild>
+      <a
+        href={url}
+        onClick={(event) => {
+          event.preventDefault();
+          void api.openUrl(url);
+        }}
+      >
+        {children}
+      </a>
+    </Button>
   );
 }
 

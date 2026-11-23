@@ -17,6 +17,7 @@ import {
 import type { Navigate, TaskFocusRequest } from "@/components/navigation";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
+import { ButtonGroup } from "@/components/ui/button-group";
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from "@/components/ui/input-group";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -298,12 +299,12 @@ export function RoomsPage({ taskList, view, onViewChange, focusTask, onNavigate 
                     </SelectGroup>
                   </SelectContent>
                 </Select>
-                <div className="flex items-center">
+                <ButtonGroup>
                   <Select
                     value={sort.id}
                     onValueChange={(id) => patch({ sorting: [{ id, desc: sortOptions.find((item) => item.id === id)?.desc ?? false }] })}
                   >
-                    <SelectTrigger className="w-24 rounded-r-none" aria-label="排序方式">
+                    <SelectTrigger className="w-24" aria-label="排序方式">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -321,7 +322,6 @@ export function RoomsPage({ taskList, view, onViewChange, focusTask, onNavigate 
                       <Button
                         variant="outline"
                         size="icon"
-                        className="-ml-px rounded-l-none"
                         aria-label={sort.desc ? "当前降序，切换为升序" : "当前升序，切换为降序"}
                         onClick={() => patch({ sorting: [{ id: sort.id, desc: !sort.desc }] })}
                       >
@@ -330,7 +330,7 @@ export function RoomsPage({ taskList, view, onViewChange, focusTask, onNavigate 
                     </TooltipTrigger>
                     <TooltipContent>{sort.desc ? "降序" : "升序"}</TooltipContent>
                   </Tooltip>
-                </div>
+                </ButtonGroup>
               </div>
             </div>
 
@@ -385,9 +385,8 @@ export function RoomsPage({ taskList, view, onViewChange, focusTask, onNavigate 
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <Button
-                          variant="ghost"
+                          variant="destructive"
                           size="sm"
-                          className="text-destructive hover:text-destructive"
                           onClick={() => openDelete(selected)}
                           disabled={batchBusy}
                         >
