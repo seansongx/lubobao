@@ -7,6 +7,11 @@
 //!   灰度不会被兜底绕过。每个接口单独构建 updater：插件的请求头对全部接口生效，没法按接口区分。
 //! - 发给 xiaofany.com 的请求带 `X-Client-Id`（本机随机生成，存在应用数据目录的 `client-id`），
 //!   服务端据此灰度；发给 GitHub 的不带（[`sends_client_id`]）。
+//! - 下载也有兜底（[`download_with_fallback`]）：从 xiaofany.com 拿到的下载地址（dl.xiaofany.cn）
+//!   连不上、返回错误状态、超时或中断时，再查排在它后面的接口（GitHub 的 `latest.json`），只有
+//!   版本号完全相同才改从那里下载；版本不同就照常报下载失败，不装别的版本。签名不符不换线路。
+//!   下载在「下载并安装」时进行，早于停止录制（[`install_update`] 只用下载好的安装包），所以
+//!   兜底不会发生在录制收尾之后。
 //! - 签名在下载完成时由插件校验（[`tauri_plugin_updater::Update::download`]），安装前再校验
 //!   一次；不通过时拒绝安装。
 //! - 安装前与退出相同地收尾（[`crate::scheduler::tauri_glue::finish_before_update`]）：停止调度和
@@ -155,18 +160,27 @@ pub enum UpdateCheck {
     },
 }
 
-/// 下载进度。`total` 为 `None` 时服务器没给长度。
-#[derive(Debug, Clone, Copy, Serialize)]
+/// 下载进度。`total` 为 `None` 时服务器没给长度。`fallback` 为真时已改从备用线路下载，
+/// `downloaded` 从 0 重新计数。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Progress {
     pub downloaded: u64,
     pub total: Option<u64>,
+    pub fallback: bool,
+}
+
+/// 检查得到的更新，以及排在给出它的接口之后的接口（下载失败时到这些接口找同一版本）。
+#[derive(Clone)]
+pub struct Found {
+    pub update: Update,
+    pub fallbacks: Vec<tauri::Url>,
 }
 
 /// 检查到的更新和下载好的安装包（已校验签名）。
 #[derive(Default)]
 pub struct UpdateState {
-    pending: Mutex<Option<Update>>,
+    pending: Mutex<Option<Found>>,
     downloaded: Mutex<Option<(String, Vec<u8>)>>,
     busy: AtomicBool,
 }
@@ -374,39 +388,68 @@ fn build_updater<R: Runtime>(
 /// 状态或无效数据时换下一个。全部失败时返回最后一个错误，与插件自己的多接口逻辑相同。
 async fn check_endpoints<R: Runtime>(
     app: &tauri::AppHandle<R>,
-) -> Result<Option<Update>, UpdateError> {
+) -> Result<Option<Found>, UpdateError> {
     ensure_pubkey(app)?;
     let endpoints = endpoints(app)?;
     check_in_order(app, endpoints, cfg!(debug_assertions), CHECK_TIMEOUT).await
 }
 
+/// 本机客户端 ID，只在 `endpoints` 里有接口要收它时才读取（或生成）。
+fn client_id_for<R: Runtime>(
+    app: &tauri::AppHandle<R>,
+    endpoints: &[tauri::Url],
+    debug: bool,
+) -> Option<String> {
+    endpoints
+        .iter()
+        .any(|endpoint| sends_client_id(endpoint, debug))
+        .then(|| client_id(app))
+        .flatten()
+}
+
+/// 查一个接口。`id` 只发给 [`sends_client_id`] 认可的接口。
+async fn check_one<R: Runtime>(
+    app: &tauri::AppHandle<R>,
+    endpoint: &tauri::Url,
+    id: Option<&str>,
+    debug: bool,
+    check_timeout: Duration,
+) -> Result<Option<Update>, UpdateError> {
+    let header = id.filter(|_| sends_client_id(endpoint, debug));
+    let updater = build_updater(app, endpoint.clone(), header, check_timeout)?;
+    Ok(updater.check().await?)
+}
+
 /// 按顺序查给定的接口（`check_endpoints` 的核心，公开给 `tests/updater_fallback.rs`）。`debug`
 /// 决定本机地址是否收到客户端 ID（`sends_client_id`），`check_timeout` 是每个接口的检查时限。
+/// 找到更新时一并返回排在后面的接口，供下载兜底。
 pub async fn check_in_order<R: Runtime>(
     app: &tauri::AppHandle<R>,
     endpoints: Vec<tauri::Url>,
     debug: bool,
     check_timeout: Duration,
-) -> Result<Option<Update>, UpdateError> {
-    let id = endpoints
-        .iter()
-        .any(|endpoint| sends_client_id(endpoint, debug))
-        .then(|| client_id(app))
-        .flatten();
-    let mut last_error = UpdaterError::EmptyEndpoints;
-    for endpoint in endpoints {
-        let host = endpoint.host_str().unwrap_or_default().to_string();
-        let header = id.as_deref().filter(|_| sends_client_id(&endpoint, debug));
-        let updater = build_updater(app, endpoint, header, check_timeout)?;
-        match updater.check().await {
-            Ok(found) => return Ok(found),
+) -> Result<Option<Found>, UpdateError> {
+    let id = client_id_for(app, &endpoints, debug);
+    let mut last_error = UpdateError::from(UpdaterError::EmptyEndpoints);
+    for (index, endpoint) in endpoints.iter().enumerate() {
+        let host = endpoint.host_str().unwrap_or_default();
+        match check_one(app, endpoint, id.as_deref(), debug, check_timeout).await {
+            Ok(found) => {
+                return Ok(found.map(|update| Found {
+                    update,
+                    fallbacks: endpoints[index + 1..].to_vec(),
+                }));
+            }
             Err(error) => {
-                eprintln!("录播宝检查更新失败（{host}），换下一个接口：{error}");
+                eprintln!(
+                    "录播宝检查更新失败（{host}），换下一个接口：{}",
+                    error.message
+                );
                 last_error = error;
             }
         }
     }
-    Err(last_error.into())
+    Err(last_error)
 }
 
 fn info_of(update: &Update) -> UpdateInfo {
@@ -468,7 +511,7 @@ pub async fn check_update(app: tauri::AppHandle) -> Result<UpdateCheck, UpdateEr
     let _busy = BusyGuard::take(&state.busy)?;
     let current_version = app.package_info().version.to_string();
     match check_endpoints(&app).await? {
-        Some(update) => {
+        Some(Found { update, fallbacks }) => {
             let update = prepare_download(update)?;
             let info = info_of(&update);
             {
@@ -480,7 +523,7 @@ pub async fn check_update(app: tauri::AppHandle) -> Result<UpdateCheck, UpdateEr
                     *downloaded = None;
                 }
             }
-            *lock(&state.pending) = Some(update);
+            *lock(&state.pending) = Some(Found { update, fallbacks });
             Ok(UpdateCheck::Available {
                 update: info,
                 install: install_mode(),
@@ -497,8 +540,120 @@ pub async fn check_update(app: tauri::AppHandle) -> Result<UpdateCheck, UpdateEr
 /// 至少间隔这么久才发一次进度事件。
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(150);
 
-/// 下载 [`check_update`] 发现的新版本并校验签名。进度经 [`PROGRESS_EVENT`] 推送。签名不符时
-/// 丢弃安装包，返回 `signature` 错误。
+/// 下载一次。每个数据块都回调进度（节流由调用方做）。
+async fn download_once<F: FnMut(Progress) + Send>(
+    update: &Update,
+    fallback: bool,
+    on_progress: &mut F,
+) -> Result<Vec<u8>, UpdaterError> {
+    let mut downloaded = 0u64;
+    update
+        .download(
+            |chunk, total| {
+                downloaded += chunk as u64;
+                on_progress(Progress {
+                    downloaded,
+                    total,
+                    fallback,
+                });
+            },
+            || {},
+        )
+        .await
+}
+
+/// 下载失败的错误：网络类（连不上、错误状态、超时、中断）可以换线路，其余（签名不符等）不换。
+fn download_error(error: UpdaterError) -> UpdateError {
+    let kind = classify(&error);
+    if kind == UpdateErrorKind::Network {
+        return UpdateError::new(kind, error.to_string());
+    }
+    UpdateError::new(kind, describe(kind, &error))
+}
+
+/// 下载 `found.update` 并校验签名；网络类失败（连不上、错误状态、超时、中断）时，依次到
+/// `found.fallbacks` 查同一版本，版本号完全相同才从那里下载。任何一条线路签名不符都立即失败，
+/// 不换线路；兜底都不成时报第一次下载的错误。成功时返回实际下载的那份更新（兜底时是备用接口
+/// 给的，安装时按它的签名再校验）和安装包。
+///
+/// `debug` 和 `check_timeout` 的含义同 [`check_in_order`]；公开给 `tests/updater_fallback.rs`。
+pub async fn download_with_fallback<R: Runtime, F: FnMut(Progress) + Send>(
+    app: &tauri::AppHandle<R>,
+    found: Found,
+    debug: bool,
+    check_timeout: Duration,
+    mut on_progress: F,
+) -> Result<(Found, Vec<u8>), UpdateError> {
+    let Found { update, fallbacks } = found;
+    let first_error = match download_once(&update, false, &mut on_progress).await {
+        Ok(bytes) => return Ok((Found { update, fallbacks }, bytes)),
+        Err(error) => download_error(error),
+    };
+    if first_error.kind != UpdateErrorKind::Network || fallbacks.is_empty() {
+        return Err(first_error);
+    }
+    eprintln!(
+        "录播宝下载更新失败（{}），改从备用线路下载：{}",
+        update.download_url.host_str().unwrap_or_default(),
+        first_error.message
+    );
+    // 告诉界面换了线路：进度从 0 重新开始。
+    on_progress(Progress {
+        downloaded: 0,
+        total: None,
+        fallback: true,
+    });
+    let id = client_id_for(app, &fallbacks, debug);
+    for (index, endpoint) in fallbacks.iter().enumerate() {
+        let host = endpoint.host_str().unwrap_or_default();
+        let candidate = match check_one(app, endpoint, id.as_deref(), debug, check_timeout).await {
+            Ok(Some(candidate)) if candidate.version == update.version => candidate,
+            Ok(Some(candidate)) => {
+                eprintln!(
+                    "录播宝备用线路（{host}）的版本是 {}，与 {} 不同，不从这里下载",
+                    candidate.version, update.version
+                );
+                continue;
+            }
+            Ok(None) => {
+                eprintln!("录播宝备用线路（{host}）没有版本 {}", update.version);
+                continue;
+            }
+            Err(error) => {
+                eprintln!("录播宝检查备用线路失败（{host}）：{}", error.message);
+                continue;
+            }
+        };
+        let candidate = match prepare_download(candidate) {
+            Ok(candidate) => candidate,
+            Err(error) => {
+                eprintln!("录播宝备用线路（{host}）不可用：{}", error.message);
+                continue;
+            }
+        };
+        match download_once(&candidate, true, &mut on_progress).await {
+            Ok(bytes) => {
+                let found = Found {
+                    update: candidate,
+                    fallbacks: fallbacks[index + 1..].to_vec(),
+                };
+                return Ok((found, bytes));
+            }
+            Err(error) => {
+                let error = download_error(error);
+                if error.kind != UpdateErrorKind::Network {
+                    return Err(error);
+                }
+                eprintln!("录播宝从备用线路（{host}）下载失败：{}", error.message);
+            }
+        }
+    }
+    Err(first_error)
+}
+
+/// 下载 [`check_update`] 发现的新版本并校验签名（主线路失败时改走备用线路，见
+/// [`download_with_fallback`]）。进度经 [`PROGRESS_EVENT`] 推送。签名不符时丢弃安装包，返回
+/// `signature` 错误。
 #[tauri::command]
 pub async fn download_update(app: tauri::AppHandle) -> Result<(), UpdateError> {
     if install_mode() == InstallMode::Manual {
@@ -509,32 +664,39 @@ pub async fn download_update(app: tauri::AppHandle) -> Result<(), UpdateError> {
     }
     let state = state(&app)?;
     let _busy = BusyGuard::take(&state.busy)?;
-    let update = lock(&state.pending)
+    let found = lock(&state.pending)
         .clone()
         .ok_or_else(|| UpdateError::new(UpdateErrorKind::NotReady, "请先检查更新"))?;
     if lock(&state.downloaded)
         .as_ref()
-        .is_some_and(|(version, _)| *version == update.version)
+        .is_some_and(|(version, _)| *version == found.update.version)
     {
         return Ok(());
     }
-    let mut downloaded = 0u64;
     let mut last = Instant::now() - PROGRESS_INTERVAL;
     let handle = app.clone();
-    let bytes = update
-        .download(
-            |chunk, total| {
-                downloaded += chunk as u64;
-                let done = total.is_some_and(|total| downloaded >= total);
-                if done || last.elapsed() >= PROGRESS_INTERVAL {
-                    last = Instant::now();
-                    let _ = handle.emit(PROGRESS_EVENT, Progress { downloaded, total });
-                }
-            },
-            || {},
-        )
-        .await?;
-    *lock(&state.downloaded) = Some((update.version.clone(), bytes));
+    let (found, bytes) = download_with_fallback(
+        &app,
+        found,
+        cfg!(debug_assertions),
+        CHECK_TIMEOUT,
+        move |progress: Progress| {
+            let done = progress
+                .total
+                .is_some_and(|total| progress.downloaded >= total);
+            // 换线路的那一下总是发出，界面立即显示提示。
+            let switched = progress.fallback && progress.downloaded == 0;
+            if done || switched || last.elapsed() >= PROGRESS_INTERVAL {
+                last = Instant::now();
+                let _ = handle.emit(PROGRESS_EVENT, progress);
+            }
+        },
+    )
+    .await?;
+    let version = found.update.version.clone();
+    // 兜底时换成备用接口给的更新：安装时按它的签名再校验。
+    *lock(&state.pending) = Some(found);
+    *lock(&state.downloaded) = Some((version, bytes));
     Ok(())
 }
 
@@ -549,7 +711,8 @@ pub async fn install_update(app: tauri::AppHandle) -> Result<(), UpdateError> {
     let _busy = BusyGuard::take(&state.busy)?;
     let update = lock(&state.pending)
         .clone()
-        .ok_or_else(|| UpdateError::new(UpdateErrorKind::NotReady, "请先检查更新"))?;
+        .ok_or_else(|| UpdateError::new(UpdateErrorKind::NotReady, "请先检查更新"))?
+        .update;
     let bytes = match lock(&state.downloaded).take() {
         Some((version, bytes)) if version == update.version => bytes,
         _ => {

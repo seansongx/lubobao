@@ -1,5 +1,5 @@
 // 浏览器假数据（npm run dev，不在 Tauri 里时使用），方便调界面。
-// 应用内更新：window.__lubobaoMock.setUpdate("none" | "mandatory" | "manual" | "network" | "signature" | "install")
+// 应用内更新：window.__lubobaoMock.setUpdate("none" | "mandatory" | "manual" | "network" | "fallback" | "signature" | "install")
 // 切换检查和安装的结果。
 // 桌面外壳：控制台调用 window.__lubobaoMock.requestQuit() 模拟托盘「退出」，requestClose()
 // 模拟关闭主窗口（按 close_window_action），requestPauseAll() 模拟托盘「全部暂停监控」。
@@ -74,7 +74,7 @@ import type {
   UpdateProgress,
 } from "@/lib/api";
 
-type MockUpdateMode = "available" | "mandatory" | "manual" | "none" | "network" | "signature" | "install";
+type MockUpdateMode = "available" | "mandatory" | "manual" | "none" | "network" | "fallback" | "signature" | "install";
 
 const TOTAL_BYTES = 39_636_992;
 
@@ -1370,10 +1370,19 @@ export function createMockBackend(): Backend {
     async downloadUpdate() {
       if (updateDownloaded) return;
       const total = 4_200_000;
+      // fallback：主线路下到一半中断，改从备用线路重新下载。
+      let fallback = false;
       for (let downloaded = 0; downloaded < total; ) {
         await delay(120);
         downloaded = Math.min(total, downloaded + 180_000);
-        updateProgressChannel.emit({ downloaded, total });
+        if (updateMode === "fallback" && !fallback && downloaded > total / 2) {
+          fallback = true;
+          downloaded = 0;
+          updateProgressChannel.emit({ downloaded, total: null, fallback });
+          await delay(800);
+          continue;
+        }
+        updateProgressChannel.emit({ downloaded, total, fallback });
       }
       if (updateMode === "signature") {
         throw { kind: "signature", message: "更新包签名校验失败，已拒绝安装：Invalid signature" } satisfies UpdateError;

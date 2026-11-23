@@ -293,12 +293,15 @@ function UpdateStep({ flow: current }: { flow: Exclude<UpdateFlow, { step: "idle
           <div className="space-y-1.5">
             <Progress value={percent ?? 0} aria-label="下载进度" />
             <p className="m-0 text-xs text-muted-foreground tabular-nums">
-              {progress
+              {progress && progress.downloaded > 0
                 ? progress.total
                   ? `正在下载 ${formatBytes(progress.downloaded)} / ${formatBytes(progress.total)}（${Math.floor(percent ?? 0)}%）`
                   : `正在下载 ${formatBytes(progress.downloaded)}`
                 : "正在连接下载服务器…"}
             </p>
+            {progress?.fallback ? (
+              <p className="m-0 text-xs text-muted-foreground">主线路下载失败，已改从备用线路下载。</p>
+            ) : null}
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={later}>

@@ -111,6 +111,7 @@ xiaofany.com 后台还要先建好软件：slug `lubobao`、框架 `tauri`，「
   1. `https://xiaofany.com/api/update/lubobao/tauri/{{target}}/{{arch}}/{{current_version}}`，有更新时 200，没有时 204。请求带 `X-Client-Id`（本机随机生成，存在应用数据目录的 `client-id`），服务端用来灰度。
   2. 兜底：`https://github.com/seansongx/lubobao/releases/latest/download/latest.json`，Tauri 静态清单（`version`、`notes`、`pub_date`、`platforms` 下 `windows-x86_64`、`darwin-aarch64`、`darwin-x86_64`、`linux-x86_64` 各自的 `signature` 和 `url`）。不带 `X-Client-Id`，也没有灰度和强制更新标记；只给最新的已发布正式版，预发布不会经它推送。
 - 第一个接口连不上、超时、返回错误状态或无效数据时才查第二个；xiaofany.com 返回 204（包括灰度没轮到）时到此为止，不会被 GitHub 绕过。每个接口单独计时（见下面的时限），两个都卡住时最长约一分钟才报网络错误。插件的请求头对全部接口生效，所以 `update.rs` 给每个接口单独建 updater，只有 xiaofany.com（调试构建里另加本机地址）带 `X-Client-Id`。
+- 下载也有兜底：xiaofany.com 给的下载地址（`dl.xiaofany.cn`）连不上、返回错误状态、超时或中途断开时，再取一次 GitHub 的 `latest.json`，只有版本号与 xiaofany.com 宣布的完全相同才从 GitHub Release 下载；版本不同（GitHub 还没发布这个版本，或已经是更新的版本）就照常报下载失败，不装别的版本。签名不符不换线路，直接拒绝安装；从 GitHub 下的包按 GitHub 清单里的签名校验，安装前也按它再校验一次。换线路时进度从 0 重新开始，对话框提示「主线路下载失败，已改从备用线路下载」。下载在点「下载并安装」时进行，早于停止录制，所以兜底失败时录制不受影响；安装那一步（停止录制之后）不再下载。检查时就是从 GitHub 拿到的更新没有再往后的线路。
 - 每个平台用的文件：Windows 是 NSIS 安装包本身（`-setup.exe` + `.sig`），macOS 是 `.app.tar.gz` + `.sig`，Linux 是 AppImage + `.sig`。deb 安装的用户在应用里只看到「请到官网下载新版本」。
 - 签名：下载完成后用 tauri.conf.json 里的公钥校验，还要求签名记录的版本号与接口宣布的一致（`requireSignedVersion`，对两个接口都适用），不符时拒绝安装。
 - 安装前与退出一样收尾：有录制时先确认，再停止调度和全部录制、等文件收尾，然后安装并重启（Windows 由安装器装好后打开新版本）。
@@ -118,7 +119,7 @@ xiaofany.com 后台还要先建好软件：slug `lubobao`、框架 `tauri`，「
 - 检查更新时带一个随机设备标识（`X-Client-Id`），只发给升级接口，不发给下载服务器。下载地址必须是 https。检查请求 30 秒内没完成、或连接后 30 秒收不到数据，就报网络错误。
 - 安装失败时（只读卷、被安全软件拦下等）录制已经停止：对话框不能关闭，只能「重启录播宝」，重启后恢复监控。
 - 更新说明里只有 xiaofany.com、lubobao.xiaofany.com 和本仓库的链接可以点，其他链接显示为纯文本。
-- 调试构建可以用环境变量 `LUBOBAO_UPDATER_ENDPOINT` 指向本地测试服务器（逗号分隔可写多个，按顺序尝试，整个替换配置里的接口），发布构建忽略它。兜底逻辑由 `cargo test -p lubobao --test updater_fallback` 用模拟运行时和本机假服务器检查：第一个接口 500、卡住或连不上时用第二个，204 时不再查第二个，GitHub 那一端收不到 `X-Client-Id`。
+- 调试构建可以用环境变量 `LUBOBAO_UPDATER_ENDPOINT` 指向本地测试服务器（逗号分隔可写多个，按顺序尝试，整个替换配置里的接口），发布构建忽略它。兜底逻辑由 `cargo test -p lubobao --test updater_fallback` 用模拟运行时和本机假服务器检查：第一个接口 500、卡住或连不上时用第二个，204 时不再查第二个，GitHub 那一端收不到 `X-Client-Id`；下载地址 500 或中途断开时从 GitHub 下载同一版本（用只在测试里用的密钥签名），GitHub 版本号不同时不下载、报原来的错误，签名不符时不换线路（主线路和备用线路都试过）。
 - fork 自己发版时，要把两个接口换成自己的（第二个里的 `seansongx/lubobao` 换成 fork 的仓库）并换上自己的公钥。
 
 本地 `npm run tauri build` 默认会生成更新包，需要签名私钥；没有时加 `--config '{"bundle":{"createUpdaterArtifacts":false}}'` 跳过更新包。
@@ -127,5 +128,5 @@ xiaofany.com 后台还要先建好软件：slug `lubobao`、框架 `tauri`，「
 
 - release.yml 在真实 Secret 下的签名、改名和 `.sig` 校验（macOS `.app.tar.gz`、Linux AppImage 的路径在本机没有跑过）；
 - publish-xiaofany.yml 的上传、发布和发布后核对；
-- GitHub 兜底：Release 上的 `latest.json` 内容，以及发布后 `https://github.com/seansongx/lubobao/releases/latest/download/latest.json` 能下载到（重定向到 GitHub 的文件服务器）。实测时可以在调试构建里设 `LUBOBAO_UPDATER_ENDPOINT=https://127.0.0.1:1/x,https://github.com/seansongx/lubobao/releases/latest/download/latest.json`，并把应用版本临时改低，在 设置 → 关于 检查更新；
+- GitHub 兜底：Release 上的 `latest.json` 内容，以及发布后 `https://github.com/seansongx/lubobao/releases/latest/download/latest.json` 能下载到（重定向到 GitHub 的文件服务器）。实测时可以在调试构建里设 `LUBOBAO_UPDATER_ENDPOINT=https://127.0.0.1:1/x,https://github.com/seansongx/lubobao/releases/latest/download/latest.json`，并把应用版本临时改低，在 设置 → 关于 检查更新；下载兜底从真实 GitHub Release 下载安装包（重定向到 `objects.githubusercontent.com`）也要等那时实测；
 - macOS、Linux AppImage 的应用内升级（Windows 已在本机用测试密钥和本地假服务器验证，见 `docs/feature-map.md`）。
