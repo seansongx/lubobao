@@ -28,7 +28,7 @@
   --header-h: auto;
   --dialog-width: 520px; /* 添加、编辑直播间和更新对话框，三平台相同 */
   --settings-width: 760px; /* 设置页内容最大宽度，三平台相同 */
-  --selection-bar-width: 3px; /* Windows 选中竖条（selection-bar），三平台相同 */
+  --selection-bar-width: 3px; /* Windows 选中竖条（selection-bar，左侧导航和设置分组），三平台相同 */
   --selection-bar-height: 16px;
   --radius: 4px;
 
@@ -74,9 +74,8 @@
   --status-checking: #2563eb; /* blue-600，旋转圆环 */
   --status-retrying: #b45309; /* amber-700，保证小字对比度 */
   --status-notify: var(--primary); /* 已开播 · 仅通知 */
-  --status-recording-soft: rgb(220 38 38 / 0.07); /* 需处理行底色 */
+  --status-recording-soft: rgb(220 38 38 / 0.07); /* 出错提示的淡红底 */
 
-  --task-row-height: 2.75rem;
 }
 
 /* Mica 生效：窗口底透明，内容层半透明（Fluent Layer） */

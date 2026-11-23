@@ -65,7 +65,6 @@
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
 
-  --spacing-task-row: var(--task-row-height);
 }
 
 @layer base {
@@ -219,8 +218,8 @@
 }
 
 /*
- * Windows 选中竖条：左侧导航、设置分组和任务表当前行共用，只配 win: 变体使用（如 win:selection-bar、
- * win:[&>td:first-child]:selection-bar）。画在 ::before 上，宿主元素需要 relative。
+ * Windows 选中竖条：左侧导航和设置分组共用，只配 win: 变体使用（win:selection-bar）。画在 ::before 上，
+ * 宿主元素需要 relative。
  */
 @utility selection-bar {
   &::before {
