@@ -28,3 +28,6 @@ dist-ssr
 
 # xiaofany.com 发布脚本的续传记录（含预签名上传地址）
 .release-state.json
+
+# Claude Code 会话工作树（每个都是仓库的完整副本）
+.claude/worktrees/
