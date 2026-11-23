@@ -246,8 +246,9 @@ export function RoomsPage({ taskList, view, onViewChange, focusTask, onNavigate 
               )}
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Button variant="ghost" size="icon" onClick={openAdd} aria-label="添加直播间">
-                    <Plus className="size-[17px]" aria-hidden />
+                  <Button onClick={openAdd}>
+                    <Plus aria-hidden />
+                    添加直播间
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>{withShortcut("添加直播间", "N")}</TooltipContent>

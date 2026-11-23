@@ -11,7 +11,7 @@
 
   2026-11-23 决定：控件（按钮、输入框、开关、复选框、对话框、菜单等）改用 shadcn/ui Nova 默认样式。本原型里的控件外形
   是当初的探索，以应用实际效果为准。同日决定内容区三个平台统一：切换平台只改变字体族、窗口材质与底色、标题栏、
-  红绿灯位置、对话框按钮顺序、滚动条和快捷键写法。
+  红绿灯位置、滚动条和快捷键写法。对话框主按钮三个平台都在左，「添加直播间」是带文字的 Teal 按钮。
 -->
 <style>
 /* ================= 平台与主题 token ================= */
@@ -227,9 +227,7 @@ svg.i { width: 15px; height: 15px; stroke-width: 1.7; }
 .btn.tb { color: var(--fg2); padding: 0 6px; }
 .btn.tb svg.i { width: 17px; height: 17px; }
 .btn.tb:hover, .btn.subtle:hover { background: var(--hover); }
-.btn.tb { display: none; }
-.btn.tb { display: inline-flex; }
-.head .btn.add-primary { display: none; }
+.head .btn.tb { display: none; }
 
 /* 输入 */
 .field { display: inline-flex; align-items: center; gap: 6px; height: var(--ctl-h); padding: 0 10px; border-radius: var(--r-ctl); background: var(--input-bg); border: 1px solid var(--ctl-border); border-bottom-color: var(--input-border-bottom); color: var(--fg2); min-width: 0; }
@@ -416,10 +414,9 @@ table.tasks tbody tr.sel td { background: color-mix(in srgb, var(--fg) 8%, trans
 .checkline { display: inline-flex; gap: 8px; align-items: center; height: var(--ctl-h); font-size: 13px; }
 .hint { font-size: 12px; color: var(--fg2); }
 .dlg-foot { display: flex; gap: 8px; padding: 0 24px 24px; justify-content: flex-end; }
-/* Windows：主按钮在左（只改顺序） */
-[data-platform="windows"] .dlg-foot .btn.primary { order: -1; }
-/* macOS / Linux：右对齐，主按钮在最右（DOM 中取消在前） */
-.dlg-foot { padding: 4px 20px 20px; }
+/* 三个平台：主按钮在左（只改顺序） */
+.dlg-foot .btn.primary { order: -1; }
+.dlg-foot { padding: 4px 20px 20px; justify-content: flex-start; }
 .dlg-foot .btn { min-width: 76px; }
 
 /* ================= 右键菜单 ================= */

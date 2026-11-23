@@ -169,12 +169,12 @@
 }
 /* macOS：不定制，WKWebView 使用系统悬浮滚动条 */
 
-/* ================= 平台结构差异 ================= */
+/* ================= 对话框按钮顺序 ================= */
 /*
- * 对话框按钮顺序：组件里一律按「取消 … 主操作」书写（Nova 默认右对齐，主按钮在右，macOS 和 Linux 照用）。
- * Windows 反转为 WinUI 的「主操作、次要、关闭」，主按钮在左。只改顺序，不改按钮样式。
+ * 对话框按钮顺序：组件里一律按「取消 … 主操作」书写（Nova 默认右对齐，主按钮在右）。
+ * 三个平台统一反转为「主操作、次要、关闭」，主按钮在左（Windows 的习惯，用户以 Windows 为主）。只改顺序，不改按钮样式。
  */
-:root[data-platform="windows"] :is([data-slot="dialog-footer"], [data-slot="alert-dialog-footer"]) {
+:is([data-slot="dialog-footer"], [data-slot="alert-dialog-footer"]) {
   flex-direction: row-reverse;
   justify-content: flex-start;
 }
