@@ -1,0 +1,16 @@
+{
+  "error": 0,
+  "msg": "正常",
+  "data": {
+    "key": "biDBgX2dlvOTM7ewJC6O338989",
+    "rand_str": "nXtX7B2AbWCwWDMo",
+    "enc_time": 1,
+    "expire_at": 1795476570,
+    "is_special": 0,
+    "cpp": {
+      "danmu": { "key_ver": "1.0", "key": "testDanmuKey" },
+      "heartbeat": { "key_ver": "1.1", "key": "testHeartbeatKey" }
+    },
+    "enc_data": "eyJhbGdfdmVyIjoxLCJrZXlfdmVyIjoxNDgyfQ"
+  }
+}
