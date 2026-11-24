@@ -1,0 +1,26 @@
+{
+  "error_code": 0,
+  "message": "ok",
+  "data": {
+    "media_info": {
+      "nick": "测试主播🧚",
+      "portrait": "https://img.example.inke.cn/portrait.jpg",
+      "inke_id": 100001,
+      "level": 30,
+      "gender": 0,
+      "gender_img": "/Public/images/gender-0.png",
+      "area": "测试市",
+      "description": "难道在火星？",
+      "level_img": "http://img2.inke.cn/level.jpg"
+    },
+    "records": [],
+    "status": 1,
+    "portrait": "https://img.example.inke.cn/portrait.jpg",
+    "liveid": "1795483117403604",
+    "live_uid": "100001",
+    "is_follow": 0,
+    "live_type": "",
+    "sub_live_type": "",
+    "live_name": "测试🎤标题"
+  }
+}

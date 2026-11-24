@@ -34,6 +34,7 @@
 //   weibo.com/l/wblive/p/show/{live_id}  微博直播间；主页 weibo.com/u/{uid} 返回 auth_required（需要登录 Cookie）
 //   live.acfun.cn/live/{用户 id}       AcFun 直播间
 //   www.huajiao.com/user/{主播ID}       花椒主播；/l/{直播ID} 演示为主播 243575475，README 示例 /l/345096174 返回 invalid_url（直播已结束）
+//   www.inke.cn/liveroom/index.html?uid={主播 uid}[&id={直播 id}]  映客直播间（按 uid 识别）
 //   路径含 login / timeout / busy / parse  分别返回 auth_required / network / rate_limited / parse
 //   其他域名                            unsupported_platform；无法解析的文本为 invalid_url
 //
@@ -184,6 +185,7 @@ const mockPlatforms: Record<Platform, { name: string; roomUrl: (roomId: string) 
   weibo: { name: "微博直播", roomUrl: (roomId) => `https://weibo.com/l/wblive/p/show/${roomId}` },
   acfun: { name: "Acfun", roomUrl: (roomId) => `https://live.acfun.cn/live/${roomId}` },
   huajiao: { name: "花椒直播", roomUrl: (roomId) => `https://www.huajiao.com/user/${roomId}` },
+  inke: { name: "映客直播", roomUrl: (roomId) => `https://www.inke.cn/liveroom/index.html?uid=${roomId}` },
 };
 
 function snapshot(id: TaskId, seed: MockSeed, createdAt: number): TaskSnapshot {
@@ -359,6 +361,15 @@ function seedTasks(now: number): TaskSnapshot[] {
       roomId: "243575475",
       anchorId: "243575475",
       platform: "huajiao",
+      monitoring: "enabled",
+      live: { state: "offline", checkedAt: now - 2 * minute },
+      record: { state: "idle" },
+    },
+    {
+      anchorName: "晚风小酒馆",
+      roomId: "22954469",
+      anchorId: "22954469",
+      platform: "inke",
       monitoring: "enabled",
       live: { state: "offline", checkedAt: now - 2 * minute },
       record: { state: "idle" },
@@ -764,7 +775,7 @@ function normalizeUrl(url: string): string {
 const DEMO_ROOM = "745964462470";
 const DEMO_ANCHOR = `MS4wLjABAAAA-mock-anchor-${DEMO_ROOM}`;
 
-/** 模拟 platforms::resolve：认抖音、快手和B站、虎牙、斗鱼、小红书、YY、网易CC、微博、AcFun、花椒，按链接内容返回各类错误。 */
+/** 模拟 platforms::resolve：认抖音、快手和B站、虎牙、斗鱼、小红书、YY、网易CC、微博、AcFun、花椒、映客，按链接内容返回各类错误。 */
 function resolveMock(input: string, tasks: TaskSnapshot[]): ResolvedRoom | CommandError {
   const url = input.trim();
   if (!url) return { kind: "invalid_input", message: "请输入直播间链接" };
@@ -799,7 +810,9 @@ function resolveMock(input: string, tasks: TaskSnapshot[]): ResolvedRoom | Comma
                     ? "acfun"
                     : host === "huajiao.com" || host.endsWith(".huajiao.com")
                       ? "huajiao"
-                      : null;
+                      : host === "inke.cn" || host.endsWith(".inke.cn")
+                        ? "inke"
+                        : null;
   if (!platform) return { kind: "unsupported_platform", message: `暂不支持 ${host} 的直播间` };
   if (/login/i.test(path)) return { kind: "auth_required", message: "该直播间需要登录后观看，请填写 Cookie" };
   if (/timeout|network/i.test(path)) return { kind: "network", message: `连接 ${host} 超时` };
@@ -950,6 +963,20 @@ function resolveMock(input: string, tasks: TaskSnapshot[]): ResolvedRoom | Comma
       anchorId: roomId,
       anchorName: task?.anchorName ?? `花椒主播 ${roomId}`,
       liveUrl: mockPlatforms.huajiao.roomUrl(roomId),
+    };
+  }
+  if (platform === "inke") {
+    const roomId = parsed.searchParams.get("uid")?.trim() ?? "";
+    if (!/^\d+$/.test(roomId) || roomId === "0") {
+      return { kind: "invalid_url", message: `映客链接里没有主播 uid，请复制直播间页面的完整链接: ${url}` };
+    }
+    const task = known(roomId);
+    return {
+      ...base,
+      roomId,
+      anchorId: task?.anchorId ?? roomId,
+      anchorName: task?.anchorName ?? `映客 ${roomId}`,
+      liveUrl: mockPlatforms.inke.roomUrl(roomId),
     };
   }
   if (host === "v.douyin.com") {
