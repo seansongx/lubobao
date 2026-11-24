@@ -1127,8 +1127,11 @@ function resolveMock(input: string, tasks: TaskSnapshot[]): ResolvedRoom | Comma
     return { ...base, roomId: user[1].slice(0, 12), anchorId: user[1], anchorName: `主播 ${user[1].slice(0, 6)}`, liveUrl: null };
   }
   const room = /^\/([\w.-]+)\/?$/.exec(path);
-  if (host === "live.douyin.com" && room) {
-    const roomId = room[1];
+  // 分类页进入的链接没有路径，房间号在 live_web_rid 参数里（与 Rust 一致，相对 StreamCap 的有意扩展）。
+  const queryRid = host === "live.douyin.com" && path.replace(/\//g, "") === "" ? parsed.searchParams.get("live_web_rid") : null;
+  const douyinRoomId = room ? room[1] : queryRid && /^\d+$/.test(queryRid) ? queryRid : null;
+  if (host === "live.douyin.com" && douyinRoomId) {
+    const roomId = douyinRoomId;
     const task = known(roomId);
     return {
       ...base,

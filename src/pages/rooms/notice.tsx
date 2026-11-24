@@ -41,8 +41,8 @@ export function Notice({
     >
       <Icon className="mt-0.5 size-4 shrink-0" aria-hidden />
       <div className="min-w-0 flex-1">
-        <div className="font-medium">{title}</div>
-        {children && <div className="mt-0.5 break-words text-muted-foreground">{children}</div>}
+        <div className="font-medium wrap-anywhere">{title}</div>
+        {children && <div className="mt-0.5 wrap-anywhere text-muted-foreground">{children}</div>}
         {actions && <div className="mt-2 flex flex-wrap gap-2">{actions}</div>}
       </div>
     </div>
