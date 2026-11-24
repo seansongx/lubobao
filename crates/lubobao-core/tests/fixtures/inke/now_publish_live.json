@@ -1,0 +1,28 @@
+{
+  "dm_error": 0,
+  "error_msg": "操作成功",
+  "live": {
+    "city": "测试市",
+    "cover": "https://img.example.inke.cn/cover.jpg",
+    "creator": 100001,
+    "end_time": 0,
+    "id": "1795483117403604",
+    "landscape": 0,
+    "live_type": "",
+    "location": "CN,测试省,测试市",
+    "multi": 0,
+    "name": "测试🎤标题",
+    "online_users": 12,
+    "pub_stat": 1,
+    "room_id": 123456789,
+    "rotate": 0,
+    "share_addr": "https://mlive2.inke.cn/app/hot/live?uid=100001&liveid=1795483117403604&ctime=1795483117",
+    "start_time": 1795483142,
+    "status": 1,
+    "stream_addr": "https://pull.example.inke.cn/live/1795483117403604_t.flv?stream_id=1795483117403604_t&wsSecret=0123&wsABStime=6b051325",
+    "stream_id": "1795483117403604_0_en",
+    "stream_multi_addr": "http://pull-zego.example.inke.cn/inkemain/1795483117403604_0_en.flv?stream_id=1795483117403604_0_en&stream_type=zego&codecInfo=8192&wsSecret=4567&wsABStime=6b063786",
+    "stream_type": "zego",
+    "sub_live_type": ""
+  }
+}
