@@ -35,6 +35,7 @@
 //   live.acfun.cn/live/{用户 id}       AcFun 直播间
 //   live.baidu.com/…live.html?room_id={房间号}  百度直播间
 //   www.zhihu.com/theater/{直播间号}   知乎直播间
+//   fm.missevan.com/live/{房间号}       猫耳FM 直播间（音频）
 //   路径含 login / timeout / busy / parse  分别返回 auth_required / network / rate_limited / parse
 //   其他域名                            unsupported_platform；无法解析的文本为 invalid_url
 //
@@ -186,6 +187,7 @@ const mockPlatforms: Record<Platform, { name: string; roomUrl: (roomId: string) 
   acfun: { name: "Acfun", roomUrl: (roomId) => `https://live.acfun.cn/live/${roomId}` },
   baidu: { name: "百度直播", roomUrl: (roomId) => `https://live.baidu.com/m/media/pclive/pchome/live.html?room_id=${roomId}` },
   zhihu: { name: "知乎直播", roomUrl: (roomId) => `https://www.zhihu.com/theater/${roomId}` },
+  maoerfm: { name: "猫耳FM直播", roomUrl: (roomId) => `https://fm.missevan.com/live/${roomId}` },
 };
 
 function snapshot(id: TaskId, seed: MockSeed, createdAt: number): TaskSnapshot {
@@ -368,6 +370,15 @@ function seedTasks(now: number): TaskSnapshot[] {
       anchorName: "中国新闻网",
       roomId: "55785",
       platform: "zhihu",
+      monitoring: "enabled",
+      live: { state: "offline", checkedAt: now - 2 * minute },
+      record: { state: "idle" },
+    },
+    {
+      anchorName: "李晚星_全能主播",
+      roomId: "869138407",
+      anchorId: "34312404",
+      platform: "maoerfm",
       monitoring: "enabled",
       live: { state: "offline", checkedAt: now - 2 * minute },
       record: { state: "idle" },
@@ -773,7 +784,7 @@ function normalizeUrl(url: string): string {
 const DEMO_ROOM = "745964462470";
 const DEMO_ANCHOR = `MS4wLjABAAAA-mock-anchor-${DEMO_ROOM}`;
 
-/** 模拟 platforms::resolve：认抖音、快手和B站、虎牙、斗鱼、小红书、YY、网易CC、微博、AcFun、百度、知乎，按链接内容返回各类错误。 */
+/** 模拟 platforms::resolve：认抖音、快手和B站、虎牙、斗鱼、小红书、YY、网易CC、微博、AcFun、百度、知乎、猫耳FM，按链接内容返回各类错误。 */
 function resolveMock(input: string, tasks: TaskSnapshot[]): ResolvedRoom | CommandError {
   const url = input.trim();
   if (!url) return { kind: "invalid_input", message: "请输入直播间链接" };
@@ -810,7 +821,9 @@ function resolveMock(input: string, tasks: TaskSnapshot[]): ResolvedRoom | Comma
                       ? "baidu"
                       : host === "zhihu.com" || host === "www.zhihu.com"
                         ? "zhihu"
-                        : null;
+                        : host === "fm.missevan.com"
+                          ? "maoerfm"
+                          : null;
   if (!platform) return { kind: "unsupported_platform", message: `暂不支持 ${host} 的直播间` };
   if (/login/i.test(path)) return { kind: "auth_required", message: "该直播间需要登录后观看，请填写 Cookie" };
   if (/timeout|network/i.test(path)) return { kind: "network", message: `连接 ${host} 超时` };
@@ -966,6 +979,19 @@ function resolveMock(input: string, tasks: TaskSnapshot[]): ResolvedRoom | Comma
       anchorId: task?.anchorId ?? null,
       anchorName: task?.anchorName ?? `知乎主播 ${roomId}`,
       liveUrl: mockPlatforms.zhihu.roomUrl(roomId),
+    };
+  }
+  if (platform === "maoerfm") {
+    const match = /^[/]live[/]([0-9]+)[/]?$/.exec(path);
+    if (!match) return { kind: "invalid_url", message: `不是可识别的猫耳FM直播链接: ${url}` };
+    const roomId = match[1];
+    const task = known(roomId);
+    return {
+      ...base,
+      roomId,
+      anchorId: task?.anchorId ?? null,
+      anchorName: task?.anchorName ?? `猫耳FM 主播 ${roomId.slice(-4)}`,
+      liveUrl: mockPlatforms.maoerfm.roomUrl(roomId),
     };
   }
   if (host === "v.douyin.com") {

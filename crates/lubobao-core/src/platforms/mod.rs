@@ -23,6 +23,7 @@ pub mod douyu;
 pub mod e2e;
 pub mod huya;
 pub mod kuaishou;
+pub mod maoer;
 pub mod netease;
 mod sign;
 pub mod weibo;
@@ -51,6 +52,7 @@ pub enum Platform {
     Acfun,
     Baidu,
     Zhihu,
+    Maoer,
     /// 端到端测试用的本地直播间（feature `e2e`），发布版没有。
     #[cfg(feature = "e2e")]
     E2e,
@@ -72,6 +74,7 @@ impl Platform {
             Platform::Acfun => "acfun",
             Platform::Baidu => "baidu",
             Platform::Zhihu => "zhihu",
+            Platform::Maoer => "maoerfm",
             #[cfg(feature = "e2e")]
             Platform::E2e => "e2e",
         }
@@ -92,6 +95,7 @@ impl Platform {
             Platform::Acfun => "Acfun",
             Platform::Baidu => "百度直播",
             Platform::Zhihu => "知乎直播",
+            Platform::Maoer => "猫耳FM直播",
             #[cfg(feature = "e2e")]
             Platform::E2e => "测试直播间",
         }
@@ -396,6 +400,7 @@ pub fn adapters() -> Vec<Box<dyn PlatformAdapter>> {
         Box::new(acfun::AcfunAdapter::new()),
         Box::new(baidu::BaiduAdapter::new()),
         Box::new(zhihu::ZhihuAdapter::new()),
+        Box::new(maoer::MaoerAdapter::new()),
     ];
     #[cfg(feature = "e2e")]
     list.push(Box::new(e2e::E2eAdapter));
