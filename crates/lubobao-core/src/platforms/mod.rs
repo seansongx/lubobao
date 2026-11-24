@@ -31,6 +31,7 @@ pub mod maoer;
 pub mod netease;
 mod sign;
 pub mod sixroom;
+pub mod sooplive;
 pub mod tiktok;
 pub mod twitch;
 pub mod weibo;
@@ -83,6 +84,7 @@ pub enum Platform {
     Tiktok,
     Twitch,
     Youtube,
+    Sooplive,
     /// 端到端测试用的本地直播间（feature `e2e`），发布版没有。
     #[cfg(feature = "e2e")]
     E2e,
@@ -112,6 +114,7 @@ impl Platform {
             Platform::Tiktok => "tiktok",
             Platform::Twitch => "twitch",
             Platform::Youtube => "youtube",
+            Platform::Sooplive => "sooplive",
             #[cfg(feature = "e2e")]
             Platform::E2e => "e2e",
         }
@@ -140,6 +143,7 @@ impl Platform {
             Platform::Tiktok => "TikTok",
             Platform::Twitch => "Twitch",
             Platform::Youtube => "YouTube",
+            Platform::Sooplive => "SOOP",
             #[cfg(feature = "e2e")]
             Platform::E2e => "测试直播间",
         }
@@ -508,6 +512,7 @@ pub fn adapters() -> Vec<Box<dyn PlatformAdapter>> {
         Box::new(tiktok::TiktokAdapter::new()),
         Box::new(twitch::TwitchAdapter::new()),
         Box::new(youtube::YoutubeAdapter::new()),
+        Box::new(sooplive::SoopAdapter::new()),
     ];
     #[cfg(feature = "e2e")]
     list.push(Box::new(e2e::E2eAdapter));

@@ -43,6 +43,7 @@
 //   www.tiktok.com/@{用户名}[/live]     TikTok 直播间；vt.tiktok.com/… 分享短链演示为 @nbcnews
 //   www.twitch.tv/{频道名}             Twitch 频道
 //   www.youtube.com/@{名称}/live，watch?v={视频 id}，youtu.be/{视频 id}  YouTube 频道或直播视频；路径含 bot 返回 auth_required
+//   play.sooplive.com/{主播ID}[/{场次号}]    SOOP（原 AfreecaTV）主播；路径含 login 返回 auth_required（成人或年龄限制需要 Cookie）
 //   路径含 login / timeout / busy / parse  分别返回 auth_required / network / rate_limited / parse
 //   其他域名                            unsupported_platform；无法解析的文本为 invalid_url
 //   分享文字（如「【xx的直播】 https://v.douyin.com/abc/ 复制此链接…」）先取出其中的链接；没有链接为 invalid_input
@@ -207,6 +208,7 @@ const mockPlatforms: Record<Platform, { name: string; roomUrl: (roomId: string) 
     roomUrl: (roomId) =>
       roomId.startsWith("@") ? `https://www.youtube.com/${roomId}/live` : `https://www.youtube.com/watch?v=${roomId}`,
   },
+  sooplive: { name: "SOOP", roomUrl: (roomId) => `https://play.sooplive.com/${roomId}` },
 };
 
 function snapshot(id: TaskId, seed: MockSeed, createdAt: number): TaskSnapshot {
@@ -461,6 +463,15 @@ function seedTasks(now: number): TaskSnapshot[] {
       roomId: "@lofigirl",
       anchorId: "UCSJ4gkVC6NrvII8umztf0Ow",
       platform: "youtube",
+      monitoring: "enabled",
+      live: { state: "offline", checkedAt: now - 2 * minute },
+      record: { state: "idle" },
+    },
+    {
+      anchorName: "조새TV",
+      roomId: "superbsw123",
+      anchorId: "9205794",
+      platform: "sooplive",
       monitoring: "enabled",
       live: { state: "offline", checkedAt: now - 2 * minute },
       record: { state: "idle" },
@@ -913,7 +924,7 @@ export function extractLink(input: string): string | null {
   return null;
 }
 
-/** 模拟 platforms::resolve：认抖音、快手和B站、虎牙、斗鱼、小红书、YY、网易CC、微博、AcFun、花椒、映客、酷狗、六间房、百度、知乎、猫耳FM、TikTok、Twitch、YouTube，按链接内容返回各类错误。 */
+/** 模拟 platforms::resolve：认抖音、快手和B站、虎牙、斗鱼、小红书、YY、网易CC、微博、AcFun、花椒、映客、酷狗、六间房、百度、知乎、猫耳FM、TikTok、Twitch、YouTube、SOOP，按链接内容返回各类错误。 */
 function resolveMock(input: string, tasks: TaskSnapshot[]): ResolvedRoom | CommandError {
   if (!input.trim()) return { kind: "invalid_input", message: "请输入直播间链接" };
   const url = extractLink(input);
@@ -967,7 +978,9 @@ function resolveMock(input: string, tasks: TaskSnapshot[]): ResolvedRoom | Comma
                                       ? "twitch"
                                       : host === "youtube.com" || host.endsWith(".youtube.com") || host === "youtu.be"
                                         ? "youtube"
-                                        : null;
+                                        : host === "sooplive.com" || host.endsWith(".sooplive.com") || host === "sooplive.co.kr" || host.endsWith(".sooplive.co.kr")
+                                          ? "sooplive"
+                                          : null;
   if (!platform) return { kind: "unsupported_platform", message: `暂不支持 ${host} 的直播间` };
   if (platform === "youtube" && /bot/i.test(path)) {
     return { kind: "auth_required", message: "YouTube 要求登录确认不是机器人（代理节点的 IP 被 YouTube 风控）：请在设置里填写登录后的 YouTube Cookie，或换一个代理节点" };
@@ -1253,6 +1266,20 @@ function resolveMock(input: string, tasks: TaskSnapshot[]): ResolvedRoom | Comma
       anchorId: task?.anchorId ?? null,
       anchorName: task?.anchorName ?? roomId,
       liveUrl: mockPlatforms.youtube.roomUrl(roomId),
+    };
+  }
+  if (platform === "sooplive") {
+    const id = path.split("/").filter(Boolean)[0]?.toLowerCase() ?? "";
+    if (!/^[a-z0-9_]{2,20}$/.test(id) || ["directory", "player", "vod", "search"].includes(id)) {
+      return { kind: "invalid_url", message: `SOOP 链接里没有主播 ID，请复制形如 play.sooplive.com/主播ID 的链接: ${url}` };
+    }
+    const task = known(id);
+    return {
+      ...base,
+      roomId: id,
+      anchorId: task?.anchorId ?? null,
+      anchorName: task?.anchorName ?? id,
+      liveUrl: mockPlatforms.sooplive.roomUrl(id),
     };
   }
   if (host === "v.douyin.com") {
