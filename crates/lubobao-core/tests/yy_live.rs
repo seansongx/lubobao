@@ -71,6 +71,19 @@ async fn report(adapter: &YyAdapter, url: &str, options: &FetchOptions) -> Optio
     }
 }
 
+/// `/{sid}` resolves to the same channel as the README `/{sid}/{sid}` link.
+#[tokio::test]
+#[ignore = "requires network access to YY"]
+async fn channel_link_without_sub_channel_resolves() {
+    let adapter = YyAdapter::new();
+    let options = FetchOptions::default();
+    let link = "https://www.yy.com/22490906";
+    match report(&adapter, link, &options).await {
+        Some(info) if info.room_id == README_LINK.1 => {}
+        other => panic!("{link}: {:?}", other.map(|info| info.room_id)),
+    }
+}
+
 #[tokio::test]
 #[ignore = "requires network access to YY"]
 async fn readme_link_resolves_against_live_yy() {

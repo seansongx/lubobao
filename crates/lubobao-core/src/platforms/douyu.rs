@@ -119,7 +119,13 @@ pub fn parse_link(input: &str) -> Result<DouyuLink, PlatformError> {
             "斗鱼专题页链接需要带 rid 参数（房间号）: {trimmed}"
         )));
     }
+    // Site pages, not rooms: the directory (`/directory/all`), categories
+    // (`/g_LOL`) and the member center. Kept short so real room names are kept.
+    let site_page = first.eq_ignore_ascii_case("directory")
+        || first.eq_ignore_ascii_case("member")
+        || first.starts_with("g_");
     if !first.is_empty()
+        && !site_page
         && first
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-'))
@@ -774,6 +780,10 @@ mod tests {
             "https://www.douyu.com/",
             "https://www.douyu.com/topic/wzDBLS6",
             "https://www.douyu.com/topic/wzDBLS6?rid=abc",
+            "https://www.douyu.com/directory",
+            "https://www.douyu.com/directory/all",
+            "https://www.douyu.com/g_LOL",
+            "https://www.douyu.com/member/cp",
             "https://v.douyu.com/show/abc",
             "https://www.douyu.com.evil.example/3637778",
             "https://www.douyu.com/bad%20name",

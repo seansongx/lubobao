@@ -1049,3 +1049,82 @@ fn record_end_without_details_falls_back_to_the_recorded_file() {
     assert_eq!(detail["filePath"], "a_000.ts");
     assert_eq!(detail["segments"], 1);
 }
+
+#[test]
+fn share_text_is_saved_as_the_link_it_contains() {
+    let dir = tempfile::tempdir().unwrap();
+    let (manager, _) = open(dir.path());
+    let task = added(
+        manager
+            .add_resolved(
+                add_input("【主播的直播】 https://v.douyin.com/iQFeBnt/ 复制此链接，打开抖音直接观看直播！"),
+                &info("1", Some("sec-1"), "主播"),
+            )
+            .unwrap(),
+    );
+    assert_eq!(task.config.url, "https://v.douyin.com/iQFeBnt/");
+
+    // 同一段文字再加一次：按提取后的链接判重，候选里也是提取后的链接。
+    match manager
+        .add_resolved(
+            add_input("看直播 https://v.douyin.com/iQFeBnt/ 复制此链接"),
+            &info("2", Some("sec-2"), "另一个"),
+        )
+        .unwrap()
+    {
+        TaskMutation::Duplicate { candidate, .. } => {
+            assert_eq!(candidate.url, "https://v.douyin.com/iQFeBnt/");
+        }
+        other => panic!("expected duplicate, got {other:?}"),
+    }
+
+    let updated = manager
+        .update_resolved(
+            UpdateTaskInput {
+                id: task.id,
+                url: Some("快来 https://live.douyin.com/745964462470，好看".into()),
+                ..UpdateTaskInput::default()
+            },
+            Some(&info("745964462470", Some("sec-1"), "主播")),
+        )
+        .unwrap();
+    match updated {
+        TaskMutation::Updated { task } => {
+            assert_eq!(task.config.url, "https://live.douyin.com/745964462470");
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn resolve_explains_input_without_a_link() {
+    let settings = Map::new();
+    let empty = TaskManager::resolve("  ", Quality::Od, &settings)
+        .await
+        .unwrap_err();
+    assert_eq!(empty.kind, ErrorKind::InvalidInput);
+    assert_eq!(empty.message, "请输入直播间链接");
+
+    let no_link = TaskManager::resolve("主播的直播间，快来看", Quality::Od, &settings)
+        .await
+        .unwrap_err();
+    assert_eq!(no_link.kind, ErrorKind::InvalidInput);
+    assert!(
+        no_link.message.contains("没有在输入中找到链接"),
+        "{no_link:?}"
+    );
+
+    // 有链接但平台不支持：提示里是提取出的链接，不是整段文字。
+    let unsupported = TaskManager::resolve(
+        "看这里 https://www.example.com/room/1 谢谢",
+        Quality::Od,
+        &settings,
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(unsupported.kind, ErrorKind::UnsupportedPlatform);
+    assert_eq!(
+        unsupported.message,
+        "暂不支持这个链接的平台：https://www.example.com/room/1"
+    );
+}

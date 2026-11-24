@@ -107,6 +107,19 @@ async fn check_flv_header(info: &LiveInfo) -> Result<(), String> {
     }
 }
 
+/// A user id with leading zeros is the same user.
+#[tokio::test]
+#[ignore = "requires network access to AcFun"]
+async fn leading_zero_link_resolves_to_the_same_user() {
+    let adapter = AcfunAdapter::new();
+    let options = FetchOptions::default();
+    let link = "https://live.acfun.cn/live/0179922";
+    match report(&adapter, link, &options).await {
+        Ok(info) if info.room_id == README_ROOM_ID => {}
+        other => panic!("{link}: {:?}", other.map(|info| info.room_id)),
+    }
+}
+
 #[tokio::test]
 #[ignore = "requires network access to AcFun"]
 async fn links_resolve_against_live_acfun() {

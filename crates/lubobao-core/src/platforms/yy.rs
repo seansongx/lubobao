@@ -54,11 +54,20 @@ pub struct YyLink {
 }
 
 impl YyLink {
-    /// Canonical URL for the link, keeping the sub-channel when given.
-    pub fn normalized_url(&self) -> String {
+    /// Room page as given, keeping the sub-channel.
+    pub fn page_url(&self) -> String {
         match &self.ssid {
             Some(ssid) => format!("{ROOM_PAGE}{}/{ssid}", self.sid),
             None => format!("{ROOM_PAGE}{}", self.sid),
+        }
+    }
+
+    /// Canonical URL for duplicate detection. A sub-channel equal to the top
+    /// channel is the channel's own room, so `/{sid}/{sid}` and `/{sid}` match.
+    pub fn normalized_url(&self) -> String {
+        match &self.ssid {
+            Some(ssid) if *ssid != self.sid => format!("{ROOM_PAGE}{}/{ssid}", self.sid),
+            _ => format!("{ROOM_PAGE}{}", self.sid),
         }
     }
 }
@@ -411,7 +420,7 @@ impl YyAdapter {
         let client = self.clients.get(options.proxy.as_deref())?;
         let cookie = user_cookie(options);
 
-        let page_url = link.normalized_url();
+        let page_url = link.page_url();
         let response = client
             .get(&page_url)
             .headers(pc_headers(cookie)?)
@@ -492,7 +501,17 @@ mod tests {
             adapter
                 .normalize_url("https://www.yy.com/22490906/22490906?tempId=1")
                 .as_deref(),
-            Some("https://www.yy.com/22490906/22490906")
+            Some("https://www.yy.com/22490906")
+        );
+        assert_eq!(
+            adapter.normalize_url("https://www.yy.com/1/2").as_deref(),
+            Some("https://www.yy.com/1/2")
+        );
+        assert_eq!(
+            parse_link("https://www.yy.com/22490906/22490906")
+                .unwrap()
+                .page_url(),
+            "https://www.yy.com/22490906/22490906"
         );
         assert_eq!(
             adapter.normalize_url("yy.com/54880976/").as_deref(),

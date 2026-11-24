@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock, Weak};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
-use crate::platforms::{LiveInfo, Platform, PlatformError, Quality, adapter_for};
+use crate::platforms::{LiveInfo, Platform, PlatformError, Quality, adapter_for, extract_link};
 
 pub mod activity;
 pub mod dedup;
@@ -33,6 +33,11 @@ use store::{Store, StoreError};
 pub const TASK_UPDATED_EVENT: &str = "task-updated";
 pub const TASK_REMOVED_EVENT: &str = "task-removed";
 pub const ACTIVITY_EVENT: &str = "activity";
+
+/// 输入里的链接（分享文案只取其中的链接）；找不到链接时为去掉首尾空白的原文。
+pub fn input_link(input: &str) -> &str {
+    extract_link(input).unwrap_or_else(|| input.trim())
+}
 
 /// 启动时发现上次录制未正常结束，写入动态所用的说明。
 pub const INTERRUPTED_REASON: &str = "录制异常中断：上次退出时录制未正常结束";
@@ -228,7 +233,7 @@ pub struct ResolvedRoom {
 impl ResolvedRoom {
     pub fn from_live_info(url: &str, info: &LiveInfo) -> Self {
         ResolvedRoom {
-            url: url.trim().to_string(),
+            url: input_link(url).to_string(),
             platform: info.platform,
             platform_name: info.platform.display_name(),
             room_id: info.room_id.clone(),
@@ -422,13 +427,18 @@ impl TaskManager {
         quality: Quality,
         settings: &Map<String, Value>,
     ) -> CommandResult<LiveInfo> {
-        let url = url.trim();
-        if url.is_empty() {
+        if url.trim().is_empty() {
             return Err(CommandError::new(
                 ErrorKind::InvalidInput,
                 "请输入直播间链接",
             ));
         }
+        let url = extract_link(url).ok_or_else(|| {
+            CommandError::new(
+                ErrorKind::InvalidInput,
+                "没有在输入中找到链接，请粘贴直播间链接或包含链接的分享文字",
+            )
+        })?;
         let adapter = adapter_for(url).ok_or_else(|| {
             CommandError::new(
                 ErrorKind::UnsupportedPlatform,
@@ -462,7 +472,7 @@ impl TaskManager {
     ) -> CommandResult<TaskMutation> {
         let settings = self.settings();
         let config = TaskConfig {
-            url: input.url.trim().to_string(),
+            url: input_link(&input.url).to_string(),
             platform: info.platform,
             room_id: info.room_id.clone(),
             anchor_id: info.anchor_id.clone(),
@@ -541,7 +551,7 @@ impl TaskManager {
     pub async fn update_task(&self, input: UpdateTaskInput) -> CommandResult<TaskMutation> {
         let current = self.get(input.id).ok_or_else(|| not_found(input.id))?;
         let new_url =
-            input.url.as_deref().map(str::trim).filter(|url| {
+            input.url.as_deref().map(input_link).filter(|url| {
                 dedup::normalize_url(url) != dedup::normalize_url(&current.config.url)
             });
         let info = match new_url {
@@ -576,7 +586,7 @@ impl TaskManager {
                         "正在录制，停止录制后才能修改链接",
                     ));
                 }
-                config.url = url.trim().to_string();
+                config.url = input_link(url).to_string();
                 config.platform = info.platform;
                 config.room_id = info.room_id.clone();
                 config.anchor_id = info.anchor_id.clone();

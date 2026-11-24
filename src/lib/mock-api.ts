@@ -42,6 +42,7 @@
 //   fm.missevan.com/live/{房间号}       猫耳FM 直播间（音频）
 //   路径含 login / timeout / busy / parse  分别返回 auth_required / network / rate_limited / parse
 //   其他域名                            unsupported_platform；无法解析的文本为 invalid_url
+//   分享文字（如「【xx的直播】 https://v.douyin.com/abc/ 复制此链接…」）先取出其中的链接；没有链接为 invalid_input
 //
 // 事件推送
 //   录制中的任务每秒增长大小；等待开播的任务每隔一段时间模拟一次检测；重试中的任务按 nextRetryAt 重试；
@@ -828,10 +829,58 @@ function normalizeUrl(url: string): string {
 const DEMO_ROOM = "745964462470";
 const DEMO_ANCHOR = `MS4wLjABAAAA-mock-anchor-${DEMO_ROOM}`;
 
+const URL_CHARS = /[A-Za-z0-9\-._~:/?#[\]@!$&'()*+,;=%]/;
+
+/** 去掉链接末尾的句末标点；链接自己带的右括号保留。 */
+function trimLinkEnd(link: string): string {
+  let end = link;
+  for (;;) {
+    const last = end.at(-1);
+    const count = (c: string) => end.split(c).length - 1;
+    const strip =
+      last !== undefined &&
+      (".,;:!?'\"".includes(last) ||
+        (last === ")" && count("(") < count(")")) ||
+        (last === "]" && count("[") < count("]")));
+    if (!strip) return end;
+    end = end.slice(0, -1);
+  }
+}
+
+/** 与 platforms::extract_link 一致：取分享文字里第一个 http(s):// 链接，没有协议时取第一个像「域名/路径」的片段；找不到返回 null。 */
+export function extractLink(input: string): string | null {
+  const text = input.trim();
+  for (const match of text.matchAll(/([A-Za-z0-9+.-]*?)(https?):\/\//gi)) {
+    const prefix = match[1];
+    const start = prefix.includes("+") && prefix.endsWith("+") ? match.index : match.index + prefix.length;
+    let end = match.index + match[0].length;
+    while (end < text.length && URL_CHARS.test(text[end])) end += 1;
+    const link = trimLinkEnd(text.slice(start, end));
+    if (link.length > match[0].length - (start - match.index)) return link;
+  }
+  // 在空白、控制字符和非 ASCII 字符（中文、全角标点）处断开。
+  for (const raw of text.split(/[^\x21-\x7e]/)) {
+    const token = trimLinkEnd(raw);
+    const host = token.split(/[/?#]/)[0];
+    if (
+      token &&
+      [...token].every((c) => URL_CHARS.test(c)) &&
+      host.includes(".") &&
+      !host.startsWith(".") &&
+      !host.endsWith(".") &&
+      /[A-Za-z]/.test(host)
+    ) {
+      return token;
+    }
+  }
+  return null;
+}
+
 /** 模拟 platforms::resolve：认抖音、快手和B站、虎牙、斗鱼、小红书、YY、网易CC、微博、AcFun、花椒、映客、酷狗、六间房、百度、知乎、猫耳FM，按链接内容返回各类错误。 */
 function resolveMock(input: string, tasks: TaskSnapshot[]): ResolvedRoom | CommandError {
-  const url = input.trim();
-  if (!url) return { kind: "invalid_input", message: "请输入直播间链接" };
+  if (!input.trim()) return { kind: "invalid_input", message: "请输入直播间链接" };
+  const url = extractLink(input);
+  if (!url) return { kind: "invalid_input", message: "没有在输入中找到链接，请粘贴直播间链接或包含链接的分享文字" };
   let parsed: URL;
   try {
     parsed = new URL(/^https?:\/\//i.test(url) ? url : `https://${url}`);
@@ -1542,7 +1591,7 @@ export function createMockBackend(): Backend {
       const task = tasks.find((item) => item.id === input.id);
       if (!task) return reject("not_found", `任务 ${input.id} 不存在`);
       const patch: Partial<TaskSnapshot> = {};
-      if (input.url !== undefined && input.url.trim() !== task.url) {
+      if (input.url !== undefined && (extractLink(input.url) ?? input.url.trim()) !== task.url) {
         // 与 Rust 一致：正在录制时不能改链接。
         if (isActive(task.record)) {
           return reject("recording_active", `${task.anchorName} 正在录制，停止录制后才能修改链接`);

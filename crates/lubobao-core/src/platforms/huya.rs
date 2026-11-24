@@ -109,15 +109,21 @@ pub fn parse_link(input: &str) -> Result<HuyaLink, PlatformError> {
         .map(|segments| segments.filter(|segment| !segment.is_empty()).collect())
         .unwrap_or_default();
     match segments.as_slice() {
-        [id] if id
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-')) =>
+        [id] if !SITE_PAGES.contains(id)
+            && id
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-')) =>
         {
             Ok(HuyaLink { id: id.to_string() })
         }
         _ => Err(invalid()),
     }
 }
+
+/// Site pages with a one-segment path that are not rooms: the live list,
+/// the category list and the followed-anchors page. Kept short so real room
+/// aliases (such as `lpl`) are never rejected.
+const SITE_PAGES: [&str; 3] = ["l", "g", "myfollow"];
 
 /// Room number from a page loaded with the mini-program headers
 /// (StreamGet: `ProfileRoom":(.*?),"sPrivateHost`). The first non-zero
@@ -940,6 +946,9 @@ mod tests {
         for input in [
             "https://www.huya.com/",
             "https://www.huya.com/g/lol",
+            "https://www.huya.com/l",
+            "https://www.huya.com/g",
+            "https://www.huya.com/myfollow",
             "https://v.huya.com/play/123.html",
             "https://www.huya.com/cache.php",
             "https://www.huya.com/bad%20id",

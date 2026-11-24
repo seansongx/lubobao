@@ -9,7 +9,7 @@ use lubobao_core::platforms::{
 };
 
 /// The five README link types, each with the room id (web_rid or 抖音号) it must resolve to.
-const README_LINKS: [(&str, &str, &str); 6] = [
+const README_LINKS: [(&str, &str, &str); 8] = [
     (
         "web room from category page (live_web_rid)",
         "https://live.douyin.com/?anchor_id=2292900791589195&category_name=all&is_vs=0&live_web_rid=228052615835&page_type=main_category_page&vs_ep_group_id=&vs_episode_id=&vs_episode_stage=&vs_season_id=",
@@ -34,6 +34,16 @@ const README_LINKS: [(&str, &str, &str); 6] = [
     (
         "web profile",
         "https://www.douyin.com/user/MS4wLjABAAAA3kr2yA4aRD-sjf9cx8xkOH8Di3RjktpKcAvqIetpsF0",
+        "panmin76",
+    ),
+    (
+        "main site room (root/live)",
+        "https://www.douyin.com/root/live/745964462470",
+        "745964462470",
+    ),
+    (
+        "share landing profile (iesdouyin)",
+        "https://www.iesdouyin.com/share/user/MS4wLjABAAAA3kr2yA4aRD-sjf9cx8xkOH8Di3RjktpKcAvqIetpsF0?from_ssr=1",
         "panmin76",
     ),
 ];
