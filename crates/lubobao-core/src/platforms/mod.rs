@@ -21,6 +21,7 @@ pub mod douyin;
 pub mod douyu;
 #[cfg(feature = "e2e")]
 pub mod e2e;
+pub mod hls;
 pub mod huajiao;
 pub mod huya;
 pub mod inke;
@@ -30,6 +31,8 @@ pub mod maoer;
 pub mod netease;
 mod sign;
 pub mod sixroom;
+pub mod tiktok;
+pub mod twitch;
 pub mod weibo;
 pub mod xiaohongshu;
 pub mod yy;
@@ -72,6 +75,8 @@ pub enum Platform {
     Baidu,
     Zhihu,
     Maoer,
+    Tiktok,
+    Twitch,
     /// 端到端测试用的本地直播间（feature `e2e`），发布版没有。
     #[cfg(feature = "e2e")]
     E2e,
@@ -98,6 +103,8 @@ impl Platform {
             Platform::Baidu => "baidu",
             Platform::Zhihu => "zhihu",
             Platform::Maoer => "maoerfm",
+            Platform::Tiktok => "tiktok",
+            Platform::Twitch => "twitch",
             #[cfg(feature = "e2e")]
             Platform::E2e => "e2e",
         }
@@ -123,6 +130,8 @@ impl Platform {
             Platform::Baidu => "百度直播",
             Platform::Zhihu => "知乎直播",
             Platform::Maoer => "猫耳FM直播",
+            Platform::Tiktok => "TikTok",
+            Platform::Twitch => "Twitch",
             #[cfg(feature = "e2e")]
             Platform::E2e => "测试直播间",
         }
@@ -482,6 +491,8 @@ pub fn adapters() -> Vec<Box<dyn PlatformAdapter>> {
         Box::new(baidu::BaiduAdapter::new()),
         Box::new(zhihu::ZhihuAdapter::new()),
         Box::new(maoer::MaoerAdapter::new()),
+        Box::new(tiktok::TiktokAdapter::new()),
+        Box::new(twitch::TwitchAdapter::new()),
     ];
     #[cfg(feature = "e2e")]
     list.push(Box::new(e2e::E2eAdapter));

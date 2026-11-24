@@ -53,6 +53,8 @@ const mockExamples: { label: string; url: string }[] = [
   { label: "百度", url: "https://live.baidu.com/m/media/pclive/pchome/live.html?room_id=9175031377&tab_category" },
   { label: "知乎", url: "https://www.zhihu.com/theater/10687?drama_id=2037464603865642996" },
   { label: "猫耳FM", url: "https://fm.missevan.com/live/868895007" },
+  { label: "TikTok", url: "https://www.tiktok.com/@nbcnews/live" },
+  { label: "Twitch", url: "https://www.twitch.tv/shroud" },
   { label: "需要登录", url: "https://live.douyin.com/login-required" },
   { label: "不支持的平台", url: "https://www.example.com/live/1" },
   { label: "网络错误", url: "https://live.douyin.com/network-timeout" },
