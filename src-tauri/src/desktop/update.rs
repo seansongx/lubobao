@@ -379,7 +379,7 @@ fn build_updater<R: Runtime>(
         builder = builder.on_before_exit(move || {
             use tauri_plugin_window_state::AppHandleExt;
             if let Err(error) = handle.save_window_state(super::window::SAVED_STATE) {
-                eprintln!("录播宝无法保存窗口位置：{error}");
+                log::warn!("录播宝无法保存窗口位置：{error}");
             }
             handle.cleanup_before_exit();
         });
@@ -444,7 +444,7 @@ pub async fn check_in_order<R: Runtime>(
                 }));
             }
             Err(error) => {
-                eprintln!(
+                log::warn!(
                     "录播宝检查更新失败（{host}），换下一个接口：{}",
                     error.message
                 );
@@ -595,7 +595,7 @@ pub async fn download_with_fallback<R: Runtime, F: FnMut(Progress) + Send>(
     if first_error.kind != UpdateErrorKind::Network || fallbacks.is_empty() {
         return Err(first_error);
     }
-    eprintln!(
+    log::warn!(
         "录播宝下载更新失败（{}），改从备用线路下载：{}",
         update.download_url.host_str().unwrap_or_default(),
         first_error.message
@@ -612,25 +612,26 @@ pub async fn download_with_fallback<R: Runtime, F: FnMut(Progress) + Send>(
         let candidate = match check_one(app, endpoint, id.as_deref(), debug, check_timeout).await {
             Ok(Some(candidate)) if candidate.version == update.version => candidate,
             Ok(Some(candidate)) => {
-                eprintln!(
+                log::warn!(
                     "录播宝备用线路（{host}）的版本是 {}，与 {} 不同，不从这里下载",
-                    candidate.version, update.version
+                    candidate.version,
+                    update.version
                 );
                 continue;
             }
             Ok(None) => {
-                eprintln!("录播宝备用线路（{host}）没有版本 {}", update.version);
+                log::warn!("录播宝备用线路（{host}）没有版本 {}", update.version);
                 continue;
             }
             Err(error) => {
-                eprintln!("录播宝检查备用线路失败（{host}）：{}", error.message);
+                log::warn!("录播宝检查备用线路失败（{host}）：{}", error.message);
                 continue;
             }
         };
         let candidate = match prepare_download(candidate) {
             Ok(candidate) => candidate,
             Err(error) => {
-                eprintln!("录播宝备用线路（{host}）不可用：{}", error.message);
+                log::warn!("录播宝备用线路（{host}）不可用：{}", error.message);
                 continue;
             }
         };
@@ -647,7 +648,7 @@ pub async fn download_with_fallback<R: Runtime, F: FnMut(Progress) + Send>(
                 if error.kind != UpdateErrorKind::Network {
                     return Err(error);
                 }
-                eprintln!("录播宝从备用线路（{host}）下载失败：{}", error.message);
+                log::warn!("录播宝从备用线路（{host}）下载失败：{}", error.message);
             }
         }
     }

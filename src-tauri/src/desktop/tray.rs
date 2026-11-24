@@ -70,6 +70,8 @@ pub struct TrayState {
     tooltip: Mutex<String>,
     /// 托盘创建成功。失败时（例如 Linux 缺少 AppIndicator）关窗直接按退出处理。
     available: AtomicBool,
+    /// 「全部暂停」「全部恢复」在阻塞线程里执行，用它保证两者不交错。
+    serial: Mutex<()>,
 }
 
 /// 托盘是否可用。
@@ -87,9 +89,15 @@ pub fn handle(app: &tauri::AppHandle, action: TrayAction) {
     match action {
         TrayAction::ShowWindow => super::show_main_window(app),
         TrayAction::PauseAll => request_pause_all(app),
-        TrayAction::ResumeAll => resume_all(app),
+        TrayAction::ResumeAll => in_background(app, resume_all),
         TrayAction::Quit => quit::request_quit(app),
     }
+}
+
+/// 暂停、恢复要拿任务锁并写 SQLite，放到阻塞线程里，不卡住托盘菜单所在的主线程。
+fn in_background(app: &tauri::AppHandle, job: fn(&tauri::AppHandle)) {
+    let handle = app.clone();
+    tauri::async_runtime::spawn_blocking(move || job(&handle));
 }
 
 /// 托盘提示文字。
@@ -110,8 +118,8 @@ pub fn title_text(snapshot: QuitSnapshot) -> String {
     }
 }
 
-/// Linux：托盘依赖运行时加载的 AppIndicator 库，缺失时 libappindicator-sys 会直接 panic
-/// （发布构建为 abort），所以先自己探测。
+/// Linux：托盘依赖运行时加载的 AppIndicator 库，缺失时 libappindicator-sys 会直接 panic，
+/// 所以先自己探测。
 #[cfg(target_os = "linux")]
 fn appindicator_available() -> bool {
     ["libayatana-appindicator3.so.1", "libappindicator3.so.1"]
@@ -238,7 +246,7 @@ pub fn set_tooltip<R: tauri::Runtime>(app: &tauri::AppHandle<R>, snapshot: QuitS
     let text = tooltip_text(snapshot);
     if let Some(tray) = app.tray_by_id(TRAY_ID) {
         if let Err(error) = tray.set_tooltip(Some(&text)) {
-            eprintln!("录播宝更新托盘提示失败：{error}");
+            log::warn!("录播宝更新托盘提示失败：{error}");
         }
         #[cfg(target_os = "linux")]
         let _ = tray.set_title(Some(title_text(snapshot)));
@@ -281,10 +289,11 @@ fn request_pause_all(app: &tauri::AppHandle) {
         super::show_main_window(app);
         let _ = app.emit(PAUSE_ALL_PROMPT_EVENT, PausePrompt { recording });
     } else {
-        pause_all(app);
+        in_background(app, pause_all);
     }
 }
 
+/// 阻塞线程上调用。
 fn pause_all(app: &tauri::AppHandle) {
     let (Some(tasks), Some(state)) = (
         app.try_state::<Arc<TaskManager>>(),
@@ -292,6 +301,7 @@ fn pause_all(app: &tauri::AppHandle) {
     ) else {
         return;
     };
+    let _serial = lock(&state.serial);
     let ids = pause_targets(&task_monitoring(&tasks));
     if ids.is_empty() {
         return;
@@ -307,10 +317,11 @@ fn pause_all(app: &tauri::AppHandle) {
             drop(paused);
             refresh_resume_item(&state);
         }
-        Err(error) => eprintln!("录播宝托盘暂停监控失败：{}", error.message),
+        Err(error) => log::error!("录播宝托盘暂停监控失败：{}", error.message),
     }
 }
 
+/// 阻塞线程上调用。
 fn resume_all(app: &tauri::AppHandle) {
     let (Some(tasks), Some(state)) = (
         app.try_state::<Arc<TaskManager>>(),
@@ -318,13 +329,14 @@ fn resume_all(app: &tauri::AppHandle) {
     ) else {
         return;
     };
+    let _serial = lock(&state.serial);
     let ids = resume_targets(&lock(&state.paused_by_tray), &task_monitoring(&tasks));
     match tasks.set_monitoring(&ids, true) {
         Ok(_) => {
             lock(&state.paused_by_tray).clear();
             refresh_resume_item(&state);
         }
-        Err(error) => eprintln!("录播宝托盘恢复监控失败：{}", error.message),
+        Err(error) => log::error!("录播宝托盘恢复监控失败：{}", error.message),
     }
 }
 
@@ -335,10 +347,10 @@ fn refresh_resume_item(state: &TrayState) {
     }
 }
 
-/// 确认框里点「全部暂停」。
+/// 确认框里点「全部暂停」。在阻塞线程里执行，完成后才返回。
 #[tauri::command]
-pub fn confirm_pause_all(app: tauri::AppHandle) {
-    pause_all(&app);
+pub async fn confirm_pause_all(app: tauri::AppHandle) {
+    let _ = tauri::async_runtime::spawn_blocking(move || pause_all(&app)).await;
 }
 
 #[cfg(test)]

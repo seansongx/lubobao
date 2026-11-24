@@ -30,17 +30,22 @@ libc = "0.2"
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading"] }
 tempfile = "3"
 sha2 = "0.10"
+# 日志门面：核心只写 `log::warn!` 等，由桌面端（tauri-plugin-log，写日志文件）和命令行（stderr）
+# 各自接收。
+log = "0.4"
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
+#
+# panic 用默认的 unwind，不设 "abort"：某个检测或录制任务（例如平台改版后解析到意外数据）
+# panic 时只结束那个 tokio 任务或那次命令调用，其余录制继续；abort 会让整个进程连同所有
+# 录制一起退出，macOS 上还会留下无人管理的 ffmpeg。各处的锁都处理了中毒（into_inner）。
 [profile.release]
 codegen-units = 1
 lto = true
 opt-level = 3
-panic = "abort"
 strip = true
 
-# 命令行程序的发布构建：与 release 相同，但 panic 时只结束出问题的任务，不中止整个进程
-# （桌面端保持 release 的 panic = "abort"）。`cargo build --profile release-cli -p lubobao-cli`。
+# 命令行程序的发布构建（`cargo build --profile release-cli -p lubobao-cli`）。现在与 release
+# 相同，保留这个名字是因为 CI、发布流程和输出目录 `target/<triple>/release-cli/` 都用它。
 [profile.release-cli]
 inherits = "release"
-panic = "unwind"

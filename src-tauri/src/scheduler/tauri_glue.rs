@@ -151,7 +151,7 @@ pub fn on_exit(app: &tauri::AppHandle) {
         .is_ok()
     });
     if !finished {
-        eprintln!("录播宝退出时收尾超时，部分录制可能没有正常结束");
+        log::warn!("录播宝退出时收尾超时，部分录制可能没有正常结束");
     }
     EXIT_READY.store(true, Ordering::SeqCst);
 }

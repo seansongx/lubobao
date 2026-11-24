@@ -500,7 +500,7 @@ async fn failed(source: &Path, message: String) -> ConvertEvent {
 async fn emit(listener: &ConvertListener, event: ConvertEvent) {
     let listener = Arc::clone(listener);
     if let Err(error) = tokio::task::spawn_blocking(move || listener(&event)).await {
-        eprintln!("转换事件回调出错：{error}");
+        log::warn!("转换事件回调出错：{error}");
     }
 }
 
@@ -637,7 +637,7 @@ async fn run_ffmpeg(
         Err(error) => return Run::SpawnFailed(error),
     };
     if let Err(message) = process_guard::attach(&child) {
-        eprintln!("转换 MP4：{message}");
+        log::warn!("转换 MP4：{message}");
     }
     let stderr = child.stderr.take();
     let reader = tokio::spawn(async move {
@@ -742,7 +742,7 @@ fn remove_quietly(path: &Path) {
     match std::fs::remove_file(path) {
         Ok(()) => {}
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-        Err(error) => eprintln!("删除不完整的 MP4 失败（{}）：{error}", path.display()),
+        Err(error) => log::warn!("删除不完整的 MP4 失败（{}）：{error}", path.display()),
     }
 }
 

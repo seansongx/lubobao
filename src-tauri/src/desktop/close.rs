@@ -73,38 +73,55 @@ fn perform(app: &tauri::AppHandle, action: CloseAction) {
     }
 }
 
+/// 记住关窗选择（写 SQLite，在阻塞线程里调用）。
+fn remember_choice(app: &tauri::AppHandle, choice: String) -> Result<(), String> {
+    let tasks = app
+        .try_state::<Arc<TaskManager>>()
+        .ok_or_else(|| "任务数据没有打开".to_string())?;
+    let mut values = Map::new();
+    values.insert(CLOSE_WINDOW_SETTING.into(), Value::String(choice));
+    tasks
+        .update_settings(values)
+        .map(|_| ())
+        .map_err(|error| error.message)
+}
+
 /// 关窗三选一的结果。`choice` 为 `tray` 或 `quit`（取消不调用）；`remember` 时写入设置，
 /// 以后不再询问，可在设置页改回。保存失败时仍执行所选操作，再以错误返回保存失败的原因。
+///
+/// 写设置在阻塞线程里进行；所选操作回到主线程执行，与其他退出入口一样不会交错。
 #[tauri::command]
-pub fn resolve_close(app: tauri::AppHandle, choice: String, remember: bool) -> Result<(), String> {
+pub async fn resolve_close(
+    app: tauri::AppHandle,
+    choice: String,
+    remember: bool,
+) -> Result<(), String> {
     let action = match choice.as_str() {
         "tray" => CloseAction::Tray,
         "quit" => CloseAction::Quit,
         other => return Err(format!("未知的选择：{other}")),
     };
-    let mut saved = Ok(());
-    if remember {
-        saved = match app.try_state::<Arc<TaskManager>>() {
-            Some(tasks) => {
-                let mut values = Map::new();
-                values.insert(CLOSE_WINDOW_SETTING.into(), Value::String(choice));
-                tasks
-                    .update_settings(values)
-                    .map(|_| ())
-                    .map_err(|error| error.message)
-            }
-            None => Err("任务数据没有打开".into()),
-        };
+    let saved = if remember {
+        let handle = app.clone();
+        let saved = tauri::async_runtime::spawn_blocking(move || remember_choice(&handle, choice))
+            .await
+            .unwrap_or_else(|error| Err(format!("保存中断：{error}")));
         if let Err(message) = &saved {
-            eprintln!("录播宝没有记住关窗选择：{message}");
+            log::warn!("录播宝没有记住关窗选择：{message}");
         }
-    }
-    // 托盘在选择期间不会消失，但仍按当前是否可用决定。
-    let action = match action {
-        CloseAction::Tray if !tray::available(&app) => CloseAction::Quit,
-        action => action,
+        saved
+    } else {
+        Ok(())
     };
-    perform(&app, action);
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        // 托盘在选择期间不会消失，但仍按当前是否可用决定。
+        let action = match action {
+            CloseAction::Tray if !tray::available(&handle) => CloseAction::Quit,
+            action => action,
+        };
+        perform(&handle, action);
+    });
     saved
 }
 

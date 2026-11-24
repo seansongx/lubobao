@@ -42,6 +42,40 @@ pub fn error(message: &str) {
     write(Level::Error, message);
 }
 
+/// 核心库经 `log` 门面写的日志（例如退出超时、写库失败）按同样的格式写到 stderr。
+/// 录播宝自己的 info 及以上都写，其他库只写警告和错误。
+struct CoreLogger;
+
+impl log::Log for CoreLogger {
+    fn enabled(&self, metadata: &log::Metadata) -> bool {
+        metadata.level() <= log::Level::Warn
+            || (metadata.level() <= log::Level::Info && metadata.target().starts_with("lubobao"))
+    }
+
+    fn log(&self, record: &log::Record) {
+        if !self.enabled(record.metadata()) {
+            return;
+        }
+        let level = match record.level() {
+            log::Level::Error => Level::Error,
+            log::Level::Warn => Level::Warn,
+            _ => Level::Info,
+        };
+        write(level, &record.args().to_string());
+    }
+
+    fn flush(&self) {}
+}
+
+static CORE_LOGGER: CoreLogger = CoreLogger;
+
+/// 接收核心库的日志。在 `main` 开头调用一次。
+pub fn install() {
+    if log::set_logger(&CORE_LOGGER).is_ok() {
+        log::set_max_level(log::LevelFilter::Info);
+    }
+}
+
 /// 动态附加信息里给人看的部分：文件路径和原因。
 fn detail_summary(detail: &Option<Value>) -> String {
     let Some(Value::Object(map)) = detail else {
@@ -191,4 +225,25 @@ pub fn ffmpeg_listener() -> ffmpeg::Listener {
             _ => info(&describe_ffmpeg(status)),
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use log::Log;
+
+    use super::CoreLogger;
+
+    fn enabled(level: log::Level, target: &str) -> bool {
+        CoreLogger.enabled(&log::Metadata::builder().level(level).target(target).build())
+    }
+
+    #[test]
+    fn core_logs_from_lubobao_at_info_and_others_only_from_warn() {
+        assert!(enabled(log::Level::Info, "lubobao_core::scheduler"));
+        assert!(enabled(log::Level::Warn, "lubobao_core::tasks"));
+        assert!(!enabled(log::Level::Debug, "lubobao_core::scheduler"));
+        assert!(!enabled(log::Level::Info, "reqwest::connect"));
+        assert!(enabled(log::Level::Warn, "reqwest::connect"));
+        assert!(enabled(log::Level::Error, "hyper"));
+    }
 }

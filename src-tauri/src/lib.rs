@@ -6,14 +6,51 @@ pub use lubobao_core::recorder;
 pub mod scheduler;
 pub mod tasks;
 
+/// 日志写到系统日志目录下的 `lubobao.log`（Windows `%LOCALAPPDATA%\com.xiaofany.lubobao\logs`，
+/// macOS `~/Library/Logs/com.xiaofany.lubobao`，Linux `~/.local/share/com.xiaofany.lubobao/logs`），
+/// 同时写到 stderr（开发时在终端里看）。录播宝自己和 Tauri 记 info 及以上，其他库只记警告和错误。
+fn log_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
+    use tauri_plugin_log::{RotationStrategy, Target, TargetKind, TimezoneStrategy};
+    tauri_plugin_log::Builder::new()
+        .targets([
+            Target::new(TargetKind::LogDir {
+                file_name: Some("lubobao".into()),
+            }),
+            Target::new(TargetKind::Stderr),
+        ])
+        .level(log::LevelFilter::Info)
+        .filter(|metadata| {
+            metadata.level() <= log::Level::Warn
+                || metadata.target().starts_with("lubobao")
+                || metadata.target().starts_with("tauri")
+        })
+        .max_file_size(5_000_000)
+        .rotation_strategy(RotationStrategy::KeepSome(3))
+        .timezone_strategy(TimezoneStrategy::UseLocal)
+        .build()
+}
+
+/// panic 时先写进日志文件，再交给默认处理（打印到 stderr）。发布构建按 unwind 处理 panic，
+/// 出问题的任务结束、应用继续运行，没有这一步就无从得知发生过 panic。
+fn log_panics() {
+    let default = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        log::error!("panic：{info}");
+        default(info);
+    }));
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    log_panics();
     tauri::Builder::default()
         // 只允许一个实例：第二次启动时把已有窗口显示到前台，新进程随即退出。
         // 必须最先注册。
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             desktop::show_main_window(app);
         }))
+        // 日志紧随其后，之后各插件和 setup 里的日志都能写进文件。
+        .plugin(log_plugin())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())

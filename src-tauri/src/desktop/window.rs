@@ -175,7 +175,7 @@ fn apply_material(window: &WebviewWindow, planned: &'static str) -> &'static str
     match window_vibrancy::apply_mica(window, None) {
         Ok(()) => "mica",
         Err(error) => {
-            eprintln!("录播宝无法应用 Mica，使用不透明底色：{error}");
+            log::warn!("录播宝无法应用 Mica，使用不透明底色：{error}");
             "none"
         }
     }
@@ -204,11 +204,11 @@ fn disable_browser_accelerators(window: &WebviewWindow) {
                 .and_then(|settings| settings.SetAreBrowserAcceleratorKeysEnabled(false))
         };
         if let Err(error) = outcome {
-            eprintln!("录播宝无法关闭 WebView2 浏览器快捷键：{error}");
+            log::warn!("录播宝无法关闭 WebView2 浏览器快捷键：{error}");
         }
     });
     if let Err(error) = result {
-        eprintln!("录播宝无法关闭 WebView2 浏览器快捷键：{error}");
+        log::warn!("录播宝无法关闭 WebView2 浏览器快捷键：{error}");
     }
 }
 

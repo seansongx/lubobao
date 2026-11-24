@@ -14,6 +14,12 @@ pub fn init(app: &tauri::AppHandle) -> tauri::Result<()> {
         .app_local_data_dir()?
         .join("components")
         .join("ffmpeg");
+    // macOS：上次崩溃留下的 ffmpeg 在调度开始录制之前结束（单实例，此时没有别的录播宝在用
+    // 这个目录）。Windows、Linux 由内核保证 ffmpeg 随录播宝结束，这里什么都不做。
+    let reaped = crate::recorder::process_guard::reap_orphans(&root);
+    if reaped > 0 {
+        log::warn!("结束了 {reaped} 个上次异常退出时留下的 ffmpeg");
+    }
     let handle = app.clone();
     let manager = Arc::new(FfmpegManager::new(
         ManagerConfig::for_current_platform(root),

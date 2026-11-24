@@ -65,7 +65,7 @@ pub fn init(app: &tauri::AppHandle) -> tauri::Result<()> {
     app.manage(desktop);
 
     if let Err(error) = tray::create(app) {
-        eprintln!("录播宝无法创建托盘图标，关闭窗口将直接退出：{error}");
+        log::warn!("录播宝无法创建托盘图标，关闭窗口将直接退出：{error}");
     }
     // 只有 macOS 有应用菜单：替换默认菜单里直接结束进程的「退出」。
     #[cfg(target_os = "macos")]
@@ -96,7 +96,7 @@ fn exit_on_sigterm(app: &tauri::AppHandle) {
                     handle.exit(0);
                 }
             }
-            Err(error) => eprintln!("录播宝无法监听 SIGTERM：{error}"),
+            Err(error) => log::warn!("录播宝无法监听 SIGTERM：{error}"),
         }
     });
 }

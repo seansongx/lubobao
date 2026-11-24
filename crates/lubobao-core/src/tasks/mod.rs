@@ -273,6 +273,10 @@ struct Inner {
     last_known_live: HashMap<TaskId, bool>,
     /// 最近一次检测失败、尚未成功过的任务。连续失败（中间穿插检测中）只写一条动态。
     failing: HashSet<TaskId>,
+    /// 默认值与已保存设置合并后的结果。调度每轮排期、每次检测都要读设置，桌面端的命令和
+    /// 通知也要读，缓存后不必每次查 SQLite。设置只经 [`TaskManager::update_settings`] 写入，
+    /// 写入后清空。
+    settings: Option<Map<String, Value>>,
 }
 
 pub struct TaskManager {
@@ -313,7 +317,7 @@ impl TaskManager {
     fn load(store: Store, save_dir: &Path, listener: Listener) -> CommandResult<TaskManager> {
         let (tasks, skipped) = store.db().load_tasks()?;
         for row in &skipped {
-            eprintln!("跳过无法读取的任务 #{}：{}", row.id, row.reason);
+            log::warn!("跳过无法读取的任务 #{}：{}", row.id, row.reason);
         }
         let manager = TaskManager {
             inner: Mutex::new(Inner {
@@ -321,6 +325,7 @@ impl TaskManager {
                 tasks: tasks.into_iter().map(|task| (task.id, task)).collect(),
                 last_known_live: HashMap::new(),
                 failing: HashSet::new(),
+                settings: None,
             }),
             defaults: settings::defaults(save_dir),
             listener,
@@ -824,7 +829,7 @@ impl TaskManager {
                     message,
                     detail,
                 })
-                .inspect_err(|error| eprintln!("写入动态失败：{error}"))
+                .inspect_err(|error| log::error!("写入动态失败：{error}"))
                 .ok()
         });
         let updated = inner.tasks.get_mut(&id).expect("task exists");
@@ -982,13 +987,18 @@ impl TaskManager {
 
     /// 默认值与用户设置合并后的完整设置。
     pub fn settings(&self) -> Map<String, Value> {
-        let stored = self.lock().store.db().load_settings().unwrap_or_default();
+        let mut inner = self.lock();
+        if let Some(cached) = &inner.settings {
+            return cached.clone();
+        }
+        let stored = inner.store.db().load_settings().unwrap_or_default();
         let mut merged = self.defaults.clone();
         for (key, value) in stored {
             if merged.contains_key(&key) {
                 merged.insert(key, value);
             }
         }
+        inner.settings = Some(merged.clone());
         merged
     }
 
@@ -1001,9 +1011,12 @@ impl TaskManager {
         for (key, value) in &values {
             settings::validate(&self.defaults, key, value)?;
         }
-        self.lock()
-            .store
-            .transaction(|db| db.save_settings(&values))?;
+        {
+            let mut inner = self.lock();
+            // 写入失败时缓存仍与数据库一致；成功后清空，下次读取时重新合并。
+            inner.store.transaction(|db| db.save_settings(&values))?;
+            inner.settings = None;
+        }
         if let Some(hook) = self.scheduler() {
             hook.settings_changed();
         }

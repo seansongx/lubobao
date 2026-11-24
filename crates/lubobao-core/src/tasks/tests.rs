@@ -303,6 +303,18 @@ fn settings_have_streamcap_defaults_and_persist_updates() {
 }
 
 #[test]
+fn cached_settings_refresh_after_an_update() {
+    let dir = tempfile::tempdir().unwrap();
+    let (manager, _) = open(dir.path());
+    // 第一次读取后缓存；之后的修改必须让下一次读取看到新值。
+    assert_eq!(manager.settings()["video_format"], json!("TS"));
+    let mut values = Map::new();
+    values.insert("video_format".into(), json!("MKV"));
+    manager.update_settings(values).unwrap();
+    assert_eq!(manager.settings()["video_format"], json!("MKV"));
+}
+
+#[test]
 fn rejects_invalid_settings_without_saving_any() {
     let dir = tempfile::tempdir().unwrap();
     let (manager, _) = open(dir.path());

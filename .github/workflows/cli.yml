@@ -78,7 +78,7 @@ jobs:
           version="$(cargo metadata --no-deps --format-version 1 | node -p 'JSON.parse(require("fs").readFileSync(0)).packages.find(p => p.name === "lubobao-cli").version')"
           echo "VERSION=$version" >> "$GITHUB_ENV"
 
-      # release-cli 与 release 相同，但 panic = "unwind"：单个任务出错不会中止整个进程。
+      # release-cli 与 release 相同（panic = "unwind"：单个任务出错不会中止整个进程）。
       - name: Build release binary
         run: cargo build --profile release-cli --locked -p lubobao-cli --target "$TARGET"
 

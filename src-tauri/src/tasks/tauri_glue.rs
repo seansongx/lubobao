@@ -56,7 +56,7 @@ pub fn init(app: &tauri::AppHandle) -> tauri::Result<()> {
             app.manage(Arc::new(manager));
         }
         Err(message) => {
-            eprintln!("录播宝无法打开任务数据：{message}");
+            log::error!("录播宝无法打开任务数据：{message}");
             let handle = app.clone();
             app.dialog()
                 .message(format!("无法打开任务数据，录播宝将退出。\n\n{message}"))

@@ -63,6 +63,6 @@ pub fn show_once(app: &tauri::AppHandle) {
         .map_err(|error| error.to_string())
         .and_then(|bytes| fs::write(&path, bytes).map_err(|error| error.to_string()));
     if let Err(error) = written {
-        eprintln!("录播宝无法保存 {}：{error}", path.display());
+        log::warn!("录播宝无法保存 {}：{error}", path.display());
     }
 }

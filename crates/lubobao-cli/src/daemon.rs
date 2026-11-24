@@ -141,6 +141,12 @@ pub async fn run(dirs: Dirs, global: GlobalOpts) -> Result<(), String> {
         Ok(false) => {}
         Err(error) => logging::warn(&format!("无法检查数据目录权限：{error}")),
     }
+    // macOS：上次崩溃留下的 ffmpeg 在调度开始录制之前结束（已持有数据目录锁，没有别的实例在用
+    // 这个目录）。其他系统由内核保证 ffmpeg 随进程结束，这里什么都不做。
+    let reaped = lubobao_core::recorder::process_guard::reap_orphans(&dirs.ffmpeg_root());
+    if reaped > 0 {
+        logging::warn(&format!("结束了 {reaped} 个上次异常退出时留下的 ffmpeg"));
+    }
 
     let tasks = Arc::new(tasks::open_in(
         &dirs.data_dir,

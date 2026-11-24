@@ -24,11 +24,13 @@ tar = "0.4"
 rusqlite = { version = "0.43.0", features = ["bundled"] }
 fs4.workspace = true
 chrono.workspace = true
+log.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows-sys.workspace = true
 
-[target.'cfg(target_os = "linux")'.dependencies]
+# Linux：ffmpeg 的 PR_SET_PDEATHSIG；macOS：启动时清理上次崩溃留下的 ffmpeg（recorder::process_guard）。
+[target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
 libc.workspace = true
 
 [dev-dependencies]

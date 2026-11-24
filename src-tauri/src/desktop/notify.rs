@@ -241,7 +241,7 @@ fn ensure_permission(app: &tauri::AppHandle) -> bool {
         Ok(PermissionState::Granted) => true,
         Ok(_) | Err(_) => {
             if let Err(error) = &state {
-                eprintln!("录播宝无法取得通知权限：{error}");
+                log::warn!("录播宝无法取得通知权限：{error}");
             }
             PERMISSION_DENIED.store(true, Ordering::SeqCst);
             false
@@ -261,7 +261,7 @@ pub fn show(app: &tauri::AppHandle, notice: &Notice) {
         .body(&notice.body)
         .show()
     {
-        eprintln!("录播宝发送系统通知失败：{error}");
+        log::warn!("录播宝发送系统通知失败：{error}");
     }
 }
 

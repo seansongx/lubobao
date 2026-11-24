@@ -8,11 +8,15 @@ import { api, type FfmpegStatus, type SchedulerStatus, type TaskId, type TaskSna
 
 type Unlisten = () => void;
 
-/** 注册若干监听并在全部就绪后调用 `ready`。返回的清理函数在任何时刻调用都安全。 */
+/**
+ * 注册若干监听并在全部有结果后调用 `ready`。返回的清理函数在任何时刻调用都安全。
+ * 某个监听注册失败时，已注册的照样保存（清理时取消），也照样调用 `ready` 读取快照，只是少了那一路实时更新。
+ */
 function subscribeAll(registrations: Promise<Unlisten>[], ready: () => void): Unlisten {
   let disposed = false;
   let unlisteners: Unlisten[] = [];
-  void Promise.all(registrations).then((fns) => {
+  void Promise.allSettled(registrations).then((results) => {
+    const fns = results.flatMap((result) => (result.status === "fulfilled" ? [result.value] : []));
     if (disposed) {
       fns.forEach((fn) => fn());
       return;

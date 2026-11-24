@@ -30,6 +30,9 @@ tauri-plugin-dialog = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-window-state = "2"
+# 日志写到应用日志目录（发布版的 Windows 没有控制台，macOS 从访达启动时 stderr 也不落盘）。
+tauri-plugin-log = "2"
+log.workspace = true
 getrandom = "0.3"
 
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]

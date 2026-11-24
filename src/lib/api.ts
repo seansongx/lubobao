@@ -588,8 +588,11 @@ const tauriBackend: Backend = {
 export const isDevMockInTauri =
   import.meta.env.DEV && isTauri() && new URLSearchParams(location.search).get("mock") === "1";
 
-/** 是否使用假数据：浏览器预览，或开发构建里调试面板切到了示例数据。 */
-export const isMockBackend = !isTauri() || isDevMockInTauri;
+/**
+ * 是否使用假数据：开发构建的浏览器预览，或开发构建里调试面板切到了示例数据。
+ * 正式构建里恒为 false（`import.meta.env.DEV` 在构建时替换为常量），示例数据后端随之从包里删掉。
+ */
+export const isMockBackend = import.meta.env.DEV && (!isTauri() || isDevMockInTauri);
 
 /**
  * 桌面端用示例数据时，退出、关窗和托盘「全部暂停监控」仍交给真实后端：这些提示来自真实的窗口和托盘，
@@ -609,8 +612,10 @@ function withRealDesktopShell(mock: Backend): Backend {
   };
 }
 
-export const api: Backend = isMockBackend
-  ? isDevMockInTauri
-    ? withRealDesktopShell(createMockBackend())
-    : createMockBackend()
-  : tauriBackend;
+// 条件里直接写 import.meta.env.DEV，正式构建时整支连同 mock-api.ts 一起被删掉。
+export const api: Backend =
+  import.meta.env.DEV && isMockBackend
+    ? isDevMockInTauri
+      ? withRealDesktopShell(createMockBackend())
+      : createMockBackend()
+    : tauriBackend;

@@ -290,6 +290,7 @@ fn invocation(command: Command) -> Result<Invocation, String> {
 }
 
 fn main() -> ExitCode {
+    logging::install();
     clear_empty_env();
     let cli = Cli::parse();
     let runtime = match tokio::runtime::Builder::new_multi_thread()

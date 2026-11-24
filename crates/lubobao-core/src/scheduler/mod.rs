@@ -603,7 +603,7 @@ impl Core {
     }
 
     fn warn(&self, task: &TaskSnapshot, message: String) {
-        eprintln!("录制提示（任务 {}）：{message}", task.id);
+        log::warn!("录制提示（任务 {}）：{message}", task.id);
         let _ = self.tasks.record_activity(NewActivity {
             task_id: Some(task.id),
             anchor_name: task.config.anchor_name.clone(),
@@ -766,7 +766,7 @@ impl Core {
                 self.tasks.finish_recording(id, RecordState::Idle, &end)
             };
             if let Err(error) = result {
-                eprintln!("写入录制结束状态失败（任务 {id}）：{error}");
+                log::error!("写入录制结束状态失败（任务 {id}）：{error}");
             }
             self.convert_recording(&task, outcome);
         }
@@ -839,7 +839,7 @@ impl Core {
                 detail: Some(detail),
             };
             if let Err(error) = tasks.record_activity(entry) {
-                eprintln!("写入转换动态失败（任务 {task_id}）：{error}");
+                log::error!("写入转换动态失败（任务 {task_id}）：{error}");
             }
         });
         if !self.post.enqueue(files.clone(), options, listener) {
@@ -863,7 +863,7 @@ impl Core {
             detail: Some(detail),
         };
         if let Err(error) = self.tasks.record_activity(entry) {
-            eprintln!("写入转换动态失败（任务 {}）：{error}", task.id);
+            log::error!("写入转换动态失败（任务 {}）：{error}", task.id);
         }
     }
 
@@ -881,7 +881,7 @@ impl Core {
             .await
             .unwrap_or(0);
         if removed > 0 {
-            eprintln!("已删除 {removed} 个上次未完成的 MP4 临时文件");
+            log::info!("已删除 {removed} 个上次未完成的 MP4 临时文件");
         }
     }
 
@@ -893,7 +893,7 @@ impl Core {
         let recordings = self.stop_recordings(deadline);
         let (post_done, ()) = tokio::join!(post, recordings);
         if !post_done {
-            eprintln!("退出时中止转 MP4 超时");
+            log::warn!("退出时中止转 MP4 超时");
         }
     }
 
@@ -918,7 +918,7 @@ impl Core {
             .await
             .is_err()
         {
-            eprintln!("退出时停止录制超时");
+            log::warn!("退出时停止录制超时");
         }
         // 等每个录制都回写结束状态，包括 stop_all 时还没启动完的。
         loop {
@@ -928,7 +928,7 @@ impl Core {
                 break;
             }
             if tokio::time::timeout_at(deadline, changed).await.is_err() {
-                eprintln!("退出时仍有 {remaining} 个录制未结束");
+                log::warn!("退出时仍有 {remaining} 个录制未结束");
                 break;
             }
         }
