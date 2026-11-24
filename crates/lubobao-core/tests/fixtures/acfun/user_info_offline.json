@@ -1,0 +1,11 @@
+{
+  "result": 0,
+  "host-name": "node",
+  "profile": {
+    "userId": 100002,
+    "name": "下播主播",
+    "following": "3",
+    "followed": "300",
+    "headUrl": "https://imgs.example.acfun.cn/b.png"
+  }
+}

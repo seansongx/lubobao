@@ -12,6 +12,7 @@ LuBoBao (录播宝) is licensed under the MIT License (see [LICENSE](LICENSE)). 
 - Also used in: the Xiaohongshu adapter in `crates/lubobao-core/src/platforms/xiaohongshu.rs` is ported from `streamget/platforms/rednote/live_stream.py` (`RedNoteLiveStream`): the app request headers, the share-link redirect, reading `liveStream` from `window.__INITIAL_STATE__` on the room page, and building the source FLV/HLS URLs from the deeplink's `flvUrl`.
 - Also used in: the YY adapter in `crates/lubobao-core/src/platforms/yy.rs` is ported from `streamget/platforms/yy/live_stream.py` (`YYLiveStream`): the page headers, reading the anchor and channel id from the room page, the `stream-manager` stream request body and the `live/detail` title lookup.
 - Also used in: the NetEase CC adapter in `crates/lubobao-core/src/platforms/netease.rs` follows `streamget/platforms/netease/live_stream.py` (`NeteaseLiveStream`): the link form, request headers, result fields (`record_url = flv_url or m3u8_url`, `sharefile` as the HLS stream) and the position-based quality choice. The room data itself comes from CC's JSON APIs because the page StreamGet parses no longer exists.
+- Also used in: the AcFun adapter in `crates/lubobao-core/src/platforms/acfun.rs` is ported from `streamget/platforms/acfun/live_stream.py` (`AcfunLiveStream`): the page headers and default cookie, the `userInfo` live check, the visitor login with a random `_did`, the `startPlay` request and sorting its FLV representations by bitrate.
 
 ```
 MIT License
