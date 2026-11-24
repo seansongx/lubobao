@@ -38,7 +38,7 @@ export function StatusMark({ status, className }: { status: DisplayStatus; class
     case "needsAction":
       return <AlertTriangle className={cn("size-3.5 shrink-0 text-status-recording", className)} aria-hidden />;
     case "paused":
-      return <span className={cn("inline-block size-2 shrink-0 rounded-[2px] bg-status-waiting", className)} aria-hidden />;
+      return <span className={cn("inline-block size-2 shrink-0 rounded-sm bg-status-waiting", className)} aria-hidden />;
   }
 }
 
@@ -65,7 +65,7 @@ export function statusText(task: TaskSnapshot): string {
 export function TaskStatus({ task }: { task: TaskSnapshot }) {
   return (
     <span
-      className={cn("inline-flex min-w-0 items-center gap-[7px] text-[12.5px]", textClass[task.display])}
+      className={cn("inline-flex min-w-0 items-center gap-1.5 text-dense", textClass[task.display])}
       title={task.displayReason ?? undefined}
     >
       <StatusMark status={task.display} />

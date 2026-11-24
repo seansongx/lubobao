@@ -336,7 +336,7 @@ export function ActivityPage({ onNavigate, focusTask }: ActivityPageProps) {
 
       <div
         ref={scrollRef}
-        className="mx-2.5 mt-3 mb-2 flex min-h-0 flex-1 flex-col overflow-y-auto text-(length:--text-dense)"
+        className="mx-2.5 mt-3 mb-2 flex min-h-0 flex-1 flex-col overflow-y-auto text-dense"
       >
         {state === "loading" && items.length === 0 ? (
           <CenterNote>

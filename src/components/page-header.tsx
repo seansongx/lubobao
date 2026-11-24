@@ -26,7 +26,7 @@ export function PageHeader({ title, summary, actions, className }: PageHeaderPro
       )}
     >
       <div {...dragRegion} className="flex min-w-0 flex-col">
-        <h1 {...dragRegion} className="m-0 shrink-0 text-(length:--text-title) leading-tight font-(--weight-title)">
+        <h1 {...dragRegion} className="m-0 shrink-0 text-title leading-tight font-(--weight-title)">
           {title}
         </h1>
         {summary && (

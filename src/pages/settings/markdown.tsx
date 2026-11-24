@@ -110,7 +110,7 @@ function inline(text: string, restrict: boolean): ReactNode[] {
     const key = `${at}`;
     if (match[1] !== undefined) {
       out.push(
-        <code key={key} className="rounded bg-muted px-1 font-mono text-[0.92em]">
+        <code key={key} /* token-ignore：行内代码按周围字号缩放 */ className="rounded bg-muted px-1 font-mono text-[0.92em]">
           {match[1]}
         </code>,
       );
@@ -142,7 +142,7 @@ function inline(text: string, restrict: boolean): ReactNode[] {
 /** restrictLinks：内容来自服务器（更新说明）时只放行 linkAllowed 的链接。 */
 export function Markdown({ source, restrictLinks = false }: { source: string; restrictLinks?: boolean }) {
   return (
-    <div className="space-y-2.5 text-(length:--text-dense) leading-relaxed">
+    <div className="space-y-2.5 text-dense leading-relaxed">
       {parse(source).map((block, index) => {
         switch (block.type) {
           case "heading":

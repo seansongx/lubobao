@@ -10,7 +10,7 @@ export function PagePlaceholder({ page }: PagePlaceholderProps) {
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col">
       <header className="flex items-center gap-2.5 px-5 pt-3.5">
-        <h1 className="m-0 text-[17px] font-semibold">{page.label}</h1>
+        <h1 className="m-0 text-title font-(--weight-title)">{page.label}</h1>
       </header>
       <div className="mx-5 mt-3.5 mb-4 flex flex-1 items-center justify-center rounded-xl border bg-card">
         <div className="flex max-w-sm flex-col items-center gap-2 px-6 py-14 text-center">

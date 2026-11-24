@@ -113,7 +113,7 @@ function StateCell({ label, value, reason }: { label: string; value: string; rea
   return (
     <div className="min-w-0 rounded-md border border-black/5 bg-card px-2.5 py-1.5 dark:border-white/5">
       <small className="block text-xs text-muted-foreground">{label}</small>
-      <b className="block truncate text-[12.5px] font-medium">{value}</b>
+      <b className="block truncate text-dense font-medium">{value}</b>
       {reason && <span className="mt-0.5 block text-xs leading-snug wrap-anywhere text-muted-foreground">{reason}</span>}
     </div>
   );
@@ -121,7 +121,7 @@ function StateCell({ label, value, reason }: { label: string; value: string; rea
 
 function KeyValues({ rows }: { rows: [string, ReactNode, string?][] }) {
   return (
-    <dl className="m-0 grid grid-cols-[64px_minmax(0,1fr)] gap-y-1.5 text-(length:--text-dense)">
+    <dl className="m-0 grid grid-cols-[64px_minmax(0,1fr)] gap-y-1.5 text-dense">
       {rows.map(([key, value, title]) => (
         <div key={key} className="contents">
           <dt className="text-muted-foreground">{key}</dt>
@@ -164,7 +164,7 @@ export const TaskInspector = memo(function TaskInspector({ task, onClose, onEdit
 
   return (
     <aside
-      className="flex w-[300px] shrink-0 flex-col border-l text-(length:--text-dense) xl:w-[340px]"
+      className="flex w-[300px] shrink-0 flex-col border-l text-dense xl:w-[340px]"
       aria-label={`${task.anchorName} 详情`}
     >
       <header className="flex items-center gap-2.5 h-(--header-h) shrink-0 border-b px-4">
@@ -257,7 +257,7 @@ export const TaskInspector = memo(function TaskInspector({ task, onClose, onEdit
             <ul className="m-0 flex list-none flex-col gap-2.5 p-0">
               {activity.map((entry) => (
                 <li key={entry.id} className="grid grid-cols-[40px_8px_minmax(0,1fr)] items-start gap-2">
-                  <time className="pt-px text-[11.5px] text-muted-foreground tabular-nums" title={formatDateTime(entry.at)}>
+                  <time className="pt-px text-(length:--text-small) text-muted-foreground tabular-nums" title={formatDateTime(entry.at)}>
                     {formatClock(entry.at)}
                   </time>
                   <span className={cn("mt-1.5 size-2 rounded-full", activityDot[entry.kind])} aria-hidden />

@@ -140,7 +140,7 @@ export function ComponentsSection() {
         </div>
       ) : null}
       <FieldRow label="版本">
-        <span className="text-(length:--text-dense) tabular-nums">
+        <span className="text-dense tabular-nums">
           {ready ? `${ready.ffmpegVersion}（@seankit/ffmpeg ${ready.packageVersion}）` : "—"}
         </span>
       </FieldRow>

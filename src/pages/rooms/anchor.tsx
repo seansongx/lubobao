@@ -23,7 +23,7 @@ export function PlatformTag({ task, className }: { task: Pick<TaskSnapshot, "pla
   return (
     <span
       className={cn(
-        "inline-flex h-4 shrink-0 items-center rounded-[3px] border px-1 text-[10.5px] leading-none text-muted-foreground",
+        "inline-flex h-4 shrink-0 items-center rounded-sm border px-1 text-(length:--text-small) leading-none text-muted-foreground",
         className,
       )}
     >

@@ -18,6 +18,11 @@
   /* 字号三个平台相同：text-sm 为正文（13px），text-xs 为说明文字（11px） */
   --text-sm: var(--text-ui);
   --text-xs: var(--text-small);
+  /* 页面专用字号：text-dense（任务表、详情、录像库、动态）、text-nav（左侧导航）、text-title（页面标题）。
+     与 tokens.css 同名，utility 直接输出 var(--text-*)，取 tokens.css 里的值；只设字号，不带行高 */
+  --text-dense: var(--text-dense);
+  --text-nav: var(--text-nav);
+  --text-title: var(--text-title);
 
   --color-background: var(--background);
   --color-foreground: var(--foreground);

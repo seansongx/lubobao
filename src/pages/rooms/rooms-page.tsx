@@ -367,7 +367,7 @@ export function RoomsPage({ taskList, view, onViewChange, focusTask, onNavigate 
                     aria-label="批量操作"
                     className="pointer-events-auto flex items-center gap-1 rounded-xl bg-popover py-1 pr-1 pl-3.5 text-popover-foreground shadow-lg ring-1 ring-foreground/10"
                   >
-                    <span className="mr-1.5 text-(length:--text-dense) whitespace-nowrap tabular-nums">已选 {selected.length} 项</span>
+                    <span className="mr-1.5 text-dense whitespace-nowrap tabular-nums">已选 {selected.length} 项</span>
                     <Button variant="ghost" size="sm" onClick={() => void batchMonitoring(true)} disabled={batchBusy}>
                       <Play aria-hidden />
                       开始监控

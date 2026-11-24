@@ -225,7 +225,7 @@ function UpdateContent({ flow: current }: { flow: Exclude<UpdateFlow, { step: "i
       {update.mandatory && current.step !== "failed" ? (
         <div
           role="note"
-          className="flex items-start gap-2 rounded-md border border-primary/40 bg-primary/10 px-3 py-2 text-(length:--text-dense) text-foreground"
+          className="flex items-start gap-2 rounded-md border border-primary/40 bg-primary/10 px-3 py-2 text-dense text-foreground"
         >
           <AlertTriangleIcon className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden />
           <span>
@@ -240,7 +240,7 @@ function UpdateContent({ flow: current }: { flow: Exclude<UpdateFlow, { step: "i
           {update.notes ? (
             <Markdown source={update.notes} restrictLinks />
           ) : (
-            <p className="m-0 text-(length:--text-dense) text-muted-foreground">这个版本没有填写更新说明。</p>
+            <p className="m-0 text-dense text-muted-foreground">这个版本没有填写更新说明。</p>
           )}
         </div>
       ) : null}
@@ -256,7 +256,7 @@ function UpdateStep({ flow: current }: { flow: Exclude<UpdateFlow, { step: "idle
       if (current.install === "manual") {
         return (
           <>
-            <p className="m-0 text-(length:--text-dense) text-muted-foreground">当前安装方式（例如 deb 包）不支持应用内更新，请到官网下载新版本。</p>
+            <p className="m-0 text-dense text-muted-foreground">当前安装方式（例如 deb 包）不支持应用内更新，请到官网下载新版本。</p>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={later}>
                 稍后
@@ -314,7 +314,7 @@ function UpdateStep({ flow: current }: { flow: Exclude<UpdateFlow, { step: "idle
     case "confirm":
       return (
         <>
-          <p className="m-0 text-(length:--text-dense)">
+          <p className="m-0 text-dense">
             新版本已下载并通过签名校验。有 {current.recording} 个录制正在进行，安装前会像退出一样正常收尾，保证文件可播放；安装完成后录播宝自动重启并恢复监控。
           </p>
           <DialogFooter>
@@ -338,7 +338,7 @@ function UpdateStep({ flow: current }: { flow: Exclude<UpdateFlow, { step: "idle
 function InstallingNote() {
   const quit = useQuitRecording();
   return (
-    <p className="m-0 flex items-start gap-2 text-(length:--text-dense)">
+    <p className="m-0 flex items-start gap-2 text-dense">
       <Loader2Icon className="mt-0.5 size-4 shrink-0 animate-spin text-primary" aria-hidden />
       <span>
         {quit.phase === "finishing" && quit.recording > 0
@@ -386,7 +386,7 @@ function FailedStep({ update, error }: { update: UpdateInfo; error: UpdateError 
   if (error.kind === "signature") {
     return (
       <>
-        <div role="alert" className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-(length:--text-dense)">
+        <div role="alert" className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-dense">
           <ShieldAlertIcon className="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden />
           <span>
             下载的安装包没有通过签名校验，可能被篡改或下载损坏，录播宝已拒绝安装，录制不受影响。请稍后再试，或到官网下载。
@@ -409,7 +409,7 @@ function FailedStep({ update, error }: { update: UpdateInfo; error: UpdateError 
     // 录制已经收尾、调度已停止，录播宝不再检测和录制：不能关闭，只能重启。
     return (
       <>
-        <div role="alert" className="space-y-1 text-(length:--text-dense)">
+        <div role="alert" className="space-y-1 text-dense">
           <p className="m-0 font-medium text-destructive">新版本没有装上，已停止录制，重启录播宝后恢复监控。</p>
           <p className="m-0 break-all text-xs text-muted-foreground">{error.message}</p>
         </div>
@@ -430,7 +430,7 @@ function FailedStep({ update, error }: { update: UpdateInfo; error: UpdateError 
   }
   return (
     <>
-      <p role="alert" className="m-0 text-(length:--text-dense) text-destructive">
+      <p role="alert" className="m-0 text-dense text-destructive">
         {error.kind === "network" ? `下载失败：${error.message}` : error.message}
       </p>
       <DialogFooter>

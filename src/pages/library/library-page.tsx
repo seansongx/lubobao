@@ -393,7 +393,7 @@ export function LibraryPage({ onNavigate }: LibraryPageProps) {
       {notice && (
         <div
           role="alert"
-          className="mx-(--page-pad) mb-2 flex items-start gap-2 rounded-lg border border-destructive/30 bg-status-recording-soft px-3 py-2 text-(length:--text-dense) select-text"
+          className="mx-(--page-pad) mb-2 flex items-start gap-2 rounded-lg border border-destructive/30 bg-status-recording-soft px-3 py-2 text-dense select-text"
         >
           <AlertTriangle className="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden />
           <span className="min-w-0 flex-1 break-all">{notice}</span>
@@ -403,7 +403,7 @@ export function LibraryPage({ onNavigate }: LibraryPageProps) {
         </div>
       )}
 
-      <div className="mx-2.5 mb-2 flex min-h-0 flex-1 flex-col overflow-hidden text-(length:--text-dense)">
+      <div className="mx-2.5 mb-2 flex min-h-0 flex-1 flex-col overflow-hidden text-dense">
         {load.state === "error" ? (
           <LibraryErrorView
             error={load.error}

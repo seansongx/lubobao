@@ -283,7 +283,7 @@ function PhaseView({ phase, onShowTask }: { phase: Phase; onShowTask: (id: TaskI
           <ul className="mt-1 flex flex-col gap-1">
             {phase.existing.map((task) => (
               <li key={task.id} className="flex items-center gap-2 text-foreground">
-                <AnchorAvatar task={task} className="size-[22px] text-[11px]" />
+                <AnchorAvatar task={task} className="size-[22px] text-(length:--text-small)" />
                 <span className="min-w-0 flex-1 truncate">
                   {task.anchorName}
                   <span className="text-xs text-muted-foreground">
