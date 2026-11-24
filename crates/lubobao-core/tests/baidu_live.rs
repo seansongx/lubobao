@@ -196,14 +196,21 @@ async fn live_room_records_thirty_seconds() {
     // null muxer although every frame decodes (as on Huya). Anything else is
     // a real error.
     const SOURCE_DTS: &str = "non monotonically increasing dts";
+    // A recording starts mid-stream, so the first packets can carry a
+    // buffering-period SEI that names an SPS which only arrives with the next
+    // keyframe; FFmpeg reports it (and "Last message repeated") once at the
+    // start, then every frame decodes.
+    const EARLY_SEI: &str = "non-existing SPS";
+    let benign = |line: &str| {
+        line.contains(SOURCE_DTS)
+            || line.contains(EARLY_SEI)
+            || line.trim_start().starts_with("Last message repeated")
+    };
     let repeated = stderr
         .lines()
         .filter(|line| line.contains(SOURCE_DTS))
         .count();
-    let errors: Vec<&str> = stderr
-        .lines()
-        .filter(|line| !line.contains(SOURCE_DTS))
-        .collect();
+    let errors: Vec<&str> = stderr.lines().filter(|line| !benign(line)).collect();
     println!(
         "check exit={:?} stderr_lines={} repeated_source_dts={repeated}",
         check.status.code(),
