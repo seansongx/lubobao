@@ -236,7 +236,6 @@ section[id], [id^="first-run-"], .dl-card { scroll-margin-top: 72px; }
 .platforms-label { color: var(--ink-3); font-size: 13px; }
 .plat { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; }
 .plat-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--brand); }
-.platforms-next { margin-left: auto; color: var(--ink-3); font-size: 13px; }
 
 /* ---------- 区块 ---------- */
 .section { padding: clamp(56px, 8vw, 96px) 0; }
@@ -455,7 +454,6 @@ section[id], [id^="first-run-"], .dl-card { scroll-margin-top: 72px; }
   .feature { grid-template-columns: minmax(0, 1fr); gap: 24px; }
   .feature-flip .feature-copy { order: 0; }
   .feature-flip .shot { justify-self: start; }
-  .platforms-next { margin-left: 0; width: 100%; }
 }
 
 @media (max-width: 640px) {

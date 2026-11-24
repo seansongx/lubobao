@@ -49,7 +49,9 @@
 
 ### 支持的平台
 
-抖音、快手，更多平台陆续接入。
+国内：抖音、快手、B站、虎牙、斗鱼、小红书、YY、网易CC、微博、AcFun、花椒、映客、酷狗、六间房、百度、知乎、猫耳FM。
+
+海外：TikTok、Twitch、YouTube、SOOP（AfreecaTV）、CHZZK、TwitCasting、ShowRoom、17Live（在中国大陆需要代理）。
 
 ### 系统要求
 
