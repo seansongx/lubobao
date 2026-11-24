@@ -43,6 +43,7 @@ const mockExamples: { label: string; url: string }[] = [
   { label: "斗鱼", url: "https://www.douyu.com/topic/demo?rid=5201314" },
   { label: "小红书", url: "https://www.xiaohongshu.com/livestream/570555100739016375" },
   { label: "YY", url: "https://www.yy.com/22490906/22490906" },
+  { label: "网易CC", url: "https://cc.163.com/583946984" },
   { label: "需要登录", url: "https://live.douyin.com/login-required" },
   { label: "不支持的平台", url: "https://www.example.com/live/1" },
   { label: "网络错误", url: "https://live.douyin.com/network-timeout" },

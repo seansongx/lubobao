@@ -30,6 +30,7 @@
 //   www.douyu.com/{房间号}，topic/…?rid={房间号}  斗鱼直播间
 //   www.xiaohongshu.com/livestream/{房间号}  小红书直播间；xhslink.com/… 演示为房间号 570000000000000001，主页链接返回 invalid_url
 //   www.yy.com/{频道号}[/{子频道号}]   YY 直播间
+//   cc.163.com/{CC号}，ds.163.com/glive/?ccid={CC号}  网易CC直播间
 //   路径含 login / timeout / busy / parse  分别返回 auth_required / network / rate_limited / parse
 //   其他域名                            unsupported_platform；无法解析的文本为 invalid_url
 //
@@ -176,6 +177,7 @@ const mockPlatforms: Record<Platform, { name: string; roomUrl: (roomId: string) 
   douyu: { name: "斗鱼直播", roomUrl: (roomId) => `https://www.douyu.com/${roomId}` },
   xiaohongshu: { name: "小红书", roomUrl: (roomId) => `https://www.xiaohongshu.com/livestream/${roomId}` },
   yy: { name: "YY直播", roomUrl: (roomId) => `https://www.yy.com/${roomId}/${roomId}` },
+  netease: { name: "网易CC直播", roomUrl: (roomId) => `https://cc.163.com/${roomId}/` },
 };
 
 function snapshot(id: TaskId, seed: MockSeed, createdAt: number): TaskSnapshot {
@@ -316,6 +318,15 @@ function seedTasks(now: number): TaskSnapshot[] {
       roomId: "22490906",
       platform: "yy",
       monitoring: "enabled",
+      live: { state: "offline", checkedAt: now - 3 * minute },
+      record: { state: "idle" },
+    },
+    {
+      anchorName: "足球联赛官方",
+      roomId: "367592480",
+      platform: "netease",
+      monitoring: "enabled",
+      quality: "HD",
       live: { state: "offline", checkedAt: now - 3 * minute },
       record: { state: "idle" },
     },
@@ -720,7 +731,7 @@ function normalizeUrl(url: string): string {
 const DEMO_ROOM = "745964462470";
 const DEMO_ANCHOR = `MS4wLjABAAAA-mock-anchor-${DEMO_ROOM}`;
 
-/** 模拟 platforms::resolve：认抖音、快手和B站、虎牙、斗鱼、小红书、YY，按链接内容返回各类错误。 */
+/** 模拟 platforms::resolve：认抖音、快手和B站、虎牙、斗鱼、小红书、YY、网易CC，按链接内容返回各类错误。 */
 function resolveMock(input: string, tasks: TaskSnapshot[]): ResolvedRoom | CommandError {
   const url = input.trim();
   if (!url) return { kind: "invalid_input", message: "请输入直播间链接" };
@@ -747,7 +758,9 @@ function resolveMock(input: string, tasks: TaskSnapshot[]): ResolvedRoom | Comma
             ? "xiaohongshu"
             : host === "yy.com" || host === "www.yy.com"
               ? "yy"
-              : null;
+              : host.endsWith("cc.163.com") || host === "ds.163.com"
+                ? "netease"
+                : null;
   if (!platform) return { kind: "unsupported_platform", message: `暂不支持 ${host} 的直播间` };
   if (/login/i.test(path)) return { kind: "auth_required", message: "该直播间需要登录后观看，请填写 Cookie" };
   if (/timeout|network/i.test(path)) return { kind: "network", message: `连接 ${host} 超时` };
@@ -836,6 +849,19 @@ function resolveMock(input: string, tasks: TaskSnapshot[]): ResolvedRoom | Comma
       anchorId: task?.anchorId ?? `yy-${roomId}`,
       anchorName: task?.anchorName ?? `YY 主播 ${roomId}`,
       liveUrl: `https://www.yy.com/${roomId}${match[2] ? `/${match[2]}` : ""}`,
+    };
+  }
+  if (platform === "netease") {
+    const match = /^\/(?:cc\/)?(\d+)\/?$/.exec(path);
+    const roomId = match?.[1] ?? parsed.searchParams.get("ccid");
+    if (!roomId || !/^\d+$/.test(roomId)) return { kind: "invalid_url", message: `不是可识别的网易CC直播链接: ${url}` };
+    const task = known(roomId);
+    return {
+      ...base,
+      roomId,
+      anchorId: task?.anchorId ?? `cc-${roomId}`,
+      anchorName: task?.anchorName ?? `网易CC主播 ${roomId}`,
+      liveUrl: mockPlatforms.netease.roomUrl(roomId),
     };
   }
   if (host === "v.douyin.com") {
