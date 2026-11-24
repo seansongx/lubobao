@@ -218,6 +218,23 @@
 }
 
 /*
+ * 选中竖条：左侧导航当前项左侧的 Teal 竖条（三个平台相同）。画在 ::before 上，宿主元素需要 relative。
+ */
+@utility selection-bar {
+  &::before {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 0;
+    width: var(--selection-bar-width);
+    height: var(--selection-bar-height);
+    translate: 0 -50%;
+    border-radius: calc(infinity * 1px);
+    background-color: var(--color-primary);
+  }
+}
+
+/*
  * 隐藏的页面（PageSlot）立即消失：Nova 的按钮、徽标、开关、Tabs 等用 transition-all，visibility 也在过渡范围内，
  * 从 visible 变 hidden 时要等过渡结束才真正隐藏，切换页面会看到上一页的控件残留一瞬间。
  */
