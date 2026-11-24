@@ -39,8 +39,11 @@ impl Default for DownloadOptions {
     }
 }
 
+/// 下载用的 client。关闭自动解压：要按 Content-Length 计数并对原始字节算 SHA-256，
+/// 源站若给 `.tgz` 加上 `Content-Encoding: gzip`，解压后的内容会校验失败。
 pub fn build_client(options: &DownloadOptions) -> Client {
     Client::builder()
+        .no_gzip()
         .connect_timeout(options.connect_timeout)
         .user_agent(concat!("lubobao/", env!("CARGO_PKG_VERSION")))
         .build()

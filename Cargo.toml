@@ -20,7 +20,10 @@ lubobao-core = { path = "crates/lubobao-core" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "sync", "time"] }
-reqwest = { version = "0.13", default-features = false, features = ["rustls", "http2", "charset", "system-proxy", "socks"] }
+# gzip：平台接口的 JSON 和网页压缩后小一个数量级（抖音进房接口 736 KB → 51 KB），慢网下不压缩会超时。
+# 只开纯 Rust 的 gzip（flate2/miniz_oxide），不开 zstd（要编译 C 库，影响 musl 静态构建）。
+# 打开后所有 client 默认自动解压；逐字节校验的下载（FFmpeg、应用更新）要显式 `.no_gzip()`。
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "http2", "charset", "system-proxy", "socks", "gzip"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 fs4 = { version = "1.1.0", default-features = false }
 libc = "0.2"

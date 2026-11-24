@@ -182,6 +182,8 @@ enum Step {
     WrongStart,
     /// 返回 200，Content-Length 比文件少 1。
     ShortLength,
+    /// 返回 200 和完整文件，另加 `Content-Encoding: gzip`（有的 CDN 这样提供 `.tgz`）。
+    GzipEncoding,
 }
 
 impl Route {
@@ -295,7 +297,7 @@ async fn serve(
         .and_then(|r| r.parse::<usize>().ok());
     let (start, cut) = match step {
         Step::Status(code) => return respond_status(&mut stream, code).await,
-        Step::IgnoreRange | Step::ShortLength => (None, None),
+        Step::IgnoreRange | Step::ShortLength | Step::GzipEncoding => (None, None),
         Step::Cut(cut) => (requested, Some(cut)),
         Step::Serve | Step::WrongStart => (requested, None),
     };
@@ -326,13 +328,13 @@ Connection: close
             } else {
                 body.len()
             };
+            let encoding = if matches!(step, Step::GzipEncoding) {
+                "Content-Encoding: gzip\r\n"
+            } else {
+                ""
+            };
             format!(
-                "HTTP/1.1 200 OK
-Content-Length: {length}
-Accept-Ranges: bytes
-Connection: close
-
-"
+                "HTTP/1.1 200 OK\r\nContent-Length: {length}\r\nAccept-Ranges: bytes\r\n{encoding}Connection: close\r\n\r\n"
             )
         }
     };
@@ -386,6 +388,29 @@ async fn installs_from_first_source_and_reports_progress() {
     }));
     assert!(events.contains(&FfmpegStatus::Verifying));
     assert!(events.last().unwrap().is_ready());
+}
+
+#[tokio::test]
+async fn gzip_content_encoding_keeps_raw_tarball_bytes() {
+    // 工作区的 reqwest 打开了 gzip。源站给 .tgz 标上 Content-Encoding: gzip 时，
+    // 下载必须保存原始字节，否则解压后的 tar 对不上 SHA-256。
+    let tgz = sample_tgz();
+    let server = TestServer::start(vec![(
+        "/pkg.tgz",
+        Route::Script {
+            body: tgz.clone(),
+            steps: vec![Step::GzipEncoding],
+        },
+    )])
+    .await;
+    let harness = Harness::new();
+    let manager = harness.manager(component_for(&tgz, vec![server.url("/pkg.tgz")]));
+
+    let status = manager.ensure().await;
+
+    assert!(status.is_ready(), "{status:?}");
+    assert_eq!(std::fs::read(harness.installed()).unwrap(), BINARY);
+    assert_eq!(server.requests().len(), 1, "{:?}", server.requests());
 }
 
 #[tokio::test]

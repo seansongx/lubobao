@@ -222,12 +222,12 @@ pub async fn execute(ctx: &Ctx, request: &Request) -> Result<Value, Failure> {
 /// `run` 正在启动或另一个命令正在写数据库时，最多等这么久。
 const BUSY_WAIT: Duration = Duration::from_secs(15);
 
-/// 等 `run` 应答的时限。`add` 要请求平台（单次 20 秒，可能还要跟随跳转），
-/// `ffmpeg install` 要下载几十 MB，放宽。
+/// 等 `run` 应答的时限。`add` 要请求平台（单次最长 60 秒，见
+/// `platforms::REQUEST_TIMEOUT`，有的平台要连发几个请求），`ffmpeg install` 要下载几十 MB，放宽。
 fn response_timeout(request: &Request) -> Duration {
     match request {
         Request::FfmpegInstall => Duration::from_secs(60 * 60),
-        Request::Add { .. } => Duration::from_secs(120),
+        Request::Add { .. } => Duration::from_secs(300),
         _ => Duration::from_secs(30),
     }
 }
