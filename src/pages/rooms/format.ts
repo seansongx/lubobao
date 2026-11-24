@@ -166,6 +166,7 @@ const errorAdvice: Record<CommandErrorKind, { title: string; advice: string }> =
   rate_limited: { title: "请求过于频繁", advice: "平台暂时限制了访问，过几分钟再试。" },
   parse: { title: "无法识别直播间信息", advice: "平台返回的内容无法解析，稍后重试；持续出现请反馈。" },
   config: { title: "设置有误", advice: "检查代理、Cookie 等设置后重试。" },
+  preparing: { title: "正在准备组件", advice: "录播宝正在下载这个平台需要的组件（YouTube 需要 yt-dlp 和 Deno），下载完成后再试。" },
   not_found: { title: "任务不存在", advice: "任务可能已被删除，刷新后重试。" },
   recording_active: { title: "正在录制", advice: "先停止录制，再进行这个操作。" },
   not_implemented: { title: "功能尚未接入", advice: "这个操作将在录制引擎接入后可用。" },

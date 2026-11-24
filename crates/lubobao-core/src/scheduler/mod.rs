@@ -474,13 +474,17 @@ impl Core {
         interval: Duration,
     ) -> Duration {
         let kind = PlatformErrorKind::of(error);
+        // 组件下载中不算失败，不累计失败次数。
+        let counts = kind != PlatformErrorKind::Preparing;
         let attempt = self
             .lock()
             .entries
             .get_mut(&id)
             .map(|entry| {
-                entry.failures += 1;
-                entry.failures
+                if counts {
+                    entry.failures += 1;
+                }
+                entry.failures.max(1)
             })
             .unwrap_or(1);
         let delay = policy::retry_delay(kind, attempt, interval);

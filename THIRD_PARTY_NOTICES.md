@@ -55,6 +55,10 @@ SOFTWARE.
 - License: Apache License 2.0
 - Used as: the behaviour reference for LuBoBao's features, defaults and FFmpeg options. LuBoBao reimplements this behaviour in Rust and TypeScript; deliberate differences are recorded in [docs/feature-map.md](docs/feature-map.md).
 
+## yt-dlp and Deno (YouTube)
+
+LuBoBao does not bundle these either. When a YouTube channel is first found live, it downloads the official single-file [yt-dlp](https://github.com/yt-dlp/yt-dlp) release (Unlicense; the release executables also contain yt-dlp-ejs and other dependencies under their own licenses, listed in the yt-dlp repository) and the official [Deno](https://github.com/denoland/deno) release (MIT License, Copyright 2018-2026 the Deno authors) from GitHub, checks their SHA-256 against `crates/lubobao-core/src/ytdlp/manifest.rs` and runs them as separate programs.
+
 ## FFmpeg
 
 LuBoBao does not bundle FFmpeg. At runtime it downloads a verified FFmpeg build from the npm package [`@seankit/ffmpeg`](https://www.npmjs.com/package/@seankit/ffmpeg) and runs it as a separate program. Those builds are licensed under GPL-3.0-or-later; each package includes the license text and the location of the corresponding source code. The Docker image `ghcr.io/seansongx/lubobao` contains the same verified Linux build at `/opt/ffmpeg/ffmpeg`, with the package's `LICENSE` and `README.md` (upstream build and source location) next to it in `/opt/ffmpeg/`.

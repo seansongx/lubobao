@@ -8,3 +8,4 @@ pub mod platforms;
 pub mod recorder;
 pub mod scheduler;
 pub mod tasks;
+pub mod ytdlp;

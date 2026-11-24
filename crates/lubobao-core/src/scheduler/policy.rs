@@ -100,6 +100,10 @@ fn doubling(base: Duration, n: u32, cap: Duration) -> Duration {
 /// 网络、限流、解析失败按 10 秒起翻倍退避，不超过检测间隔；其余类别要用户处理，
 /// 按检测间隔和 10 分钟中较长的一个重试，修改设置后会立即重试。
 pub fn retry_delay(kind: PlatformErrorKind, attempt: u32, interval: Duration) -> Duration {
+    if kind == PlatformErrorKind::Preparing {
+        // 组件下载中：不退避，和等 FFmpeg 一样过一会儿再看。
+        return FFMPEG_WAIT.min(interval);
+    }
     if kind.is_retryable() {
         doubling(RETRY_BASE, attempt, interval)
     } else {
@@ -304,6 +308,22 @@ mod tests {
         assert_eq!(recheck_delay(1, interval).as_secs(), 5);
         assert_eq!(recheck_delay(3, interval).as_secs(), 20);
         assert_eq!(recheck_delay(20, interval), interval);
+    }
+
+    #[test]
+    fn preparing_components_waits_briefly_without_backing_off() {
+        let interval = Duration::from_secs(180);
+        for attempt in [1, 5, 30] {
+            assert_eq!(
+                retry_delay(PlatformErrorKind::Preparing, attempt, interval),
+                FFMPEG_WAIT
+            );
+        }
+        assert_eq!(
+            retry_delay(PlatformErrorKind::Preparing, 1, Duration::from_secs(5)),
+            Duration::from_secs(5)
+        );
+        assert!(PlatformErrorKind::Preparing.is_retryable());
     }
 
     #[test]

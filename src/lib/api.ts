@@ -40,7 +40,9 @@ export type PlatformErrorKind =
   | "auth_required"
   | "rate_limited"
   | "parse"
-  | "config";
+  | "config"
+  /** 平台需要的组件还在下载（YouTube 的 yt-dlp 和 Deno），不算失败，约 15 秒后再检测。 */
+  | "preparing";
 
 /** 时间均为 Unix 毫秒。 */
 export type LiveState =

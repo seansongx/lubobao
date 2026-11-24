@@ -9,11 +9,10 @@ use super::{FfmpegManager, FfmpegStatus, ManagerConfig, STATUS_EVENT};
 
 /// 在 Tauri `setup` 中调用：登记状态并在后台开始检查，不阻塞窗口。
 pub fn init(app: &tauri::AppHandle) -> tauri::Result<()> {
-    let root = app
-        .path()
-        .app_local_data_dir()?
-        .join("components")
-        .join("ffmpeg");
+    let components = app.path().app_local_data_dir()?.join("components");
+    // YouTube 用的 yt-dlp 和 Deno：只登记目录，第一次检测到 YouTube 开播时才下载。
+    lubobao_core::ytdlp::init(components.join("youtube"));
+    let root = components.join("ffmpeg");
     let handle = app.clone();
     let manager = Arc::new(FfmpegManager::new(
         ManagerConfig::for_current_platform(root),

@@ -349,6 +349,10 @@ pub enum PlatformError {
     /// User settings cannot be used, e.g. a cookie with line breaks or an
     /// unsupported proxy scheme.
     Config(String),
+    /// A component the platform needs (YouTube's yt-dlp and Deno) is still
+    /// being downloaded. Not a platform failure: checked again shortly
+    /// without backing off.
+    Preparing(String),
 }
 
 impl PlatformError {
@@ -360,6 +364,7 @@ impl PlatformError {
             PlatformError::RateLimited(_) => "rate_limited",
             PlatformError::Parse(_) => "parse",
             PlatformError::Config(_) => "config",
+            PlatformError::Preparing(_) => "preparing",
         }
     }
 
@@ -370,7 +375,8 @@ impl PlatformError {
             | PlatformError::AuthRequired(message)
             | PlatformError::RateLimited(message)
             | PlatformError::Parse(message)
-            | PlatformError::Config(message) => message,
+            | PlatformError::Config(message)
+            | PlatformError::Preparing(message) => message,
         }
     }
 }

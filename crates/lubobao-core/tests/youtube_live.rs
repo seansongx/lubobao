@@ -19,6 +19,12 @@
 //! `LUBOBAO_FFMPEG`, falling back to the app's installed component under
 //! `%LOCALAPPDATA%`, and keeps the file in `YOUTUBE_RECORD_DIR` (default: the
 //! system temp directory).
+//!
+//! The stream comes from yt-dlp, which the adapter downloads with Deno on
+//! first use into `YOUTUBE_TOOLS_DIR` (default: `lubobao-youtube-tools` in the
+//! temp directory). `YOUTUBE_TOOLS_FRESH=1` deletes that directory first, so
+//! `components_download_and_are_reused_offline` covers a download from
+//! scratch. Stream URLs are printed as host only; the cookie is never printed.
 
 mod support;
 
@@ -30,7 +36,35 @@ use lubobao_core::platforms::{
     FetchOptions, LiveInfo, PlatformAdapter, Quality, youtube::YoutubeAdapter,
 };
 use lubobao_core::recorder::{self, RecordOptions, RecordingRequest};
+use lubobao_core::ytdlp::{self, ToolsManager};
 use support::ProxyRelay;
+
+fn tools_dir() -> PathBuf {
+    std::env::var("YOUTUBE_TOOLS_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| std::env::temp_dir().join("lubobao-youtube-tools"))
+}
+
+/// Fetch, and when the components are still downloading, wait for them and
+/// fetch again.
+async fn fetch_ready(
+    adapter: &YoutubeAdapter,
+    url: &str,
+    options: &FetchOptions,
+) -> Option<LiveInfo> {
+    let manager = ytdlp::init(tools_dir());
+    match adapter.fetch(url, options).await {
+        Err(error) if error.kind() == "preparing" => {
+            println!("WAIT {error}");
+            if let Err(error) = manager.prepare_and_wait(options.proxy.as_deref()).await {
+                println!("ERR  components: {error}");
+                return None;
+            }
+            report(adapter, url, options).await
+        }
+        _ => report(adapter, url, options).await,
+    }
+}
 
 /// A channel that rarely streams.
 const OFFLINE_LINK: &str = "https://www.youtube.com/@mkbhd/live";
@@ -67,10 +101,11 @@ async fn report(adapter: &YoutubeAdapter, url: &str, options: &FetchOptions) -> 
             if let Some(selected) = &info.selected {
                 let (format, source) = selected.source_url(false, false);
                 println!(
-                    "     selected={} ({:?}) source={format:?} {}…",
+                    "     selected={} ({:?}) source={format:?} host={} header_keys={:?}",
                     selected.variant.name,
                     selected.requested,
-                    &source[..source.len().min(90)]
+                    support::url_host(source),
+                    info.stream_headers.keys().collect::<Vec<_>>()
                 );
             }
             Some(info)
@@ -121,10 +156,22 @@ async fn links_resolve_against_live_youtube() {
     }
     if let Ok(live_url) = std::env::var("YOUTUBE_LIVE_URL") {
         for quality in Quality::ALL {
-            let info = report(&adapter, &live_url, &options(&relay, quality)).await;
+            let info = fetch_ready(&adapter, &live_url, &options(&relay, quality)).await;
             if info.and_then(|info| info.selected).is_none() {
                 failures.push(format!("live channel {quality}: no stream selected"));
             }
+        }
+        // Without a cookie, a blocked proxy address gets the bot check.
+        let anonymous = FetchOptions {
+            cookies: None,
+            ..options(&relay, Quality::Od)
+        };
+        match adapter.fetch(&live_url, &anonymous).await {
+            Err(error) => println!("NO COOKIE {}: {error}", error.kind()),
+            Ok(info) => println!(
+                "NO COOKIE live={} (this address is not blocked)",
+                info.is_live
+            ),
         }
     }
     if let Some(relay) = &relay {
@@ -145,7 +192,7 @@ async fn live_stream_records_thirty_seconds() {
     );
     let relay = relay().await;
     let adapter = YoutubeAdapter::new();
-    let info = report(&adapter, &live_url, &options(&relay, quality))
+    let info = fetch_ready(&adapter, &live_url, &options(&relay, quality))
         .await
         .expect("fetch live stream");
     let selected = info.selected.clone().expect("stream must be live");
@@ -207,4 +254,42 @@ async fn live_stream_records_thirty_seconds() {
     assert!(outcome.bytes_written > 0);
     support::describe_file(&ffmpeg, &outcome.files[0]);
     support::assert_decodes(&ffmpeg, &outcome.files[0]);
+}
+
+#[tokio::test]
+#[ignore = "downloads yt-dlp and Deno from GitHub (LUBOBAO_TEST_PROXY in mainland China)"]
+async fn components_download_and_are_reused_offline() {
+    let dir = tools_dir();
+    if std::env::var("YOUTUBE_TOOLS_FRESH").as_deref() == Ok("1") {
+        let _ = std::fs::remove_dir_all(&dir);
+        println!("removed {}", dir.display());
+    }
+    let relay = relay().await;
+    let proxy = relay.as_ref().map(|relay| relay.url.clone());
+    let started = Instant::now();
+    let manager = Arc::new(ToolsManager::new(dir.clone(), ytdlp::manifest::current()));
+    let paths = manager
+        .prepare_and_wait(proxy.as_deref())
+        .await
+        .expect("components install");
+    println!(
+        "ready in {:.1} s: {} {}",
+        started.elapsed().as_secs_f64(),
+        paths.ytdlp.display(),
+        paths.deno.display()
+    );
+    if let Some(relay) = &relay {
+        println!("relayed: {:?}", relay.hosts_since(0));
+    }
+    assert!(paths.ytdlp.is_file() && paths.deno.is_file());
+
+    // A second manager on the same directory reuses the installed version
+    // without any network access (the proxy here does not exist).
+    let offline = Arc::new(ToolsManager::new(dir, ytdlp::manifest::current()));
+    let started = Instant::now();
+    let reused = offline
+        .prepare(Some("http://127.0.0.1:9"))
+        .expect("reuse without network");
+    println!("reused in {} ms", started.elapsed().as_millis());
+    assert_eq!(reused, paths);
 }

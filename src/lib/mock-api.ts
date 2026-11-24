@@ -136,7 +136,7 @@ const ffmpegPresets: Record<string, FfmpegStatus> = {
   fatal: { state: "failed", reason: "当前系统架构没有可用的 FFmpeg 包", retryable: false },
 };
 
-const retryableKinds = new Set(["network", "rate_limited", "parse"]);
+const retryableKinds = new Set(["network", "rate_limited", "parse", "preparing"]);
 
 function deriveDisplay(
   monitoring: Monitoring,

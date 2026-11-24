@@ -75,6 +75,8 @@ pub enum PlatformErrorKind {
     RateLimited,
     Parse,
     Config,
+    /// 平台需要的组件还在下载（YouTube 的 yt-dlp 和 Deno），不算失败。
+    Preparing,
 }
 
 impl PlatformErrorKind {
@@ -86,6 +88,7 @@ impl PlatformErrorKind {
             PlatformError::RateLimited(_) => PlatformErrorKind::RateLimited,
             PlatformError::Parse(_) => PlatformErrorKind::Parse,
             PlatformError::Config(_) => PlatformErrorKind::Config,
+            PlatformError::Preparing(_) => PlatformErrorKind::Preparing,
         }
     }
 
@@ -93,7 +96,10 @@ impl PlatformErrorKind {
     pub fn is_retryable(self) -> bool {
         matches!(
             self,
-            PlatformErrorKind::Network | PlatformErrorKind::RateLimited | PlatformErrorKind::Parse
+            PlatformErrorKind::Network
+                | PlatformErrorKind::RateLimited
+                | PlatformErrorKind::Parse
+                | PlatformErrorKind::Preparing
         )
     }
 }
