@@ -1,8 +1,6 @@
 # 把 website/ 同步到官网服务器（lubobao.xiaofany.com）。
 #
-# 只在 main 分支 website/ 有改动时或手动运行，不响应 PR。用服务器上的受限用户 lubobao-site：
-# 它的密钥在 authorized_keys 里被限定为 command="rrsync /var/www/lubobao",restrict，
-# 只能在这个目录里同步文件，不能登录 shell 或做别的事。服务器准备和 Secret 设置见 docs/website-deploy.md。
+# 只在 main 分支 website/ 有改动时或手动运行，不响应 PR。部署用的钥匙在服务器上被限定为只能同步网站目录。
 #
 # 需要的 Secret：SITE_DEPLOY_HOST、SITE_DEPLOY_USER、SITE_DEPLOY_SSH_KEY、SITE_DEPLOY_KNOWN_HOSTS；
 # 可选变量：SITE_DEPLOY_PORT（默认 22）、SITE_URL（默认 https://lubobao.xiaofany.com）。
@@ -49,7 +47,7 @@ jobs:
           [[ -n "$SSH_KEY" ]] || missing="$missing SITE_DEPLOY_SSH_KEY"
           [[ -n "$KNOWN_HOSTS" ]] || missing="$missing SITE_DEPLOY_KNOWN_HOSTS"
           if [[ -n "$missing" ]]; then
-            echo "::notice title=跳过官网部署::未配置 Secret:${missing}。配置方法见 docs/website-deploy.md。"
+            echo "::notice title=跳过官网部署::未配置 Secret:${missing}。"
             echo "ready=false" >> "$GITHUB_OUTPUT"
           else
             echo "ready=true" >> "$GITHUB_OUTPUT"
@@ -99,7 +97,7 @@ jobs:
           ssh-keygen -F "$host" -f ~/.ssh/site_known_hosts > /dev/null \
             || { echo "::error::SITE_DEPLOY_KNOWN_HOSTS 里没有与 SITE_DEPLOY_HOST 对应的记录：每行开头的主机名要与 SITE_DEPLOY_HOST 完全一致（IP 对 IP、域名对域名；端口不是 22 时写成 [主机]:端口）"; exit 1; }
 
-      # 服务器端由 rrsync 把路径限定在 /var/www/lubobao，这里的目标 "./" 就是该目录。
+      # 服务器端把路径限定在网站目录，这里的目标 "./" 就是该目录。
       # --checksum 只传内容变化的文件；--delay-updates 先传到临时文件，全部传完再一起换上。
       - name: Sync website
         if: steps.config.outputs.ready == 'true'
