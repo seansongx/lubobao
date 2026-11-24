@@ -15,6 +15,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 pub mod acfun;
+pub mod baidu;
 pub mod bilibili;
 pub mod douyin;
 pub mod douyu;
@@ -25,12 +26,14 @@ pub mod huya;
 pub mod inke;
 pub mod kuaishou;
 pub mod kugou;
+pub mod maoer;
 pub mod netease;
 mod sign;
 pub mod sixroom;
 pub mod weibo;
 pub mod xiaohongshu;
 pub mod yy;
+pub mod zhihu;
 
 /// Boxed future returned by adapter methods so adapters can be used as trait objects.
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
@@ -57,6 +60,9 @@ pub enum Platform {
     /// 六间房：平台键以数字开头，按 StreamCap 的 `6room` 序列化。
     #[serde(rename = "6room")]
     SixRoom,
+    Baidu,
+    Zhihu,
+    Maoer,
     /// 端到端测试用的本地直播间（feature `e2e`），发布版没有。
     #[cfg(feature = "e2e")]
     E2e,
@@ -80,6 +86,9 @@ impl Platform {
             Platform::Inke => "inke",
             Platform::Kugou => "kugou",
             Platform::SixRoom => "6room",
+            Platform::Baidu => "baidu",
+            Platform::Zhihu => "zhihu",
+            Platform::Maoer => "maoerfm",
             #[cfg(feature = "e2e")]
             Platform::E2e => "e2e",
         }
@@ -102,6 +111,9 @@ impl Platform {
             Platform::Inke => "映客直播",
             Platform::Kugou => "酷狗直播",
             Platform::SixRoom => "六间房直播",
+            Platform::Baidu => "百度直播",
+            Platform::Zhihu => "知乎直播",
+            Platform::Maoer => "猫耳FM直播",
             #[cfg(feature = "e2e")]
             Platform::E2e => "测试直播间",
         }
@@ -408,6 +420,9 @@ pub fn adapters() -> Vec<Box<dyn PlatformAdapter>> {
         Box::new(inke::InkeAdapter::new()),
         Box::new(kugou::KugouAdapter::new()),
         Box::new(sixroom::SixRoomAdapter::new()),
+        Box::new(baidu::BaiduAdapter::new()),
+        Box::new(zhihu::ZhihuAdapter::new()),
+        Box::new(maoer::MaoerAdapter::new()),
     ];
     #[cfg(feature = "e2e")]
     list.push(Box::new(e2e::E2eAdapter));

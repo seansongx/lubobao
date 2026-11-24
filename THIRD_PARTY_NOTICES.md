@@ -18,6 +18,9 @@ LuBoBao (录播宝) is licensed under the MIT License (see [LICENSE](LICENSE)). 
 - Also used in: the Huajiao adapter in `crates/lubobao-core/src/platforms/huajiao.rs` follows `streamget/platforms/huajiao/live_stream.py` (`HuajiaoLiveStream`): the request headers, the `getUserFeeds` live check (`rtop`), the FLV URL (`pull_url` plus `&codec={encode}`) and the `getFeedInfo` lookup of a broadcast id.
 - Also used in: the Kugou adapter in `crates/lubobao-core/src/platforms/kugou.rs` is ported from `streamget/platforms/kugou/live_stream.py` (`KugouLiveStream`): the room id taken from the link, the page headers, the `getEnterRoomInfo` live check, the `mutiline/streamaddr` request parameters and taking the HTTPS FLV of the last stream line.
 - Also used in: the 六间房 (6.cn) adapter in `crates/lubobao-core/src/platforms/sixroom.rs` is ported from `streamget/platforms/sixroom/live_stream.py` (`SixRoomLiveStream`): the iOS app request headers, reading the anchor uid from the room page, the `coop-mobile-inroom` form request and building the FLV address from `flvtitle`.
+- Also used in: the Baidu adapter in `crates/lubobao-core/src/platforms/baidu.rs` is ported from `streamget/platforms/baidu/live_stream.py` (`BaiduLiveStream`): the `mbd.baidu.com/searchbox` `cmd=371` request, the `status == "0"` live check and rewriting the streams to the `hls.liveshow.bdstatic.com` HLS host.
+- Also used in: the Zhihu adapter in `crates/lubobao-core/src/platforms/zhihu.rs` is ported from `streamget/platforms/zhihu/live_stream.py` (`ZhihuLiveStream`): the mobile request headers, reading `js-initialData` from the theater page, the `drama.status == 1` live check and the `playInfo` FLV and HLS URLs.
+- Also used in: the Maoer FM adapter in `crates/lubobao-core/src/platforms/maoer.rs` is ported from `streamget/platforms/maoer/live_stream.py` (`MaoerLiveStream`): the `api/v2/live/{room_id}` request, the `status.broadcasting` live check and recording the FLV pull URL.
 
 ```
 MIT License

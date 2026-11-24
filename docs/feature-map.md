@@ -178,6 +178,24 @@
 - 画质与上游相同：只有一条 FLV，五档都录这一条，档位名「原画」。不在优先 FLV 的平台里，`record_url` 本身就是 FLV。
 - 不需要登录。用户 Cookie（可选）只随房间页和接口发送，没有时不带 Cookie 头（上游发空 Cookie）；取流不带 Cookie。上游取流时不带请求头，录播宝带 App User-Agent 和 Referer（实测不带也能拉流）。
 - 上游不报标题；录播宝在开播时取 `liveinfo.title`（实测多为空）。主播昵称为空时用「六间房 {房间号}」。房间号为链接里的数字，主播 id 为 uid，按它去重。
+**有意差异 · 百度 解析**（参考 StreamGet v4.0.10 `BaiduLiveStream`，StreamCap `BaiduHandler`，平台键 `baidu`；`display_name` 为「百度直播」，界面短名「百度」）：
+- 接受 `live.baidu.com` 下带 `room_id={纯数字}` 查询参数的链接，归一为 `https://live.baidu.com/m/media/pclive/pchome/live.html?room_id={房间号}`；上游用正则 `room_id=(.*?)&` 取房间号，`room_id` 在最后一个参数时（没有后续 `&`）会失败，这里按查询参数解析，两种写法都认。
+- 房间不存在时接口返回 `data.371` 为空，判为链接无效；上游在读主播名时出错。`status` 为 `"0"` 才算开播，回放（实测 `"20"`）判为未开播，与上游一致。
+- 画质与上游一致：`url_clarity_list` 非空时取其 `urls.flv` 的文件名，否则取 `url_list[].urls[0].hls` 的文件名，拼到 `https://hls.liveshow.bdstatic.com/live/` 得到 m3u8，只录 HLS；按接口给的顺序（实测 720p、480p）建档，依次对应原画、超清，其余补最后一档。
+- 请求使用上游固定的 H5 设备号（上游在三个里随机选一个，这里固定用第一个）和 `ua=360_740_ANDROID_0`；不需要登录，用户 Cookie（可选）只发给接口，取流不带。主播昵称为空时用「百度直播 {房间号}」。
+
+**有意差异 · 知乎 解析**（参考 StreamGet v4.0.10 `ZhihuLiveStream`，StreamCap `ZhihuHandler`，平台键 `zhihu`；`display_name` 为「知乎直播」，界面短名「知乎」）：
+- 只接受 `zhihu.com/theater/{纯数字}`（也认 `www.zhihu.com`），归一为 `https://www.zhihu.com/theater/{直播间号}`；`drama_id` 每场直播不同，不进归一后的链接，同一直播间的不同链接按直播间号去重。上游按 `zhihu.com/` 注册，只要求链接里有 `/theater/` 并取最后一段当直播间号。
+- 直播间不存在时页面仍返回 200，但页面数据里没有 `theater`，判为链接无效；上游在读 `theaters[...]` 时出错。页面没有 `js-initialData` 时报解析错误（上游当作未开播），避免页面改版后静默漏录。
+- 开播判断与上游一致：`drama.status == 1`，实测已结束的直播间为 2。取流用 `drama.playInfo.hlsUrl`（m3u8）录制，`playUrl`（FLV）作备用；只有一档流，五档画质都用它。流地址带有效期的 `auth_key`，每次检测都会重新取。
+- 不需要登录。用户 Cookie（可选）只发给页面，取流不带；取流带上游的移动端 User-Agent。主播昵称为空时用「知乎直播 {直播间号}」。
+
+**有意差异 · 猫耳FM 解析**（参考 StreamGet v4.0.10 `MaoerLiveStream`，StreamCap `MaoerFMHandler`，平台键 `maoerfm`；`display_name` 为「猫耳FM直播」，界面短名「猫耳FM」）：
+- 只接受 `fm.missevan.com/live/{纯数字}`（可带查询参数），归一为 `https://fm.missevan.com/live/{房间号}`；上游按 `fm.missevan.com/` 注册，取路径最后一段当房间号，其他页面也会进到解析再出错。
+- 房间不存在时接口返回 HTTP 404（正文 `code: 500030004`「无法找到该聊天室」），判为链接无效；上游在读 `info` 时出错。
+- 开播判断与上游一致：`info.room.status.broadcasting` 为真才算开播；从未开过房间的主播没有 `room` 字段，判为未开播。
+- 这是音频直播，只有一档流（FLV + HLS），五档画质都用它；和上游一样录 FLV（`record_url = flv_url`），HLS 作备用。流地址带有效期的 `sign`，每次检测都会重新取。
+- 不需要登录。用户 Cookie（可选）只发给接口，取流不带；取流带上游的 PC User-Agent。主播昵称为空时用「猫耳FM {房间号}」。
 
 **有意差异 · 桌面行为**（参考 StreamCap `app/lifecycle/`、`app/messages/desktop_notify.py`）：
 - 系统通知：与上游一样，总开关 `system_notification_enabled` 控制全部系统通知，开播通知只在主窗口隐藏或最小化时发。不同的是，上游的「开播通知」「下播通知」开关只管推送渠道，0.1.0 没有推送渠道，这两个开关改为控制系统通知：开播默认开、下播默认关。「仅通知」的直播间开播时只看总开关，不受「开播通知」开关和窗口状态影响（否则关掉开播通知后这类直播间既不录也不提醒）。任务进入「需处理」时提醒一次（上游没有）。短时间内的多条开播或下播合并成一条。
@@ -209,5 +227,8 @@
 | 映客 | `www.inke.cn/liveroom/index.html?uid={主播 uid}&id={直播 id}`（上游示例 `uid=22954469&id=1720860391070904`），`id` 可省；也认其他 `inke.cn` 子域名带 `uid` 的页面，如 App 分享链接 `mlive2.inke.cn/app/hot/live?uid=…&liveid=…` | 不需要。用户 Cookie 可选，只发给 `now_publish` 和 `live_share_pc`，取流不带 | 按域名 `inke.cn` 和数字 `uid` 识别，不发请求；检测时 `now_publish` 的 `live` 为 `null` 判为未开播；`live_share_pc` 返回的 `inke_id` 与 uid 不符判为链接无效 | 只有一路签名 FLV（实测 720×1280 15fps H.264），各档都录它 | 2026-11-23：上游示例识别为「万万啊🧚🏻‍♀️」（未开播）；只有 uid 的链接未开播时显示「映客 22954469」；不存在的 `uid=999999999&id=1` 判为链接无效。在播的 `771687341`（链接带旧的直播 id）取到当前场次的 FLV，经录制引擎录 35.1 秒（720×1280 15fps H.264 Main + AAC-LC 44.1 kHz 立体声），FFmpeg 完整解码 0 错误。用 `lubobao-cli run` 添加 `774870442` 后约 9 秒自动录制，App 分享链接被识别为同一直播间；录 58.7 秒后 `shutdown`，TS 为 720×1280 H.264，解码 0 错误。尚未验证主播下播收尾 | 已实现待验证 |
 | 酷狗 | `fanxing.kugou.com/{房间号}`（上游 README 示例 `fanxing2.kugou.com/50428671?refer=2177&sourceFrom=`，可带查询参数），也认 `*.kugou.com` 下带 `roomId={房间号}` 的分享页 | 不需要。用户 Cookie 可选，只发给酷狗接口，取流不带 | 只按域名和路径识别，不发请求：路径只有一段纯数字，或参数里有 `roomId`；检测时主播信息全空判为直播间不存在，`liveType` 为 -1 或没有线路判为未开播 | 只有一档 FLV（原画），所有画质都录同一条，取最后一条线路 | 2026-11-23：README 示例 `50428671` 识别为「不lele」（主播 id 1533092999，未开播）；不存在的 `1` 判为链接无效（没有找到直播间）。在播的 `51201875`、`51202136` 五档都取到同一条有效 FLV 头；经录制引擎录 37.45 秒（1080×1920 30fps H.264 High + AAC-LC 44.1 kHz 立体声，16.6 MB）和 37.91 秒（同为 1080×1920 竖屏），除文件末尾一个只含 SEI 的包外所有帧完整解码（见有意差异）。用 `lubobao-cli run` 添加后约 1 秒自动录制，重复添加同一房间的另一种写法被识别为同一直播间；录 54.7 秒后手动停止，TS 和转出的 MP4 都是 1080×1920 H.264 + AAC，随后 `shutdown` 正常退出。尚未验证主播下播收尾 | 已实现待验证 |
 | 六间房 | `v.6.cn/{房间号}`（上游示例 `634435`，可带查询参数），也认 `m.v.6.cn/{房间号}` | 不需要。用户 Cookie 可选，只发给房间页和 `inroom` 接口，取流不带 | 只按域名和单段纯数字路径识别，不发请求；检测时房间页 404 判为不存在，`flvtitle` 为空判为未开播 | 只有一条 FLV，所有画质都录这一条（「原画」） | 2026-11-23：上游示例 `634435` 已不存在（HTTP 404），判为链接无效；`100` 未开播判为未开播并取到昵称和 uid。在播的 `58018` 五档都取到同一条 FLV（有效 `FLV` 头）；经录制引擎录 37.8 秒（12.0 MB），1024×768 20fps H.264 High + AAC-LC 48 kHz 单声道，FFmpeg 完整解码 0 错误。用 `lubobao-cli run` 添加后约 2 秒自动录制，重复添加 `m.v.6.cn/58018?src=x` 被识别为同一直播间，不存在的 `634435` 添加时报「没有找到直播间」；高清档录约 58 秒后手动停止，转出的 MP4 为 1024×768 H.264 + AAC，解码 0 错误，随后 `shutdown` 正常退出。尚未验证主播下播收尾 | 已实现待验证 |
+| 百度 | `live.baidu.com/…?room_id={房间号}`（上游示例 `live.baidu.com/m/media/pclive/pchome/live.html?room_id=9175031377&tab_category`，`room_id` 可在任意位置） | 不需要。用户 Cookie 可选，只发给 `mbd.baidu.com` 接口，取流不带 | 只按域名 `live.baidu.com` 和 `room_id` 纯数字识别，不发请求；检测时接口返回空判为直播间不存在，`status` 不是 `"0"` 判为未开播 | 只有 HLS（`hls.liveshow.bdstatic.com`），按接口顺序建档（实测 720p、480p），依次对应原画、超清，其余补最后一档 | 2026-11-24：上游示例 `9175031377`（甜瓜漫剧）当时是回放，判为未开播；不存在的 `room_id=1` 判为链接无效。在播的 `11690716886`（面部提升祝东升）五档都取到有效 m3u8；经录制引擎录原画 48.0 秒（HLS，输出 TS），FFmpeg 完整解码 0 错误 | 已实现待验证 |
+| 知乎 | `www.zhihu.com/theater/{直播间号}`（上游示例 `…/theater/10687?drama_id=2037464603865642996`，`drama_id` 忽略） | 不需要。用户 Cookie 可选，只发给页面，取流不带 | 只按域名 `zhihu.com` 和 `/theater/{纯数字}` 识别，不发请求；检测时页面没有 `theater` 数据判为直播间不存在，`drama.status` 不是 1 判为未开播 | 只有一档（FLV + HLS），五档画质都用它，录 HLS | 2026-11-24：上游示例 `10687`（闪电新闻）已结束，判为未开播；不存在的 `99999999` 判为链接无效。在播的 `55785`（中国新闻网）五档都取到有效 m3u8；经录制引擎录 40.0 秒（H.264 High 1080p25 + AAC-LC 48 kHz），FFmpeg 解码无错误，仅开头有一条 SEI 先于 SPS 的提示（源流特性，测试里放行） | 已实现待验证 |
+| 猫耳FM | `fm.missevan.com/live/{房间号}`（上游示例 `…/live/868895007`，可带查询参数） | 不需要。用户 Cookie 可选，只发给接口，取流不带 | 只按域名 `fm.missevan.com` 和 `/live/{纯数字}` 识别，不发请求；检测时接口 404 判为直播间不存在，`broadcasting` 不为真判为未开播 | 音频直播（AAC 音频加 16×16 占位视频），只有一档（FLV + HLS），五档画质都用它，录 FLV | 2026-11-24：上游示例 `868895007` 未开播，判为未开播；不存在的 `1` 判为链接无效（404）。在播的 `869138407`（李晚星_全能主播）五档都取到流；经录制引擎录 30.4 秒，FFmpeg 完整解码 0 错误 | 已实现待验证 |
 
 上游项目与完整平台示例见 [StreamCap](https://github.com/ihmily/StreamCap)。录播宝的技术选型、FFmpeg 分发和验收规则见 [AGENTS.md](../AGENTS.md)。
