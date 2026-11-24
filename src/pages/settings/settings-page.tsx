@@ -130,7 +130,7 @@ export function SettingsPage({ focusGroup }: SettingsPageProps) {
               aria-current={group === item.id ? "page" : undefined}
               onClick={() => setGroup(item.id)}
               className={cn(
-                "relative h-[calc(var(--nav-item-h)-4px)] rounded-md px-2 text-left text-(length:--text-ui) outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring",
+                "relative h-[calc(var(--nav-item-h)-8px)] rounded-md px-2 text-left text-(length:--text-ui) outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring",
                 group === item.id && "bg-accent",
               )}
             >

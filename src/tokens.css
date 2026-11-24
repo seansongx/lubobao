@@ -25,12 +25,14 @@
   --text-small: 11px; /* 说明文字（Tailwind text-xs） */
   --text-title: 15px;
   --weight-title: 700;
-  --nav-item-h: 32px;
+  --nav-item-h: 36px; /* 左侧导航项；设置页左侧分组比它矮 8px */
   --page-pad: 20px;
-  --sidebar-width: 208px;
+  --sidebar-width: 216px;
   --header-h: 52px; /* 页面顶部工具栏；macOS 的红绿灯与之垂直居中 */
   --dialog-width: 520px; /* 添加、编辑直播间和更新对话框 */
   --settings-width: 760px; /* 设置页内容最大宽度 */
+  --selection-bar-width: 3px; /* 左侧导航当前项的 Teal 竖条（selection-bar） */
+  --selection-bar-height: 16px;
   --radius: 6px;
 
   --window: #ececec;
@@ -59,13 +61,13 @@
   --input: rgb(0 0 0 / 0.15);
   --ring: var(--primary);
 
-  --sidebar: #e8e8eb;
+  --sidebar: var(--window); /* 侧栏与窗口同底，不画分隔线 */
   --sidebar-foreground: var(--foreground);
   --sidebar-primary: var(--primary);
   --sidebar-primary-foreground: var(--primary-foreground);
-  --sidebar-accent: rgb(0 0 0 / 0.08);
+  --sidebar-accent: rgb(0 0 0 / 0.05);
   --sidebar-accent-foreground: var(--foreground);
-  --sidebar-border: rgb(0 0 0 / 0.1);
+  --sidebar-border: transparent;
   --sidebar-ring: var(--primary);
 
   /* 任务状态：颜色之外必须同时显示文字或图标 */
@@ -127,9 +129,7 @@
     --border: rgb(255 255 255 / 0.1);
     --input: rgb(255 255 255 / 0.16);
 
-    --sidebar: #2a2a2d;
-    --sidebar-accent: rgb(255 255 255 / 0.1);
-    --sidebar-border: rgb(0 0 0 / 0.5);
+    --sidebar-accent: rgb(255 255 255 / 0.06);
 
     --status-recording: #f87171; /* red-400 */
     --status-waiting: #64748b; /* slate-500 */

@@ -36,7 +36,7 @@
 :root {
   --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue", "Microsoft YaHei UI", sans-serif;
   --fs: 13px; --fs-table: 13px; --fs-small: 11px; --fs-title: 15px; --fw-title: 700;
-  --ctl-h: 24px; --nav-h: 32px; --pad: 20px; --sidebar-w: 208px;
+  --ctl-h: 24px; --nav-h: 36px; --pad: 20px; --sidebar-w: 216px;
   --r-ctl: 6px; --r-card: 10px; --r-dialog: 12px; --r-menu: 7px; --r-sel: 6px;
   --menu-item-h: 22px;
   --wallpaper: radial-gradient(60% 80% at 10% 20%, #b9cfe6 0, transparent 70%), radial-gradient(60% 70% at 30% 90%, #d6c9e2 0, transparent 70%), #dfe3ea;
@@ -97,11 +97,11 @@
   --font: "Adwaita Sans", Cantarell, "Noto Sans CJK SC", "Ubuntu", "Microsoft YaHei UI", system-ui, sans-serif;
   /* 没有窗口材质：不透明底色 */
   --wallpaper: #ececec; --window-tint: #ececec;
-  --sidebar-bg: #e8e8eb;
+  --sidebar-bg: transparent; /* 侧栏与窗口同底 */
 }
 [data-platform="linux"][data-theme="dark"] {
   --wallpaper: #2b2b2d; --window-tint: #2b2b2d;
-  --sidebar-bg: #2a2a2d;
+  --sidebar-bg: transparent;
 }
 
 /* ================= 基础与去网页感 ================= */
@@ -172,7 +172,7 @@ svg.i { width: 15px; height: 15px; stroke-width: 1.7; }
 
 .shell { flex: 1; display: grid; grid-template-columns: var(--sidebar-w) 1fr; min-height: 0; }
 .sidebar { background: var(--sidebar-bg); display: flex; flex-direction: column; padding: 4px 8px 8px; gap: 2px; min-height: 0; }
-.sidebar { padding: 10px 10px 10px; border-right: 1px solid var(--divider); position: relative; }
+.sidebar { padding: 4px 6px 8px; position: relative; } /* 原 Windows 的样子：与窗口同底，不画分隔线 */
 /* 外壳：macOS 侧栏透出 vibrancy，顶部给红绿灯留出工具栏高度 */
 [data-platform="macos"] .sidebar { padding-top: 52px; backdrop-filter: blur(30px) saturate(1.6); -webkit-backdrop-filter: blur(30px) saturate(1.6); }
 .traffic { display: none; }
@@ -183,10 +183,9 @@ svg.i { width: 15px; height: 15px; stroke-width: 1.7; }
 .nav { position: relative; display: flex; align-items: center; gap: 12px; height: var(--nav-h); padding: 0 12px; border: 0; border-radius: var(--r-ctl); background: transparent; text-align: left; color: var(--fg); font-size: 14px; }
 .nav:hover { background: var(--hover); }
 .nav.on { background: var(--hover); }
-.nav { gap: 8px; padding: 0 8px; font-size: 13px; }
-.nav .ic { color: var(--primary); }
-.nav.on { background: rgb(0 0 0 / .08); }
-:root[data-theme="dark"] .nav.on { background: rgb(255 255 255 / .1); }
+.nav.on { background: rgb(0 0 0 / .05); }
+:root[data-theme="dark"] .nav.on { background: rgb(255 255 255 / .06); }
+.sidebar .nav.on::before { content: ""; position: absolute; left: 0; top: 50%; width: 3px; height: 16px; translate: 0 -50%; border-radius: 99px; background: var(--primary); }
 .nav-head { font-size: 11px; font-weight: 600; color: var(--fg3); padding: 0 8px 4px; }
 .nav-head { display: none; }
 .nav .count { margin-left: auto; font-size: var(--fs-small); color: var(--fg2); }
@@ -357,7 +356,10 @@ table.tasks tbody tr.sel td { background: color-mix(in srgb, var(--fg) 8%, trans
 .settings { flex: 1; display: flex; min-height: 0; }
 .set-nav { width: 168px; flex: none; padding: 12px 8px 12px var(--pad); display: flex; flex-direction: column; gap: 2px; }
 .set-nav { padding-left: 12px; }
-.set-nav .nav { height: calc(var(--nav-h) - 4px); font-size: 13px; }
+.set-nav .nav { height: calc(var(--nav-h) - 8px); gap: 8px; padding: 0 8px; font-size: 13px; }
+.set-nav .nav .ic { color: var(--primary); }
+.set-nav .nav.on { background: rgb(0 0 0 / .08); }
+:root[data-theme="dark"] .set-nav .nav.on { background: rgb(255 255 255 / .1); }
 .set-body { flex: 1; overflow: auto; padding: 12px var(--pad) 24px 8px; min-width: 0; }
 .set-group { max-width: 760px; }
 .set-group h2 { font-size: calc(var(--fs) + 0px); font-weight: 600; margin: 4px 0 8px; display: flex; align-items: center; }
