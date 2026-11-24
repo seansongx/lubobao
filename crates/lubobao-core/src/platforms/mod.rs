@@ -23,6 +23,7 @@ pub mod huya;
 pub mod kuaishou;
 pub mod netease;
 mod sign;
+pub mod weibo;
 pub mod xiaohongshu;
 pub mod yy;
 
@@ -43,6 +44,7 @@ pub enum Platform {
     Xiaohongshu,
     Yy,
     Netease,
+    Weibo,
     /// 端到端测试用的本地直播间（feature `e2e`），发布版没有。
     #[cfg(feature = "e2e")]
     E2e,
@@ -60,6 +62,7 @@ impl Platform {
             Platform::Xiaohongshu => "xiaohongshu",
             Platform::Yy => "yy",
             Platform::Netease => "netease",
+            Platform::Weibo => "weibo",
             #[cfg(feature = "e2e")]
             Platform::E2e => "e2e",
         }
@@ -76,6 +79,7 @@ impl Platform {
             Platform::Xiaohongshu => "小红书",
             Platform::Yy => "YY直播",
             Platform::Netease => "网易CC直播",
+            Platform::Weibo => "微博直播",
             #[cfg(feature = "e2e")]
             Platform::E2e => "测试直播间",
         }
@@ -376,6 +380,7 @@ pub fn adapters() -> Vec<Box<dyn PlatformAdapter>> {
         Box::new(xiaohongshu::XiaohongshuAdapter::new()),
         Box::new(yy::YyAdapter::new()),
         Box::new(netease::NeteaseAdapter::new()),
+        Box::new(weibo::WeiboAdapter::new()),
     ];
     #[cfg(feature = "e2e")]
     list.push(Box::new(e2e::E2eAdapter));
