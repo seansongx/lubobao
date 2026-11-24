@@ -15,6 +15,7 @@ LuBoBao (录播宝) is licensed under the MIT License (see [LICENSE](LICENSE)). 
 - Also used in: the Weibo adapter in `crates/lubobao-core/src/platforms/weibo.rs` is ported from `streamget/platforms/weibo/live_stream.py` (`WeiboLiveStream`): the link forms, request headers and default visitor cookie, the `mymblog` lookup for profile links, the `pc/anchor/live` room API and deriving the source stream by removing the transcode suffix.
 - Also used in: the AcFun adapter in `crates/lubobao-core/src/platforms/acfun.rs` is ported from `streamget/platforms/acfun/live_stream.py` (`AcfunLiveStream`): the page headers and default cookie, the `userInfo` live check, the visitor login with a random `_did`, the `startPlay` request and sorting its FLV representations by bitrate.
 - Also used in: the Baidu adapter in `crates/lubobao-core/src/platforms/baidu.rs` is ported from `streamget/platforms/baidu/live_stream.py` (`BaiduLiveStream`): the `mbd.baidu.com/searchbox` `cmd=371` request, the `status == "0"` live check and rewriting the streams to the `hls.liveshow.bdstatic.com` HLS host.
+- Also used in: the Zhihu adapter in `crates/lubobao-core/src/platforms/zhihu.rs` is ported from `streamget/platforms/zhihu/live_stream.py` (`ZhihuLiveStream`): the mobile request headers, reading `js-initialData` from the theater page, the `drama.status == 1` live check and the `playInfo` FLV and HLS URLs.
 
 ```
 MIT License
