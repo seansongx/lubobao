@@ -62,8 +62,15 @@ pub enum DouyinLink {
     /// `https://v.douyin.com/iQFeBnt/` — app share link to a room or a profile;
     /// which one is only known after following the redirect.
     ShortLink { code: String },
-    /// `https://www.douyin.com/user/MS4wLjABAAAA...`
+    /// `https://www.douyin.com/user/MS4wLjABAAAA...`, also the share page
+    /// `https://www.iesdouyin.com/share/user/MS4wLjABAAAA...`.
     WebProfile { sec_uid: String },
+    /// `https://webcast.amemv.com/douyin/webcast/reflow/{room_id}?sec_user_id=…`,
+    /// where a room share link lands when opened in a browser.
+    AppRoom {
+        room_id: String,
+        sec_user_id: String,
+    },
 }
 
 impl DouyinLink {
@@ -74,6 +81,12 @@ impl DouyinLink {
             DouyinLink::DouyinId { id } => format!("https://live.douyin.com/{id}"),
             DouyinLink::ShortLink { code } => format!("https://v.douyin.com/{code}/"),
             DouyinLink::WebProfile { sec_uid } => format!("https://www.douyin.com/user/{sec_uid}"),
+            DouyinLink::AppRoom {
+                room_id,
+                sec_user_id,
+            } => format!(
+                "https://webcast.amemv.com/douyin/webcast/reflow/{room_id}?sec_user_id={sec_user_id}"
+            ),
         }
     }
 
@@ -81,9 +94,23 @@ impl DouyinLink {
     pub fn uses_app_flow(&self) -> bool {
         matches!(
             self,
-            DouyinLink::ShortLink { .. } | DouyinLink::WebProfile { .. }
+            DouyinLink::ShortLink { .. }
+                | DouyinLink::WebProfile { .. }
+                | DouyinLink::AppRoom { .. }
         )
     }
+}
+
+fn is_digits(text: &str) -> bool {
+    !text.is_empty() && text.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// 抖音号 and `sec_uid` characters.
+fn is_douyin_id(text: &str) -> bool {
+    !text.is_empty()
+        && text
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b'-'))
 }
 
 /// Recognize and normalize a Douyin link without any network access.
@@ -124,8 +151,10 @@ pub fn parse_link(input: &str) -> Result<DouyinLink, PlatformError> {
             };
             if id.chars().all(|c| c.is_ascii_digit()) {
                 Ok(DouyinLink::WebRoom { web_rid: id })
-            } else {
+            } else if is_douyin_id(&id) {
                 Ok(DouyinLink::DouyinId { id })
+            } else {
+                Err(invalid())
             }
         }
         "v.douyin.com" => {
@@ -133,9 +162,36 @@ pub fn parse_link(input: &str) -> Result<DouyinLink, PlatformError> {
             Ok(DouyinLink::ShortLink { code })
         }
         "www.douyin.com" | "douyin.com" => match segments.as_slice() {
-            ["user", sec_uid, ..] => Ok(DouyinLink::WebProfile {
+            ["user", sec_uid, ..] if is_douyin_id(sec_uid) => Ok(DouyinLink::WebProfile {
                 sec_uid: sec_uid.to_string(),
             }),
+            // Watching a room on the main site (an intentional extension over StreamCap).
+            ["root", "live", web_rid] if is_digits(web_rid) => Ok(DouyinLink::WebRoom {
+                web_rid: web_rid.to_string(),
+            }),
+            _ => Err(invalid()),
+        },
+        // Where share links land when opened in a browser; StreamCap only meets
+        // them as redirect targets.
+        "www.iesdouyin.com" | "iesdouyin.com" => match segments.as_slice() {
+            ["share", "user", sec_uid] if is_douyin_id(sec_uid) => Ok(DouyinLink::WebProfile {
+                sec_uid: sec_uid.to_string(),
+            }),
+            _ => Err(invalid()),
+        },
+        "webcast.amemv.com" => match segments.as_slice() {
+            [.., "reflow", room_id] if is_digits(room_id) => {
+                let sec_user_id = url
+                    .query_pairs()
+                    .find(|(key, _)| key == "sec_user_id")
+                    .map(|(_, value)| value.into_owned())
+                    .filter(|value| is_douyin_id(value))
+                    .ok_or_else(invalid)?;
+                Ok(DouyinLink::AppRoom {
+                    room_id: room_id.to_string(),
+                    sec_user_id,
+                })
+            }
             _ => Err(invalid()),
         },
         _ => Err(invalid()),
@@ -716,8 +772,9 @@ impl DouyinAdapter {
 
         let final_url = match link {
             // The profile URL already holds the sec_uid StreamGet would read
-            // from the (non-redirecting) response URL.
-            DouyinLink::WebProfile { .. } => link.normalized_url(),
+            // from the (non-redirecting) response URL, and a reflow URL is
+            // where a room share link redirects to.
+            DouyinLink::WebProfile { .. } | DouyinLink::AppRoom { .. } => link.normalized_url(),
             _ => Self::resolve_final_url(client, &link.normalized_url()).await?,
         };
 
@@ -942,6 +999,78 @@ mod tests {
             parse_link("https://live.douyin.com/745964462470?live_web_rid=1").unwrap(),
             DouyinLink::WebRoom {
                 web_rid: "745964462470".into()
+            }
+        );
+    }
+
+    #[test]
+    fn recognizes_main_site_rooms_and_share_landing_pages() {
+        let cases = [
+            (
+                "https://www.douyin.com/root/live/745964462470?from=x",
+                DouyinLink::WebRoom {
+                    web_rid: "745964462470".into(),
+                },
+                "https://live.douyin.com/745964462470",
+            ),
+            (
+                "https://www.iesdouyin.com/share/user/MS4wLjABAAAAfJdQ?sec_uid=MS4wLjABAAAAfJdQ&from_ssr=1",
+                DouyinLink::WebProfile {
+                    sec_uid: "MS4wLjABAAAAfJdQ".into(),
+                },
+                "https://www.douyin.com/user/MS4wLjABAAAAfJdQ",
+            ),
+            (
+                "https://webcast.amemv.com/douyin/webcast/reflow/7000000000000000003?u_code=x&sec_user_id=MS4wLjABAAAA7C6m-x_y&utm_source=copy",
+                DouyinLink::AppRoom {
+                    room_id: "7000000000000000003".into(),
+                    sec_user_id: "MS4wLjABAAAA7C6m-x_y".into(),
+                },
+                "https://webcast.amemv.com/douyin/webcast/reflow/7000000000000000003?sec_user_id=MS4wLjABAAAA7C6m-x_y",
+            ),
+        ];
+        for (input, expected, normalized) in cases.clone() {
+            let link = parse_link(input).unwrap();
+            assert_eq!(link, expected, "{input}");
+            assert_eq!(link.normalized_url(), normalized, "{input}");
+            assert!(DouyinAdapter::new().matches(input), "{input}");
+        }
+        // The normalized reflow URL is still what the app flow expects.
+        let app_room = parse_link(cases[2].0).unwrap();
+        assert!(app_room.uses_app_flow());
+        assert_eq!(
+            parse_reflow_redirect(&app_room.normalized_url()).unwrap(),
+            Some((
+                "7000000000000000003".to_string(),
+                "MS4wLjABAAAA7C6m-x_y".to_string()
+            ))
+        );
+        for bad in [
+            "https://www.douyin.com/root/live/abc",
+            "https://www.douyin.com/root/live/",
+            "https://webcast.amemv.com/douyin/webcast/reflow/1?u_code=x",
+            "https://webcast.amemv.com/douyin/webcast/reflow/abc?sec_user_id=x",
+            "https://www.iesdouyin.com/share/video/1",
+        ] {
+            assert_eq!(parse_link(bad).unwrap_err().kind(), "invalid_url", "{bad}");
+        }
+    }
+
+    #[test]
+    fn douyin_ids_only_take_id_characters() {
+        // Text after a link must not become part of the 抖音号.
+        for bad in [
+            "https://live.douyin.com/yall1102 复制此链接",
+            "https://live.douyin.com/yall%E7%9B%B4",
+            "https://live.douyin.com/a!b",
+            "https://www.douyin.com/user/MS4w%20x",
+        ] {
+            assert_eq!(parse_link(bad).unwrap_err().kind(), "invalid_url", "{bad}");
+        }
+        assert_eq!(
+            parse_link("https://live.douyin.com/a_b.c-d").unwrap(),
+            DouyinLink::DouyinId {
+                id: "a_b.c-d".into()
             }
         );
     }

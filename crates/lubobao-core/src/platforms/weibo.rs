@@ -106,9 +106,11 @@ pub fn parse_link(input: &str) -> Result<WeiboLink, PlatformError> {
         return Err(invalid());
     }
     let host = url.host_str().ok_or_else(invalid)?.to_ascii_lowercase();
-    if !matches!(host.as_str(), "weibo.com" | "www.weibo.com") {
-        return Err(invalid());
-    }
+    let mobile = match host.as_str() {
+        "weibo.com" | "www.weibo.com" => false,
+        "m.weibo.cn" => true,
+        _ => return Err(invalid()),
+    };
     let segments: Vec<String> = url
         .path_segments()
         .map(|segments| {
@@ -119,13 +121,20 @@ pub fn parse_link(input: &str) -> Result<WeiboLink, PlatformError> {
         })
         .unwrap_or_default();
     let segments: Vec<&str> = segments.iter().map(String::as_str).collect();
-    match segments.as_slice() {
-        ["l", "wblive", "p", "show", live_id] if is_live_id(live_id) => Ok(WeiboLink::Room {
-            live_id: live_id.to_string(),
-        }),
-        ["u", uid] if is_digits(uid) => Ok(WeiboLink::Profile {
-            uid: uid.to_string(),
-        }),
+    // Profiles also come as `weibo.com/{uid}` and, on the mobile site,
+    // `m.weibo.cn/u/{uid}` or `m.weibo.cn/profile/{uid}` (an intentional
+    // extension over StreamCap).
+    match (mobile, segments.as_slice()) {
+        (false, ["l", "wblive", "p", "show", live_id]) if is_live_id(live_id) => {
+            Ok(WeiboLink::Room {
+                live_id: live_id.to_string(),
+            })
+        }
+        (false, ["u", uid] | [uid]) | (true, ["u" | "profile", uid]) if is_digits(uid) => {
+            Ok(WeiboLink::Profile {
+                uid: uid.to_string(),
+            })
+        }
         _ => Err(invalid()),
     }
 }
@@ -554,6 +563,30 @@ mod tests {
     }
 
     #[test]
+    fn profile_links_without_u_and_on_the_mobile_site_are_recognized() {
+        let adapter = WeiboAdapter::new();
+        for input in [
+            "https://weibo.com/5509110125",
+            "https://www.weibo.com/5509110125?refer_flag=1001030103_",
+            "https://m.weibo.cn/u/5509110125",
+            "m.weibo.cn/profile/5509110125/",
+        ] {
+            assert_eq!(
+                parse_link(input).unwrap(),
+                WeiboLink::Profile {
+                    uid: "5509110125".into()
+                },
+                "{input}"
+            );
+            assert_eq!(
+                adapter.normalize_url(input).as_deref(),
+                Some("https://weibo.com/u/5509110125"),
+                "{input}"
+            );
+        }
+    }
+
+    #[test]
     fn rejects_other_pages_and_sites() {
         let adapter = WeiboAdapter::new();
         for input in [
@@ -563,7 +596,9 @@ mod tests {
             "https://weibo.com/l/wblive/p/show/1022",
             "https://weibo.com/u/abc",
             "https://weibo.com/1669879400/Abcdef",
-            "https://m.weibo.cn/u/5509110125",
+            "https://weibo.com/abc",
+            "https://m.weibo.cn/status/5509110125",
+            "https://m.weibo.cn/l/wblive/p/show/1022:5",
             "https://weibo.com.evil.example/u/1",
             "ftp://weibo.com/u/1",
             "https://www.yy.com/22490906",

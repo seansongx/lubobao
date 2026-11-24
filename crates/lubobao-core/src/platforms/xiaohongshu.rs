@@ -132,7 +132,11 @@ pub fn parse_link(input: &str) -> Result<XiaohongshuLink, PlatformError> {
     }
     let host = url.host_str().ok_or_else(invalid)?.to_ascii_lowercase();
     match host.as_str() {
-        "www.xiaohongshu.com" | "xiaohongshu.com" => parse_site_path(&url).ok_or_else(invalid),
+        // `rednote.com` is where overseas visitors are redirected; StreamCap
+        // only meets it as a redirect target.
+        "www.xiaohongshu.com" | "xiaohongshu.com" | "www.rednote.com" | "rednote.com" => {
+            parse_site_path(&url).ok_or_else(invalid)
+        }
         "xhslink.com" | "www.xhslink.com" => {
             let path = url.path().trim_end_matches('/');
             if path.is_empty() {
@@ -532,6 +536,22 @@ mod tests {
     }
 
     #[test]
+    fn rednote_room_links_are_recognized_directly() {
+        let adapter = XiaohongshuAdapter::new();
+        let input = "https://www.rednote.com/livestream/570000000000000001?host_id=5c1234567890abcdef012345";
+        assert_eq!(
+            parse_link(input).unwrap(),
+            parse_link("https://www.xiaohongshu.com/livestream/570000000000000001?host_id=5c1234567890abcdef012345")
+                .unwrap()
+        );
+        assert!(adapter.matches(input));
+        assert_eq!(
+            adapter.normalize_url(input),
+            adapter.normalize_url("https://www.xiaohongshu.com/livestream/570000000000000001")
+        );
+    }
+
+    #[test]
     fn rejects_other_pages_and_sites() {
         let adapter = XiaohongshuAdapter::new();
         for input in [
@@ -541,7 +561,8 @@ mod tests {
             "https://www.xiaohongshu.com/explore/6789abcdef0123456789abcd",
             "https://xhslink.com/",
             "https://www.xiaohongshu.com.evil.example/livestream/1",
-            "https://www.rednote.com/livestream/1",
+            "https://www.rednote.com/explore/1",
+            "https://www.rednote.com.evil.example/livestream/1",
             "ftp://www.xiaohongshu.com/livestream/1",
             "https://www.douyu.com/3637778",
             "",

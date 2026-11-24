@@ -94,6 +94,22 @@ async fn check_flv_header(info: &LiveInfo) -> Result<(), String> {
     }
 }
 
+/// A `rednote.com` room link is read like the `xiaohongshu.com` one.
+#[tokio::test]
+#[ignore = "requires network access to Xiaohongshu"]
+async fn rednote_room_link_behaves_like_xiaohongshu() {
+    let adapter = XiaohongshuAdapter::new();
+    let options = FetchOptions::default();
+    let link = "https://www.rednote.com/livestream/570000000000000001";
+    let started = std::time::Instant::now();
+    match adapter.fetch(link, &options).await {
+        Err(error) if error.kind() == "invalid_url" => {
+            println!("OK   {link}: {error} {} ms", started.elapsed().as_millis())
+        }
+        other => panic!("{link}: {other:?}"),
+    }
+}
+
 #[tokio::test]
 #[ignore = "requires network access to Xiaohongshu"]
 async fn links_resolve_against_live_xiaohongshu() {

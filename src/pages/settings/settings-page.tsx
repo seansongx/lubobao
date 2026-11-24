@@ -51,7 +51,7 @@ class SettingsErrorBoundary extends Component<BoundaryProps, { error: Error | nu
     if (!this.state.error) return this.props.children;
     return (
       <div role="alert" className="flex max-w-(--settings-width) items-center gap-3 rounded-lg border bg-card px-4 py-3 select-text">
-        <span className="flex-1 text-destructive">这一组设置显示失败：{this.state.error.message}</span>
+        <span className="min-w-0 flex-1 wrap-anywhere text-destructive">这一组设置显示失败：{this.state.error.message}</span>
         {/* 重新读取成功后父组件换 key，错误边界随之重置。 */}
         <Button type="button" variant="outline" onClick={this.props.onRetry}>
           重新读取

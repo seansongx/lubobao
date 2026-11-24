@@ -79,7 +79,8 @@ pub fn parse_link(input: &str) -> Result<String, PlatformError> {
         .map(|segments| segments.filter(|segment| !segment.is_empty()).collect())
         .unwrap_or_default();
     match segments.as_slice() {
-        ["live", uid] if is_user_id(uid) => Ok(uid.to_string()),
+        // `/live/0179922` and `/live/179922` are the same user.
+        ["live", uid] if is_user_id(uid) => Ok(uid.trim_start_matches('0').to_string()),
         _ => Err(invalid()),
     }
 }
@@ -489,6 +490,7 @@ mod tests {
             ("https://live.acfun.cn/live/179922", "179922"),
             ("  live.acfun.cn/live/179922/ ", "179922"),
             ("http://LIVE.ACFUN.CN/live/2889712?from=share#x", "2889712"),
+            ("https://live.acfun.cn/live/0179922", "179922"),
         ] {
             assert_eq!(parse_link(input).unwrap(), uid, "{input}");
             assert!(adapter.matches(input), "{input}");
@@ -515,6 +517,7 @@ mod tests {
             "https://live.acfun.cn/live/1/2",
             "https://live.acfun.cn/game/179922",
             "https://live.acfun.cn/live/99999999999999999999",
+            "https://live.acfun.cn/live/000",
             "https://www.acfun.cn/u/179922",
             "https://live.acfun.cn.evil.example/live/179922",
             "ftp://live.acfun.cn/live/179922",

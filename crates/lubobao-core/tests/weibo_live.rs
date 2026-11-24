@@ -114,6 +114,26 @@ async fn readme_link_resolves_against_live_weibo() {
     assert!(failures.is_empty(), "failures: {failures:#?}");
 }
 
+/// Profile forms without `/u/` and on the mobile site behave like `PROFILE_LINK`.
+#[tokio::test]
+#[ignore = "requires network access to Weibo"]
+async fn other_profile_forms_behave_like_u_links() {
+    let adapter = WeiboAdapter::new();
+    let options = FetchOptions::default();
+    let mut failures = Vec::new();
+    for link in [
+        "https://weibo.com/1669879400",
+        "https://m.weibo.cn/u/1669879400",
+        "https://m.weibo.cn/profile/1669879400",
+    ] {
+        match adapter.fetch(link, &options).await {
+            Err(error) if error.kind() == "auth_required" => println!("OK   {link}: {error}"),
+            other => failures.push(format!("{link}: {other:?}")),
+        }
+    }
+    assert!(failures.is_empty(), "failures: {failures:#?}");
+}
+
 fn ffmpeg_path() -> PathBuf {
     for var in ["LUBOBAO_TEST_FFMPEG", "LUBOBAO_FFMPEG"] {
         if let Ok(path) = std::env::var(var) {

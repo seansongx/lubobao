@@ -103,6 +103,33 @@ async fn readme_link_resolves_against_live_kuaishou() {
     assert!(failures.is_empty(), "failures: {failures:#?}");
 }
 
+/// Profile pages take the same id as `/u/`; a public share short link
+/// (`v.kuaishou.com/mX4VwG`, which redirects to `c.kuaishou.com/fw/user/mi2018520`)
+/// resolves to that user.
+#[tokio::test]
+#[ignore = "requires network access to Kuaishou"]
+async fn profile_and_share_links_resolve_against_live_kuaishou() {
+    let adapter = KuaishouAdapter::new();
+    let options = FetchOptions::default();
+    let mut failures = Vec::new();
+    for link in [
+        "https://live.kuaishou.com/profile/yall1102",
+        "https://www.kuaishou.com/profile/yall1102",
+    ] {
+        match report(&adapter, link, &options).await {
+            Some(info) if info.anchor_id.as_deref() == Some(README_ANCHOR_ID) => {}
+            other => failures.push(format!("{link}: {:?}", other.map(|info| info.anchor_id))),
+        }
+    }
+    let share = "https://v.kuaishou.com/mX4VwG";
+    match report(&adapter, share, &options).await {
+        Some(info) if !info.anchor_name.is_empty() => {}
+        Some(info) => failures.push(format!("{share}: no anchor name ({})", info.room_id)),
+        None => failures.push(format!("{share}: fetch failed")),
+    }
+    assert!(failures.is_empty(), "failures: {failures:#?}");
+}
+
 fn ffmpeg_path() -> PathBuf {
     for var in ["LUBOBAO_TEST_FFMPEG", "LUBOBAO_FFMPEG"] {
         if let Ok(path) = std::env::var(var) {

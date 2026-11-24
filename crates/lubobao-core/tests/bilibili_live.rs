@@ -112,6 +112,19 @@ async fn readme_link_resolves_against_live_bilibili() {
     assert!(failures.is_empty(), "failures: {failures:#?}");
 }
 
+/// A `b23.tv` share link made with Bilibili's share API for room 21452505.
+#[tokio::test]
+#[ignore = "requires network access to Bilibili"]
+async fn share_short_link_resolves_against_live_bilibili() {
+    let adapter = BilibiliAdapter::new();
+    let options = FetchOptions::default();
+    let link = "https://b23.tv/oolIxoB";
+    match report(&adapter, link, &options).await {
+        Some(info) if info.room_id == "21452505" && !info.anchor_name.is_empty() => {}
+        other => panic!("{link}: {:?}", other.map(|info| info.room_id)),
+    }
+}
+
 fn ffmpeg_path() -> PathBuf {
     for var in ["LUBOBAO_TEST_FFMPEG", "LUBOBAO_FFMPEG"] {
         if let Ok(path) = std::env::var(var) {

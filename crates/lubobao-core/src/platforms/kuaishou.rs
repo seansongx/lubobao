@@ -37,6 +37,7 @@ const PAGE_REFERER: &str = "https://live.kuaishou.com/profile/cym030000";
 const STREAM_REFERER: &str = "https://live.kuaishou.com/";
 
 const ROOM_PAGE: &str = "https://live.kuaishou.com/u/";
+const SHARE_PAGE: &str = "https://v.kuaishou.com/";
 const USER_INFO_API: &str = "https://live.kuaishou.com/live_api/baseuser/userinfo/byid";
 
 /// Start and end of the state script, as in StreamGet's regex
@@ -72,45 +73,97 @@ impl KuaishouLink {
     }
 }
 
-/// Recognize and normalize a Kuaishou link without any network access.
-///
-/// StreamCap registers `https://live.kuaishou.com/` and StreamGet reads the
-/// principal id after `https://live.kuaishou.com/u/`, so only room links of
-/// that form are accepted. A trailing live-stream id
-/// (`/u/{id}/{liveStreamId}`) and query strings are dropped.
-pub fn parse_link(input: &str) -> Result<KuaishouLink, PlatformError> {
+fn is_principal_id(id: &str) -> bool {
+    !id.is_empty()
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
+}
+
+fn parse_url(input: &str) -> Option<Url> {
     let trimmed = input.trim();
     let with_scheme = if trimmed.contains("://") {
         trimmed.to_string()
     } else {
         format!("https://{trimmed}")
     };
-    let invalid = || PlatformError::InvalidUrl(format!("不是可识别的快手直播链接: {trimmed}"));
-    let url = Url::parse(&with_scheme).map_err(|_| invalid())?;
-    if !matches!(url.scheme(), "http" | "https") {
-        return Err(invalid());
-    }
-    let host = url.host_str().ok_or_else(invalid)?.to_ascii_lowercase();
-    if host != "live.kuaishou.com" {
-        return Err(invalid());
-    }
-    let segments: Vec<&str> = url
-        .path_segments()
+    let url = Url::parse(&with_scheme).ok()?;
+    matches!(url.scheme(), "http" | "https").then_some(url)
+}
+
+fn path_segments(url: &Url) -> Vec<&str> {
+    url.path_segments()
         .map(|segments| segments.filter(|segment| !segment.is_empty()).collect())
-        .unwrap_or_default();
-    match segments.as_slice() {
-        ["u", id, ..]
-            if id
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.')) =>
-        {
-            Ok(KuaishouLink {
-                principal_id: id.to_string(),
-            })
-        }
-        _ => Err(invalid()),
+        .unwrap_or_default()
+}
+
+/// Room link in a parsed URL: `live.kuaishou.com/u/{id}` or `/profile/{id}`,
+/// or the main site's `www.kuaishou.com/profile/{id}`.
+fn room_in_url(url: &Url) -> Option<KuaishouLink> {
+    let host = url.host_str()?.to_ascii_lowercase();
+    let segments = path_segments(url);
+    let id = match (host.as_str(), segments.as_slice()) {
+        ("live.kuaishou.com", ["u" | "profile", id, ..]) => *id,
+        ("www.kuaishou.com" | "kuaishou.com", ["profile", id]) => *id,
+        _ => return None,
+    };
+    is_principal_id(id).then(|| KuaishouLink {
+        principal_id: id.to_string(),
+    })
+}
+
+/// Recognize and normalize a Kuaishou link without any network access.
+///
+/// StreamCap registers `https://live.kuaishou.com/` and StreamGet reads the
+/// principal id after `https://live.kuaishou.com/u/`. The profile pages
+/// `live.kuaishou.com/profile/{id}` and `www.kuaishou.com/profile/{id}` take
+/// the same id (an intentional extension). A trailing live-stream id
+/// (`/u/{id}/{liveStreamId}`) and query strings are dropped.
+pub fn parse_link(input: &str) -> Result<KuaishouLink, PlatformError> {
+    let trimmed = input.trim();
+    parse_url(trimmed)
+        .as_ref()
+        .and_then(room_in_url)
+        .ok_or_else(|| PlatformError::InvalidUrl(format!("不是可识别的快手直播链接: {trimmed}")))
+}
+
+/// Code of an app share link `v.kuaishou.com/{code}` (an intentional
+/// extension over StreamCap; the room is only known after the redirect).
+pub fn parse_share_link(input: &str) -> Option<String> {
+    let url = parse_url(input)?;
+    if !url.host_str()?.eq_ignore_ascii_case("v.kuaishou.com") {
+        return None;
+    }
+    match path_segments(&url).as_slice() {
+        [code] if code.chars().all(|c| c.is_ascii_alphanumeric()) => Some(code.to_string()),
+        _ => None,
     }
 }
+
+/// Room behind a share link, from a redirect target: a room link or the
+/// mobile share pages `…/fw/live/{id}` and `…/fw/user/{id}`.
+pub fn room_from_share_target(target: &str) -> Option<KuaishouLink> {
+    let url = Url::parse(target).ok()?;
+    if let Some(room) = room_in_url(&url) {
+        return Some(room);
+    }
+    let host = url.host_str()?.to_ascii_lowercase();
+    let site = ["kuaishou.com", "chenzhongtech.com", "gifshow.com"]
+        .iter()
+        .any(|domain| host == *domain || host.ends_with(&format!(".{domain}")));
+    if !site {
+        return None;
+    }
+    match path_segments(&url).as_slice() {
+        ["fw", "live" | "user", id] if is_principal_id(id) => Some(KuaishouLink {
+            principal_id: id.to_string(),
+        }),
+        _ => None,
+    }
+}
+
+/// Mobile user agent for following share links.
+const SHARE_USER_AGENT: &str = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1";
 
 /// Room state parsed from the page or the user-info API, before quality selection.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -697,12 +750,36 @@ impl KuaishouAdapter {
             .is_ok()
     }
 
+    /// Room behind a `v.kuaishou.com` share link.
+    async fn resolve_share_link(
+        code: &str,
+        options: &FetchOptions,
+    ) -> Result<KuaishouLink, PlatformError> {
+        let mut headers = HeaderMap::new();
+        headers.insert(USER_AGENT, HeaderValue::from_static(SHARE_USER_AGENT));
+        let target = super::follow_short_link(
+            options.proxy.as_deref(),
+            &format!("{SHARE_PAGE}{code}"),
+            headers,
+            |url| room_from_share_target(url.as_str()).is_some(),
+        )
+        .await?;
+        room_from_share_target(&target).ok_or_else(|| {
+            PlatformError::InvalidUrl(format!(
+                "快手分享链接没有指向直播间或主播主页，请检查链接是否失效: {target}"
+            ))
+        })
+    }
+
     async fn fetch_inner(
         &self,
         url: &str,
         options: &FetchOptions,
     ) -> Result<LiveInfo, PlatformError> {
-        let link = parse_link(url)?;
+        let link = match parse_share_link(url) {
+            Some(code) => Self::resolve_share_link(&code, options).await?,
+            None => parse_link(url)?,
+        };
         let client = self.clients.get(options.proxy.as_deref())?;
 
         if let Some(cookie) = user_cookie(options)
@@ -734,10 +811,13 @@ impl PlatformAdapter for KuaishouAdapter {
     }
 
     fn matches(&self, url: &str) -> bool {
-        parse_link(url).is_ok()
+        parse_link(url).is_ok() || parse_share_link(url).is_some()
     }
 
     fn normalize_url(&self, url: &str) -> Option<String> {
+        if let Some(code) = parse_share_link(url) {
+            return Some(format!("{SHARE_PAGE}{code}"));
+        }
         parse_link(url).ok().map(|link| link.normalized_url())
     }
 
@@ -795,6 +875,11 @@ mod tests {
                 "beimu0315",
             ),
             ("https://LIVE.kuaishou.com/u/a_b-c.d#top", "a_b-c.d"),
+            ("https://live.kuaishou.com/profile/yall1102", "yall1102"),
+            (
+                "https://www.kuaishou.com/profile/3xxy7fxvxdex7ua?source=x",
+                "3xxy7fxvxdex7ua",
+            ),
         ];
         let adapter = KuaishouAdapter::new();
         for (input, id) in cases {
@@ -810,14 +895,51 @@ mod tests {
     }
 
     #[test]
+    fn share_links_are_recognized_offline_and_resolved_from_the_redirect() {
+        let adapter = KuaishouAdapter::new();
+        assert_eq!(
+            parse_share_link("https://v.kuaishou.com/mX4VwG").as_deref(),
+            Some("mX4VwG")
+        );
+        assert!(adapter.matches("v.kuaishou.com/mX4VwG/"));
+        assert_eq!(
+            adapter
+                .normalize_url("http://v.kuaishou.com/mX4VwG?x=1")
+                .as_deref(),
+            Some("https://v.kuaishou.com/mX4VwG")
+        );
+        let cases = [
+            (
+                "https://c.kuaishou.com/fw/user/mi2018520?fid=1&cc=share_copylink",
+                Some("mi2018520"),
+            ),
+            (
+                "https://v.m.chenzhongtech.com/fw/live/3xxy7fxvxdex7ua?cc=share_copylink",
+                Some("3xxy7fxvxdex7ua"),
+            ),
+            ("https://live.kuaishou.com/u/yall1102", Some("yall1102")),
+            ("https://c.kuaishou.com/fw/photo/3xabc", None),
+            ("https://www.example.com/fw/live/yall1102", None),
+        ];
+        for (target, id) in cases {
+            assert_eq!(
+                room_from_share_target(target).map(|link| link.principal_id),
+                id.map(str::to_string),
+                "{target}"
+            );
+        }
+    }
+
+    #[test]
     fn rejects_other_sites_and_non_room_links() {
         let adapter = KuaishouAdapter::new();
         for input in [
             "https://live.kuaishou.com/",
             "https://live.kuaishou.com/u/",
-            "https://live.kuaishou.com/profile/yall1102",
             "https://www.kuaishou.com/u/yall1102",
-            "https://v.kuaishou.com/abc",
+            "https://www.kuaishou.com/profile/",
+            "https://v.kuaishou.com/",
+            "https://v.kuaishou.com/a/b",
             "https://live.kuaishou.com/u/bad%20id",
             "ftp://live.kuaishou.com/u/yall1102",
             "https://live.douyin.com/yall1102",

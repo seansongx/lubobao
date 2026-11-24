@@ -47,6 +47,7 @@ const API_REFERER: &str = "https://live.bilibili.com/26066074";
 const STREAM_REFERER: &str = "https://live.bilibili.com/";
 
 const ROOM_PAGE: &str = "https://live.bilibili.com/";
+const SHARE_PAGE: &str = "https://b23.tv/";
 const ROOM_INIT_API: &str = "https://api.live.bilibili.com/room/v1/Room/room_init";
 const H5_INFO_API: &str = "https://api.live.bilibili.com/xlive/web-room/v1/index/getH5InfoByRoom";
 const MASTER_INFO_API: &str = "https://api.live.bilibili.com/live_user/v1/Master/info";
@@ -128,6 +129,34 @@ pub fn parse_link(input: &str) -> Result<BilibiliLink, PlatformError> {
     Ok(BilibiliLink {
         room_id: id.to_string(),
     })
+}
+
+/// Code of a share short link `b23.tv/{code}` (an intentional extension over
+/// StreamCap; the room is only known after the redirect).
+pub fn parse_share_link(input: &str) -> Option<String> {
+    let trimmed = input.trim();
+    let with_scheme = if trimmed.contains("://") {
+        trimmed.to_string()
+    } else {
+        format!("https://{trimmed}")
+    };
+    let url = Url::parse(&with_scheme).ok()?;
+    if !matches!(url.scheme(), "http" | "https")
+        || !matches!(
+            url.host_str()?.to_ascii_lowercase().as_str(),
+            "b23.tv" | "www.b23.tv"
+        )
+    {
+        return None;
+    }
+    let segments: Vec<&str> = url
+        .path_segments()
+        .map(|segments| segments.filter(|segment| !segment.is_empty()).collect())
+        .unwrap_or_default();
+    match segments.as_slice() {
+        [code] if code.chars().all(|c| c.is_ascii_alphanumeric()) => Some(code.to_string()),
+        _ => None,
+    }
 }
 
 /// Parse a JSON API body, classifying non-JSON answers.
@@ -587,12 +616,36 @@ impl BilibiliAdapter {
         url
     }
 
+    /// Room behind a `b23.tv` share link.
+    async fn resolve_share_link(
+        code: &str,
+        options: &FetchOptions,
+    ) -> Result<BilibiliLink, PlatformError> {
+        let mut headers = HeaderMap::new();
+        headers.insert(USER_AGENT, HeaderValue::from_static(PC_USER_AGENT));
+        let target = super::follow_short_link(
+            options.proxy.as_deref(),
+            &format!("{SHARE_PAGE}{code}"),
+            headers,
+            |url| parse_link(url.as_str()).is_ok(),
+        )
+        .await?;
+        parse_link(&target).map_err(|_| {
+            PlatformError::InvalidUrl(format!(
+                "B站分享链接没有指向直播间，请检查链接是否失效: {target}"
+            ))
+        })
+    }
+
     async fn fetch_inner(
         &self,
         url: &str,
         options: &FetchOptions,
     ) -> Result<LiveInfo, PlatformError> {
-        let link = parse_link(url)?;
+        let link = match parse_share_link(url) {
+            Some(code) => Self::resolve_share_link(&code, options).await?,
+            None => parse_link(url)?,
+        };
         let client = self.clients.get(options.proxy.as_deref())?;
         let headers = api_headers(user_cookie(options))?;
 
@@ -684,10 +737,13 @@ impl PlatformAdapter for BilibiliAdapter {
     }
 
     fn matches(&self, url: &str) -> bool {
-        parse_link(url).is_ok()
+        parse_link(url).is_ok() || parse_share_link(url).is_some()
     }
 
     fn normalize_url(&self, url: &str) -> Option<String> {
+        if let Some(code) = parse_share_link(url) {
+            return Some(format!("{SHARE_PAGE}{code}"));
+        }
         parse_link(url).ok().map(|link| link.normalized_url())
     }
 
@@ -757,6 +813,32 @@ mod tests {
     }
 
     #[test]
+    fn share_links_are_recognized_offline() {
+        let adapter = BilibiliAdapter::new();
+        for input in [
+            "https://b23.tv/oolIxoB",
+            "b23.tv/oolIxoB/",
+            "http://B23.tv/oolIxoB?x=1",
+        ] {
+            assert_eq!(
+                parse_share_link(input).as_deref(),
+                Some("oolIxoB"),
+                "{input}"
+            );
+            assert!(adapter.matches(input), "{input}");
+            assert_eq!(
+                adapter.normalize_url(input).as_deref(),
+                Some("https://b23.tv/oolIxoB"),
+                "{input}"
+            );
+        }
+        // Where the share link above redirects; only room links are taken.
+        let target = "https://live.bilibili.com/21452505?plat_id=124&share_from=h5&share_source=COPY&unique_k=oolIxoB";
+        assert_eq!(parse_link(target).unwrap().room_id, "21452505");
+        assert!(parse_link("https://www.bilibili.com/video/BV1xx411c7mD").is_err());
+    }
+
+    #[test]
     fn rejects_other_sites_and_non_room_links() {
         let adapter = BilibiliAdapter::new();
         for input in [
@@ -767,7 +849,8 @@ mod tests {
             "https://live.bilibili.com/320/extra",
             "https://www.bilibili.com/320",
             "https://space.bilibili.com/13763303",
-            "https://b23.tv/abcd",
+            "https://b23.tv/",
+            "https://b23.tv/a/b",
             "ftp://live.bilibili.com/320",
             "https://live.kuaishou.com/u/320",
             "",

@@ -9,10 +9,12 @@ use reqwest::Url;
 use super::model::{Task, TaskConfig, TaskId};
 use crate::platforms::adapter_for;
 
-/// 归一化链接：优先用平台适配器的规则，其次做通用处理（补 https、小写主机名、
+use super::input_link;
+
+/// 归一化链接（分享文字先取出其中的链接）：优先用平台适配器的规则，其次做通用处理（补 https、小写主机名、
 /// 去掉片段和末尾斜杠、查询参数排序）。无法解析时返回去掉首尾空白的原文。
 pub fn normalize_url(url: &str) -> String {
-    let trimmed = url.trim();
+    let trimmed = input_link(url);
     if let Some(normalized) =
         adapter_for(trimmed).and_then(|adapter| adapter.normalize_url(trimmed))
     {
@@ -120,6 +122,42 @@ mod tests {
             normalize_url("v.douyin.com/CeiU5cbX"),
             "https://v.douyin.com/CeiU5cbX/"
         );
+    }
+
+    #[test]
+    fn normalizes_share_texts_to_the_link_inside() {
+        assert_eq!(
+            normalize_url("【主播的直播】 https://v.douyin.com/CeiU5cbX 复制此链接"),
+            "https://v.douyin.com/CeiU5cbX/"
+        );
+    }
+
+    #[test]
+    fn equivalent_yy_and_acfun_links_normalize_the_same() {
+        assert_eq!(
+            normalize_url("https://www.yy.com/22490906/22490906"),
+            normalize_url("yy.com/22490906")
+        );
+        assert_ne!(
+            normalize_url("https://www.yy.com/22490906/1"),
+            normalize_url("https://www.yy.com/22490906")
+        );
+        assert_eq!(
+            normalize_url("https://live.acfun.cn/live/0179922"),
+            normalize_url("https://live.acfun.cn/live/179922")
+        );
+        let tasks = vec![task(
+            1,
+            config("https://www.yy.com/22490906/22490906", None, None),
+        )];
+        let candidate = config("https://www.yy.com/22490906", None, None);
+        assert_eq!(find_duplicates(&tasks, &candidate, None), vec![1]);
+        let tasks = vec![task(
+            2,
+            config("https://live.acfun.cn/live/179922", None, None),
+        )];
+        let candidate = config("live.acfun.cn/live/0179922", None, None);
+        assert_eq!(find_duplicates(&tasks, &candidate, None), vec![2]);
     }
 
     #[test]

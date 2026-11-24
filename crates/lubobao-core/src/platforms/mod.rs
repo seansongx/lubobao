@@ -488,6 +488,147 @@ pub fn adapters() -> Vec<Box<dyn PlatformAdapter>> {
     list
 }
 
+/// Characters allowed in a URL (RFC 3986 unreserved, reserved and `%`).
+fn is_url_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || "-._~:/?#[]@!$&'()*+,;=%".contains(c)
+}
+
+/// Drop punctuation that ends a sentence rather than the link. A closing
+/// bracket stays when the link opened it.
+fn trim_link_end(mut link: &str) -> &str {
+    loop {
+        let Some(last) = link.chars().last() else {
+            return link;
+        };
+        let strip = match last {
+            '.' | ',' | ';' | ':' | '!' | '?' | '\'' | '"' => true,
+            ')' => link.matches('(').count() < link.matches(')').count(),
+            ']' => link.matches('[').count() < link.matches(']').count(),
+            _ => false,
+        };
+        if !strip {
+            return link;
+        }
+        link = &link[..link.len() - 1];
+    }
+}
+
+/// First `http(s)://…` link in the text (also `e2e+http://` test links).
+fn find_scheme_link(text: &str) -> Option<&str> {
+    for (index, _) in text.match_indices("://") {
+        let before = &text[..index];
+        let scheme_start = before
+            .char_indices()
+            .rev()
+            .take_while(|(_, c)| c.is_ascii_alphanumeric() || matches!(c, '+' | '.' | '-'))
+            .last()
+            .map_or(index, |(start, _)| start);
+        let scheme = before[scheme_start..].to_ascii_lowercase();
+        let start =
+            if scheme.contains('+') && (scheme.ends_with("+http") || scheme.ends_with("+https")) {
+                scheme_start
+            } else if scheme.ends_with("https") {
+                index - "https".len()
+            } else if scheme.ends_with("http") {
+                index - "http".len()
+            } else {
+                continue;
+            };
+        let rest = &text[index + 3..];
+        let end = rest.find(|c: char| !is_url_char(c)).unwrap_or(rest.len());
+        let link = trim_link_end(&text[start..index + 3 + end]);
+        if link.len() > index + 3 - start {
+            return Some(link);
+        }
+    }
+    None
+}
+
+/// Whether a token without a scheme looks like `host.tld/…`.
+fn looks_like_host_path(token: &str) -> bool {
+    let host = token.split(['/', '?', '#']).next().unwrap_or_default();
+    !token.is_empty()
+        && token.chars().all(is_url_char)
+        && host.contains('.')
+        && !host.starts_with('.')
+        && !host.ends_with('.')
+        && host.chars().any(|c| c.is_ascii_alphabetic())
+}
+
+/// The link in what the user pasted. App share texts wrap the link in other
+/// words (`【xxx的直播】 https://v.douyin.com/abc/ 复制此链接…`), so take the
+/// first `http(s)://` link, ending at whitespace, full-width punctuation or
+/// any character a URL cannot hold, without trailing sentence punctuation.
+/// Without a scheme, the first token that looks like `host.tld/path` (such as
+/// `live.douyin.com/123`). `None` when the text holds no link at all.
+///
+/// StreamCap only strips the input; extracting the link is an intentional
+/// extension.
+pub fn extract_link(input: &str) -> Option<&str> {
+    let text = input.trim();
+    if let Some(link) = find_scheme_link(text) {
+        return Some(link);
+    }
+    text.split(|c: char| c.is_whitespace() || !c.is_ascii())
+        .map(trim_link_end)
+        .find(|token| looks_like_host_path(token))
+}
+
+/// Follow a share short link hop by hop and return the first redirect target
+/// `accept` takes, without requesting it. When the redirects end elsewhere,
+/// returns the URL they ended at so the caller can report it.
+pub(crate) async fn follow_short_link(
+    proxy: Option<&str>,
+    url: &str,
+    headers: reqwest::header::HeaderMap,
+    accept: impl Fn(&reqwest::Url) -> bool,
+) -> Result<String, PlatformError> {
+    let mut builder = reqwest::Client::builder()
+        .connect_timeout(CONNECT_TIMEOUT)
+        .read_timeout(READ_TIMEOUT)
+        .timeout(REQUEST_TIMEOUT)
+        .redirect(reqwest::redirect::Policy::none());
+    if let Some(proxy) = normalize_proxy(proxy.unwrap_or_default())? {
+        let proxy = reqwest::Proxy::all(&proxy)
+            .map_err(|error| PlatformError::Config(format!("代理地址无效 {proxy}: {error}")))?;
+        builder = builder.proxy(proxy);
+    }
+    let client = builder
+        .build()
+        .map_err(|error| PlatformError::Network(format!("failed to build HTTP client: {error}")))?;
+    let mut current = reqwest::Url::parse(url)
+        .map_err(|_| PlatformError::InvalidUrl(format!("分享链接无效: {url}")))?;
+    for _ in 0..10 {
+        let response = client
+            .get(current.clone())
+            .headers(headers.clone())
+            .send()
+            .await?;
+        let status = response.status();
+        if !status.is_redirection() {
+            if status.is_success() {
+                return Ok(current.to_string());
+            }
+            return Err(classify_http_status(status.as_u16(), current.as_str()));
+        }
+        let location = response
+            .headers()
+            .get(reqwest::header::LOCATION)
+            .and_then(|value| value.to_str().ok())
+            .ok_or_else(|| PlatformError::Parse(format!("分享链接跳转缺少目标地址: {url}")))?;
+        let next = current
+            .join(location)
+            .map_err(|_| PlatformError::Parse(format!("分享链接跳转地址无效: {location}")))?;
+        if accept(&next) {
+            return Ok(next.to_string());
+        }
+        current = next;
+    }
+    Err(PlatformError::Network(format!(
+        "分享链接跳转次数过多: {url}"
+    )))
+}
+
 /// First adapter that accepts the link.
 pub fn adapter_for(url: &str) -> Option<Box<dyn PlatformAdapter>> {
     adapters().into_iter().find(|adapter| adapter.matches(url))
@@ -905,5 +1046,144 @@ mod tests {
 
         assert_eq!(error.kind(), "network", "{error:?}");
         assert!(error.message().contains("连接中断"), "{error:?}");
+    }
+
+    #[test]
+    fn extracts_the_link_from_share_texts() {
+        let cases = [
+            (
+                "【小明的直播】 https://v.douyin.com/iQFeBnt/ 复制此链接，打开Dou音搜索，直接观看直播！",
+                "https://v.douyin.com/iQFeBnt/",
+            ),
+            (
+                "8- #在抖音，记录美好生活#【小明】正在直播，来和我一起支持Ta吧。复制下方链接，打开【抖音】，直接观看直播！ https://v.douyin.com/CeiU5cbX/ 4@0.com :8pm",
+                "https://v.douyin.com/CeiU5cbX/",
+            ),
+            (
+                "https://live.douyin.com/745964462470 看直播",
+                "https://live.douyin.com/745964462470",
+            ),
+            (
+                "快来看https://b23.tv/oolIxoB，好看！",
+                "https://b23.tv/oolIxoB",
+            ),
+            ("(https://www.huya.com/lpl).", "https://www.huya.com/lpl"),
+            ("https://example.com/a_(b) end", "https://example.com/a_(b)"),
+            ("HTTPS://LIVE.douyin.com/1。", "HTTPS://LIVE.douyin.com/1"),
+            (
+                "e2e+http://127.0.0.1:9/stream.flv",
+                "e2e+http://127.0.0.1:9/stream.flv",
+            ),
+            (
+                "  live.douyin.com/745964462470  ",
+                "live.douyin.com/745964462470",
+            ),
+            (
+                "看这个 live.bilibili.com/21452505。",
+                "live.bilibili.com/21452505",
+            ),
+            (
+                "https://live.douyin.com/?a=1&live_web_rid=2",
+                "https://live.douyin.com/?a=1&live_web_rid=2",
+            ),
+        ];
+        for (input, expected) in cases {
+            assert_eq!(extract_link(input), Some(expected), "{input}");
+        }
+        for input in [
+            "",
+            "   ",
+            "直播间",
+            "abc",
+            "https:// 空",
+            "1.5 倍速",
+            "ftp://x.com/1",
+        ] {
+            assert_eq!(extract_link(input), None, "{input}");
+        }
+    }
+
+    /// Local server that answers each connection with the next response head.
+    async fn sequential_server(heads: Vec<String>) -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            for head in heads {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut request = Vec::new();
+                let mut chunk = [0u8; 1024];
+                while !request.windows(4).any(|w| w == b"\r\n\r\n") {
+                    let read = stream.read(&mut chunk).await.unwrap();
+                    if read == 0 {
+                        break;
+                    }
+                    request.extend_from_slice(&chunk[..read]);
+                }
+                let head = head.replace("{addr}", &addr.to_string());
+                stream.write_all(head.as_bytes()).await.unwrap();
+                stream.flush().await.unwrap();
+            }
+        });
+        format!("http://{addr}")
+    }
+
+    fn redirect(location: &str) -> String {
+        format!(
+            "HTTP/1.1 302 Found\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        )
+    }
+
+    #[tokio::test]
+    async fn short_link_stops_at_the_first_accepted_target_without_requesting_it() {
+        let base = sequential_server(vec![
+            redirect("/hop"),
+            redirect("https://live.bilibili.com/21452505?share_source=COPY"),
+        ])
+        .await;
+        let target = follow_short_link(
+            None,
+            &format!("{base}/abc"),
+            reqwest::header::HeaderMap::new(),
+            |url| url.host_str() == Some("live.bilibili.com"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            target,
+            "https://live.bilibili.com/21452505?share_source=COPY"
+        );
+    }
+
+    #[tokio::test]
+    async fn short_link_reports_where_unaccepted_redirects_end() {
+        let base = sequential_server(vec![
+            redirect("http://{addr}/landing"),
+            "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_string(),
+        ])
+        .await;
+        let target = follow_short_link(
+            None,
+            &format!("{base}/abc"),
+            reqwest::header::HeaderMap::new(),
+            |_| false,
+        )
+        .await
+        .unwrap();
+        assert_eq!(target, format!("{base}/landing"));
+
+        let base = sequential_server(vec![
+            "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_string(),
+        ])
+        .await;
+        let error = follow_short_link(
+            None,
+            &format!("{base}/gone"),
+            reqwest::header::HeaderMap::new(),
+            |_| true,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.kind(), "invalid_url");
     }
 }
