@@ -304,6 +304,7 @@ const supportedPlatforms: { key: Platform; name: string }[] = [
   { key: "youtube", name: "YouTube" },
   { key: "sooplive", name: "SOOP" },
   { key: "chzzk", name: "CHZZK" },
+  { key: "twitcasting", name: "TwitCasting" },
 ];
 
 export function NetworkSection({ ctx }: SectionProps) {
