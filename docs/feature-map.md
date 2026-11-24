@@ -272,6 +272,8 @@
 - 凭据：不需要登录，用户 Cookie 只发给接口。网页 `17.live` 本身有 Akamai 防护，用脚本直接访问会被拒绝，录播宝只用 API。
 - 代理：平台键 `17live` 不在 StreamCap 默认的「走代理的平台」里，大陆通常可直连，连不上时把 `17live` 加进「走代理的平台」。
 
+**待实现 · Bigo**（参考 StreamGet v4.0.10 `BigoLiveStream`，StreamCap `BigoHandler`，平台键 `bigo`）：2026-11-24 实测上游用的 `ta.bigo.tv/official_website/studio/getInternalStudioInfo` 对匿名请求一律返回 `needLogin: true`、空昵称和空 `hls_src`（对热门列表里正在直播的 18 个房间都是这样）。网页版现在请求这个接口时还带 `token`（登录后的网页令牌）、`mk` 和 `supportHevc`，没有登录令牌拿不到播放地址。没有 Bigo 账号无法验证，这一批没有接入；有了账号或找到匿名取流的办法后再做。
+
 **有意差异 · 桌面行为**（参考 StreamCap `app/lifecycle/`、`app/messages/desktop_notify.py`）：
 - 系统通知：与上游一样，总开关 `system_notification_enabled` 控制全部系统通知，开播通知只在主窗口隐藏或最小化时发。不同的是，上游的「开播通知」「下播通知」开关只管推送渠道，0.1.0 没有推送渠道，这两个开关改为控制系统通知：开播默认开、下播默认关。「仅通知」的直播间开播时只看总开关，不受「开播通知」开关和窗口状态影响（否则关掉开播通知后这类直播间既不录也不提醒）。任务进入「需处理」时提醒一次（上游没有）。短时间内的多条开播或下播合并成一条。
 - 关闭窗口：与上游一样询问「最小化到托盘 / 退出 / 取消」，另加「记住我的选择」，存入设置 `close_window_action`（`ask`、`tray`、`quit`），可在设置页「托盘与通知」修改。托盘创建失败（例如 Linux 没有 AppIndicator 库，启动时先探测）时关窗直接退出。GNOME 没装 AppIndicator 扩展时库存在但托盘不显示，隐藏后可以再次启动录播宝唤回窗口（单实例）。Linux 托盘不支持提示文字，改用标题：有录制时显示「录播宝 · 录制中 N」，平时显示「录播宝」。
