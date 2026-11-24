@@ -30,6 +30,7 @@ pub mod kuaishou;
 pub mod kugou;
 pub mod maoer;
 pub mod netease;
+pub mod showroom;
 mod sign;
 pub mod sixroom;
 pub mod sooplive;
@@ -89,6 +90,7 @@ pub enum Platform {
     Sooplive,
     Chzzk,
     Twitcasting,
+    Showroom,
     /// 端到端测试用的本地直播间（feature `e2e`），发布版没有。
     #[cfg(feature = "e2e")]
     E2e,
@@ -121,6 +123,7 @@ impl Platform {
             Platform::Sooplive => "sooplive",
             Platform::Chzzk => "chzzk",
             Platform::Twitcasting => "twitcasting",
+            Platform::Showroom => "showroom",
             #[cfg(feature = "e2e")]
             Platform::E2e => "e2e",
         }
@@ -159,6 +162,7 @@ impl Platform {
             Platform::Sooplive => "SOOP",
             Platform::Chzzk => "CHZZK",
             Platform::Twitcasting => "TwitCasting",
+            Platform::Showroom => "ShowRoom",
             #[cfg(feature = "e2e")]
             Platform::E2e => "测试直播间",
         }
@@ -530,6 +534,7 @@ pub fn adapters() -> Vec<Box<dyn PlatformAdapter>> {
         Box::new(sooplive::SoopAdapter::new()),
         Box::new(chzzk::ChzzkAdapter::new()),
         Box::new(twitcasting::TwitcastingAdapter::new()),
+        Box::new(showroom::ShowroomAdapter::new()),
     ];
     #[cfg(feature = "e2e")]
     list.push(Box::new(e2e::E2eAdapter));

@@ -469,7 +469,7 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
         </span>
         <p className="m-0 text-sm font-medium">还没有直播间</p>
         <p className="m-0 text-muted-foreground">
-          粘贴抖音、快手、B站、虎牙、斗鱼、小红书、YY、网易CC、微博、AcFun、花椒、映客、酷狗、六间房、百度、知乎、猫耳FM、TikTok、Twitch、YouTube、SOOP、CHZZK、TwitCasting的直播间链接，或抖音的主播主页、分享短链。录播宝会按检测间隔查看是否开播，开播后自动录制。
+          粘贴抖音、快手、B站、虎牙、斗鱼、小红书、YY、网易CC、微博、AcFun、花椒、映客、酷狗、六间房、百度、知乎、猫耳FM、TikTok、Twitch、YouTube、SOOP、CHZZK、TwitCasting、ShowRoom的直播间链接，或抖音的主播主页、分享短链。录播宝会按检测间隔查看是否开播，开播后自动录制。
         </p>
         <Button className="mt-2" onClick={onAdd}>
           <Plus aria-hidden />
