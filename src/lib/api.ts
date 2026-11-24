@@ -31,7 +31,7 @@ export type FfmpegStatus =
 // ---- 任务（src-tauri/src/tasks/model.rs） ----
 
 export type TaskId = number;
-export type Platform = "douyin" | "kuaishou" | "bilibili" | "huya" | "douyu" | "xiaohongshu" | "yy" | "netease" | "weibo" | "acfun" | "huajiao" | "inke" | "kugou" | "6room" | "baidu" | "zhihu" | "maoerfm" | "tiktok" | "twitch";
+export type Platform = "douyin" | "kuaishou" | "bilibili" | "huya" | "douyu" | "xiaohongshu" | "yy" | "netease" | "weibo" | "acfun" | "huajiao" | "inke" | "kugou" | "6room" | "baidu" | "zhihu" | "maoerfm" | "tiktok" | "twitch" | "youtube";
 export type Quality = "OD" | "UHD" | "HD" | "SD" | "LD";
 export type Monitoring = "enabled" | "paused";
 export type PlatformErrorKind =
@@ -40,7 +40,9 @@ export type PlatformErrorKind =
   | "auth_required"
   | "rate_limited"
   | "parse"
-  | "config";
+  | "config"
+  /** 平台需要的组件还在下载（YouTube 的 yt-dlp 和 Deno），不算失败，约 15 秒后再检测。 */
+  | "preparing";
 
 /** 时间均为 Unix 毫秒。 */
 export type LiveState =
@@ -253,7 +255,7 @@ export interface Settings {
   execute_custom_script: boolean;
   custom_script_command: string;
   /**
-   * 平台 Cookie：键为平台键（"douyin"、"kuaishou"、"bilibili"、"huya"、"douyu"、"xiaohongshu"、"yy"、"netease"、"weibo"、"acfun"、"huajiao"、"inke"、"kugou"、"6room"、"baidu"、"zhihu"、"maoerfm"、"tiktok"、"twitch"……），值为 Cookie 字符串，空字符串表示不用。
+   * 平台 Cookie：键为平台键（"douyin"、"kuaishou"、"bilibili"、"huya"、"douyu"、"xiaohongshu"、"yy"、"netease"、"weibo"、"acfun"、"huajiao"、"inke"、"kugou"、"6room"、"baidu"、"zhihu"、"maoerfm"、"tiktok"、"twitch"、"youtube"……），值为 Cookie 字符串，空字符串表示不用。
    * 对应 StreamCap cookies.json。更新时整个对象替换。值含换行等无法放进请求头的字符时，
    * updateSettings 以 kind "config" 拒绝。
    */

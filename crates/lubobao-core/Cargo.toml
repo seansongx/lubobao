@@ -25,6 +25,7 @@ rusqlite = { version = "0.43.0", features = ["bundled"] }
 fs4.workspace = true
 chrono.workspace = true
 log.workspace = true
+zip = { version = "9.8", default-features = false, features = ["deflate"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys.workspace = true

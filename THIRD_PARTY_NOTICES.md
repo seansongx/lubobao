@@ -23,6 +23,7 @@ LuBoBao (录播宝) is licensed under the MIT License (see [LICENSE](LICENSE)). 
 - Also used in: the Maoer FM adapter in `crates/lubobao-core/src/platforms/maoer.rs` is ported from `streamget/platforms/maoer/live_stream.py` (`MaoerLiveStream`): the `api/v2/live/{room_id}` request, the `status.broadcasting` live check and recording the FLV pull URL.
 - Also used in: the TikTok adapter in `crates/lubobao-core/src/platforms/tiktok.rs` is ported from `streamget/platforms/tiktok/live_stream.py` (`TikTokLiveStream`): the PC and mobile request headers and default `ttwid` cookies, reading the room from the live page's `SIGI_STATE` script, the `api-live/user/room` request, the `status == 2` live check, the region-block message and building the quality list from `streamData.pull_data.stream_data` (sorted by video bitrate, then resolution, with the codec appended to each URL) with the neighbouring tier as fallback when the chosen stream cannot be reached.
 - Also used in: the Twitch adapter in `crates/lubobao-core/src/platforms/twitch.rs` follows `streamget/platforms/twitch/live_stream.py` (`TwitchLiveStream`): the GQL request headers and web client id, the `streamPlaybackAccessToken` query, the `usher.ttvnw.net` master playlist request and its parameters, and choosing a variant by position after sorting by bandwidth. The channel and the token are read with one GQL query instead of StreamGet's persisted `ComscoreStreamingQuery`. `crates/lubobao-core/src/platforms/hls.rs` reads master playlists like StreamGet's `get_play_url_list`.
+- Also used in: the YouTube adapter in `crates/lubobao-core/src/platforms/youtube.rs` follows `streamget/platforms/youtube/live_stream.py` (`YoutubeLiveStream`): reading `ytInitialPlayerResponse` from the page, the `videoDetails.isLive` check, recording `streamingData.hlsManifestUrl` and choosing a variant of that master playlist by position after sorting by bandwidth.
 
 ```
 MIT License
@@ -53,6 +54,10 @@ SOFTWARE.
 - Project: https://github.com/ihmily/StreamCap
 - License: Apache License 2.0
 - Used as: the behaviour reference for LuBoBao's features, defaults and FFmpeg options. LuBoBao reimplements this behaviour in Rust and TypeScript; deliberate differences are recorded in [docs/feature-map.md](docs/feature-map.md).
+
+## yt-dlp and Deno (YouTube)
+
+LuBoBao does not bundle these either. When a YouTube channel is first found live, it downloads the official single-file [yt-dlp](https://github.com/yt-dlp/yt-dlp) release (Unlicense; the release executables also contain yt-dlp-ejs and other dependencies under their own licenses, listed in the yt-dlp repository) and the official [Deno](https://github.com/denoland/deno) release (MIT License, Copyright 2018-2026 the Deno authors) from GitHub, checks their SHA-256 against `crates/lubobao-core/src/ytdlp/manifest.rs` and runs them as separate programs.
 
 ## FFmpeg
 

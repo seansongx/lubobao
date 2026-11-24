@@ -66,7 +66,7 @@ const TONE_CLASS: Record<Tone, string> = {
 };
 
 /** 检测失败的这几类会自动重试，用琥珀色；其余失败需要用户处理，用红色警告。与 derive_display 一致。 */
-const RETRYABLE = new Set(["network", "rate_limited", "parse"]);
+const RETRYABLE = new Set(["network", "rate_limited", "parse", "preparing"]);
 
 const FAILURE_KIND_LABEL: Record<string, string> = {
   network: "网络错误，会自动重试",
@@ -75,6 +75,7 @@ const FAILURE_KIND_LABEL: Record<string, string> = {
   auth_required: "需要登录，请在设置中填写 Cookie",
   invalid_url: "链接无效",
   config: "配置有误",
+  preparing: "正在准备组件，稍后自动检测",
 };
 
 const QUALITY_LABEL: Record<string, string> = { OD: "原画", UHD: "超清", HD: "高清", SD: "标清", LD: "流畅" };

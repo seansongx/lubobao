@@ -133,6 +133,11 @@ impl Dirs {
         self.data_dir.join("components").join("ffmpeg")
     }
 
+    /// YouTube 用的 yt-dlp 和 Deno，第一次检测到 YouTube 开播时才下载。
+    pub fn youtube_tools_root(&self) -> PathBuf {
+        self.data_dir.join("components").join("youtube")
+    }
+
     /// 收紧数据目录的权限为 0700（里面有控制通道和 Cookie）。返回是否改动过。
     #[cfg(unix)]
     pub fn secure_data_dir(&self) -> io::Result<bool> {

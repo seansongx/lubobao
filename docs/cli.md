@@ -31,6 +31,8 @@ lubobao-cli ffmpeg install
 lubobao-cli ffmpeg status
 ```
 
+录 YouTube 还需要 yt-dlp 和 Deno：第一次检测到 YouTube 开播时，在后台从 GitHub 下载到数据目录（`components/youtube/`），按 SHA-256 校验后安装，期间这个直播间显示「正在准备 YouTube 组件」，下载完自动开始录制。它们按 YouTube 的代理设置下载。Docker 镜像里录 YouTube 尚未验证。
+
 自动下载失败时，`run` 会在 1、5、15 分钟后重试，之后每 30 分钟一次，每次都写一行日志；也可以随时手动 `lubobao-cli ffmpeg install`。
 
 自动下载的 FFmpeg 需要 glibc 2.28 及以上。Alpine、CentOS 7 这类系统上请用包管理器装 ffmpeg（例如 `apk add ffmpeg`），再用 `--ffmpeg <路径>` 或环境变量 `LUBOBAO_FFMPEG` 指定，此时不再下载（设为空值等于没设置）：

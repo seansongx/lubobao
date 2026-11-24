@@ -9,11 +9,10 @@ use super::{FfmpegManager, FfmpegStatus, ManagerConfig, STATUS_EVENT};
 
 /// 在 Tauri `setup` 中调用：登记状态并在后台开始检查，不阻塞窗口。
 pub fn init(app: &tauri::AppHandle) -> tauri::Result<()> {
-    let root = app
-        .path()
-        .app_local_data_dir()?
-        .join("components")
-        .join("ffmpeg");
+    let components = app.path().app_local_data_dir()?.join("components");
+    // YouTube 用的 yt-dlp 和 Deno：只登记目录，第一次检测到 YouTube 开播时才下载。
+    lubobao_core::ytdlp::init(components.join("youtube"));
+    let root = components.join("ffmpeg");
     // macOS：上次崩溃留下的 ffmpeg 在调度开始录制之前结束（单实例，此时没有别的录播宝在用
     // 这个目录）。Windows、Linux 由内核保证 ffmpeg 随录播宝结束，这里什么都不做。
     let reaped = crate::recorder::process_guard::reap_orphans(&root);

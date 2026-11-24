@@ -134,6 +134,7 @@ pub enum ErrorKind {
     RateLimited,
     Parse,
     Config,
+    Preparing,
     /// 没有适配器能识别这个链接。
     UnsupportedPlatform,
     NotFound,
@@ -183,6 +184,7 @@ impl From<PlatformError> for CommandError {
             PlatformErrorKind::RateLimited => ErrorKind::RateLimited,
             PlatformErrorKind::Parse => ErrorKind::Parse,
             PlatformErrorKind::Config => ErrorKind::Config,
+            PlatformErrorKind::Preparing => ErrorKind::Preparing,
         };
         CommandError::new(kind, error.message())
     }
@@ -809,6 +811,11 @@ impl TaskManager {
                 (previous_live == Some(true))
                     .then(|| (ActivityKind::LiveEnd, "已下播".to_string(), None))
             }
+            // 组件还在下载：不算检测失败，不写动态。
+            LiveState::CheckFailed {
+                kind: PlatformErrorKind::Preparing,
+                ..
+            } => None,
             LiveState::CheckFailed { kind, message, .. } => inner.failing.insert(id).then(|| {
                 (
                     ActivityKind::Failure,

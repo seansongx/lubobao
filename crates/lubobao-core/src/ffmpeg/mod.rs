@@ -8,7 +8,7 @@
 
 pub mod download;
 mod error;
-mod install;
+pub(crate) mod install;
 pub mod manifest;
 mod status;
 #[cfg(test)]

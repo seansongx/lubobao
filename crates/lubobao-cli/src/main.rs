@@ -310,6 +310,7 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    lubobao_core::ytdlp::init(dirs.youtube_tools_root());
     if let Command::Run = cli.command {
         return match runtime.block_on(daemon::run(dirs, cli.global)) {
             Ok(()) => ExitCode::SUCCESS,
