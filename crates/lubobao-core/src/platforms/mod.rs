@@ -23,6 +23,7 @@ pub mod huya;
 pub mod kuaishou;
 mod sign;
 pub mod xiaohongshu;
+pub mod yy;
 
 /// Boxed future returned by adapter methods so adapters can be used as trait objects.
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
@@ -39,6 +40,7 @@ pub enum Platform {
     Huya,
     Douyu,
     Xiaohongshu,
+    Yy,
     /// 端到端测试用的本地直播间（feature `e2e`），发布版没有。
     #[cfg(feature = "e2e")]
     E2e,
@@ -54,6 +56,7 @@ impl Platform {
             Platform::Huya => "huya",
             Platform::Douyu => "douyu",
             Platform::Xiaohongshu => "xiaohongshu",
+            Platform::Yy => "yy",
             #[cfg(feature = "e2e")]
             Platform::E2e => "e2e",
         }
@@ -68,6 +71,7 @@ impl Platform {
             Platform::Huya => "虎牙直播",
             Platform::Douyu => "斗鱼直播",
             Platform::Xiaohongshu => "小红书",
+            Platform::Yy => "YY直播",
             #[cfg(feature = "e2e")]
             Platform::E2e => "测试直播间",
         }
@@ -366,6 +370,7 @@ pub fn adapters() -> Vec<Box<dyn PlatformAdapter>> {
         Box::new(huya::HuyaAdapter::new()),
         Box::new(douyu::DouyuAdapter::new()),
         Box::new(xiaohongshu::XiaohongshuAdapter::new()),
+        Box::new(yy::YyAdapter::new()),
     ];
     #[cfg(feature = "e2e")]
     list.push(Box::new(e2e::E2eAdapter));

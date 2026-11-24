@@ -10,6 +10,7 @@ LuBoBao (录播宝) is licensed under the MIT License (see [LICENSE](LICENSE)). 
 - Also used in: the Huya adapter in `crates/lubobao-core/src/platforms/huya.rs` is ported from `streamget/platforms/huya/live_stream.py` (`HuyaLiveStream`): the letter-id lookup, the `profileRoom` API flow and CDN choice, the web-page path for 英雄联盟 rooms, and the anti-leech parameter algorithm (`get_anti_code`).
 - Also used in: the Douyu adapter in `crates/lubobao-core/src/platforms/douyu.rs` is ported from `streamget/platforms/douyu/live_stream.py` (`DouyuLiveStream`): the room id lookup, the `betard` room API, the `getEncryption` white-key MD5 signature for `getH5PlayV1` and the quality-to-rate mapping.
 - Also used in: the Xiaohongshu adapter in `crates/lubobao-core/src/platforms/xiaohongshu.rs` is ported from `streamget/platforms/rednote/live_stream.py` (`RedNoteLiveStream`): the app request headers, the share-link redirect, reading `liveStream` from `window.__INITIAL_STATE__` on the room page, and building the source FLV/HLS URLs from the deeplink's `flvUrl`.
+- Also used in: the YY adapter in `crates/lubobao-core/src/platforms/yy.rs` is ported from `streamget/platforms/yy/live_stream.py` (`YYLiveStream`): the page headers, reading the anchor and channel id from the room page, the `stream-manager` stream request body and the `live/detail` title lookup.
 
 ```
 MIT License

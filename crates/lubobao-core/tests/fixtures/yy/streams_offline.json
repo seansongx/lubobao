@@ -1,0 +1,113 @@
+{
+  "head": {
+    "seq": 1701869217590,
+    "appidstr": "0",
+    "bidstr": "121",
+    "cidstr": "100002",
+    "sidstr": "100002",
+    "client_type": 108,
+    "client_ver": "5.17.0",
+    "stream_sys_ver": 1,
+    "app": "yylive_web",
+    "playersdk_ver": "5.17.0",
+    "thundersdk_ver": "0",
+    "streamsdk_ver": "5.17.0"
+  },
+  "cid": 100002,
+  "sid": 100002,
+  "businessid": 121,
+  "sequence": 1701869217590,
+  "channel_stream_info": {
+    "streams": [
+      {
+        "stream_name": "g_100002_0_1",
+        "cid": 100002,
+        "sid": 100002,
+        "stream_group": "g_100002_0_1",
+        "mix": 1,
+        "type": 5,
+        "thunder_stream": {},
+        "cidstr": "100002",
+        "sidstr": "100002",
+        "appidstr": "0",
+        "bidstr": "0"
+      }
+    ]
+  },
+  "client_capacity": {
+    "stream_visibility_rules": [
+      {
+        "type": {
+          "integer": {
+            "discrete": {
+              "values": [
+                3,
+                4,
+                5
+              ]
+            }
+          }
+        }
+      },
+      {
+        "type": {
+          "integer": {
+            "discrete": {
+              "values": [
+                1
+              ]
+            }
+          }
+        }
+      },
+      {
+        "type": {
+          "integer": {
+            "discrete": {
+              "values": [
+                2
+              ]
+            }
+          }
+        },
+        "json": {
+          "fields": {
+            "tag": {
+              "vtype": 1,
+              "str": {
+                "values": [
+                  "web"
+                ]
+              }
+            },
+            "abtest": {
+              "vtype": 1,
+              "str": {
+                "values": [
+                  "0"
+                ]
+              }
+            },
+            "encoderType": {
+              "integer": {
+                "discrete": {
+                  "values": [
+                    100
+                  ]
+                }
+              }
+            },
+            "rate": {
+              "integer": {
+                "range": {
+                  "min_value": 250,
+                  "max_value": 102400
+                }
+              }
+            }
+          }
+        }
+      }
+    ]
+  }
+}

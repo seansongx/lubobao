@@ -29,6 +29,7 @@
 //   www.huya.com/{房间号或字母标识}       虎牙直播间（字母标识演示为房间号 660000）
 //   www.douyu.com/{房间号}，topic/…?rid={房间号}  斗鱼直播间
 //   www.xiaohongshu.com/livestream/{房间号}  小红书直播间；xhslink.com/… 演示为房间号 570000000000000001，主页链接返回 invalid_url
+//   www.yy.com/{频道号}[/{子频道号}]   YY 直播间
 //   路径含 login / timeout / busy / parse  分别返回 auth_required / network / rate_limited / parse
 //   其他域名                            unsupported_platform；无法解析的文本为 invalid_url
 //
@@ -174,6 +175,7 @@ const mockPlatforms: Record<Platform, { name: string; roomUrl: (roomId: string) 
   huya: { name: "虎牙直播", roomUrl: (roomId) => `https://www.huya.com/${roomId}` },
   douyu: { name: "斗鱼直播", roomUrl: (roomId) => `https://www.douyu.com/${roomId}` },
   xiaohongshu: { name: "小红书", roomUrl: (roomId) => `https://www.xiaohongshu.com/livestream/${roomId}` },
+  yy: { name: "YY直播", roomUrl: (roomId) => `https://www.yy.com/${roomId}/${roomId}` },
 };
 
 function snapshot(id: TaskId, seed: MockSeed, createdAt: number): TaskSnapshot {
@@ -305,6 +307,14 @@ function seedTasks(now: number): TaskSnapshot[] {
       roomId: "570555131224313846",
       anchorId: "5f0000000000000000000001",
       platform: "xiaohongshu",
+      monitoring: "enabled",
+      live: { state: "offline", checkedAt: now - 3 * minute },
+      record: { state: "idle" },
+    },
+    {
+      anchorName: "晚风舞蹈",
+      roomId: "22490906",
+      platform: "yy",
       monitoring: "enabled",
       live: { state: "offline", checkedAt: now - 3 * minute },
       record: { state: "idle" },
@@ -710,7 +720,7 @@ function normalizeUrl(url: string): string {
 const DEMO_ROOM = "745964462470";
 const DEMO_ANCHOR = `MS4wLjABAAAA-mock-anchor-${DEMO_ROOM}`;
 
-/** 模拟 platforms::resolve：认抖音、快手和B站、虎牙、斗鱼、小红书，按链接内容返回各类错误。 */
+/** 模拟 platforms::resolve：认抖音、快手和B站、虎牙、斗鱼、小红书、YY，按链接内容返回各类错误。 */
 function resolveMock(input: string, tasks: TaskSnapshot[]): ResolvedRoom | CommandError {
   const url = input.trim();
   if (!url) return { kind: "invalid_input", message: "请输入直播间链接" };
@@ -735,7 +745,9 @@ function resolveMock(input: string, tasks: TaskSnapshot[]): ResolvedRoom | Comma
           ? "douyu"
           : host === "xiaohongshu.com" || host === "www.xiaohongshu.com" || host === "xhslink.com"
             ? "xiaohongshu"
-            : null;
+            : host === "yy.com" || host === "www.yy.com"
+              ? "yy"
+              : null;
   if (!platform) return { kind: "unsupported_platform", message: `暂不支持 ${host} 的直播间` };
   if (/login/i.test(path)) return { kind: "auth_required", message: "该直播间需要登录后观看，请填写 Cookie" };
   if (/timeout|network/i.test(path)) return { kind: "network", message: `连接 ${host} 超时` };
@@ -811,6 +823,19 @@ function resolveMock(input: string, tasks: TaskSnapshot[]): ResolvedRoom | Comma
       anchorId: task?.anchorId ?? "5f0000000000000000000002",
       anchorName: task?.anchorName ?? `小红书主播 ${roomId.slice(-4)}`,
       liveUrl: mockPlatforms.xiaohongshu.roomUrl(roomId),
+    };
+  }
+  if (platform === "yy") {
+    const match = /^\/(\d+)(?:\/(\d+))?\/?$/.exec(path);
+    if (!match) return { kind: "invalid_url", message: `不是可识别的 YY 直播链接: ${url}` };
+    const roomId = match[1];
+    const task = known(roomId);
+    return {
+      ...base,
+      roomId,
+      anchorId: task?.anchorId ?? `yy-${roomId}`,
+      anchorName: task?.anchorName ?? `YY 主播 ${roomId}`,
+      liveUrl: `https://www.yy.com/${roomId}${match[2] ? `/${match[2]}` : ""}`,
     };
   }
   if (host === "v.douyin.com") {
