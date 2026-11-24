@@ -1,0 +1,59 @@
+{
+  "now_time": 1795482213,
+  "data": [
+    {
+      "ccid": 367592480,
+      "cuteid": 367592480,
+      "channel_id": 6519303,
+      "cid": 6519303,
+      "room_id": 2323,
+      "roomid": 2323,
+      "uid": 289164163,
+      "nickname": "实况足球官方",
+      "title": "实况足球超级联赛26-27夏季赛",
+      "status": 1,
+      "gamename": "实况足球",
+      "gametype": 9055,
+      "width": 1920,
+      "height": 1080,
+      "vbr": 7999488,
+      "startat": "2026-09-26 12:31:59",
+      "sharefile": "https://alipullhls.cc.netease.com/pushstation/25cf361ef49142b4409a289164163.m3u8?auth_key=1795482500-00000000000000000000000000000000-0-11111111111111111111111111111111",
+      "m3u8": "http://cgi.v.cc.163.com/redirect/video/367592480.m3u8?secret=e2f3634835",
+      "stream_list": {
+        "high": {
+          "vbr": 2000,
+          "CDN_FMT": {
+            "fws": "wsSecret=00000000000000000000000000000000&wsTime=6b04e242"
+          },
+          "streamname": "25cf361ef49142b4409a289164163tc1"
+        },
+        "medium": {
+          "vbr": 1000,
+          "CDN_FMT": {
+            "fws": "wsSecret=00000000000000000000000000000000&wsTime=6b04e242"
+          },
+          "streamname": "25cf361ef49142b4409a289164163tc2"
+        },
+        "low": {
+          "vbr": 600,
+          "CDN_FMT": {
+            "fws": "wsSecret=00000000000000000000000000000000&wsTime=6b04e242"
+          },
+          "streamname": "25cf361ef49142b4409a289164163tc4"
+        },
+        "original": {
+          "vbr": 7999,
+          "CDN_FMT": {
+            "ali": "auth_key=1795482500-00000000000000000000000000000000-0-11111111111111111111111111111111",
+            "fws": "wsSecret=00000000000000000000000000000000&wsTime=6b04e242"
+          },
+          "streamname": "25cf361ef49142b4409a289164163"
+        }
+      },
+      "is_audiolive": 0,
+      "livetype": "game",
+      "poster": "http://cc.fp.ps.netease.com/file/6b04e1973bf94bb1105e77adQ8hOsm1i07"
+    }
+  ]
+}

@@ -21,6 +21,7 @@ pub mod douyu;
 pub mod e2e;
 pub mod huya;
 pub mod kuaishou;
+pub mod netease;
 mod sign;
 
 /// Boxed future returned by adapter methods so adapters can be used as trait objects.
@@ -37,6 +38,7 @@ pub enum Platform {
     Bilibili,
     Huya,
     Douyu,
+    Netease,
     /// 端到端测试用的本地直播间（feature `e2e`），发布版没有。
     #[cfg(feature = "e2e")]
     E2e,
@@ -51,6 +53,7 @@ impl Platform {
             Platform::Bilibili => "bilibili",
             Platform::Huya => "huya",
             Platform::Douyu => "douyu",
+            Platform::Netease => "netease",
             #[cfg(feature = "e2e")]
             Platform::E2e => "e2e",
         }
@@ -64,6 +67,7 @@ impl Platform {
             Platform::Bilibili => "哔哩哔哩",
             Platform::Huya => "虎牙直播",
             Platform::Douyu => "斗鱼直播",
+            Platform::Netease => "网易CC直播",
             #[cfg(feature = "e2e")]
             Platform::E2e => "测试直播间",
         }
@@ -361,6 +365,7 @@ pub fn adapters() -> Vec<Box<dyn PlatformAdapter>> {
         Box::new(bilibili::BilibiliAdapter::new()),
         Box::new(huya::HuyaAdapter::new()),
         Box::new(douyu::DouyuAdapter::new()),
+        Box::new(netease::NeteaseAdapter::new()),
     ];
     #[cfg(feature = "e2e")]
     list.push(Box::new(e2e::E2eAdapter));
