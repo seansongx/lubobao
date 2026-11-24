@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 pub mod acfun;
 pub mod baidu;
 pub mod bilibili;
+pub mod chzzk;
 pub mod douyin;
 pub mod douyu;
 #[cfg(feature = "e2e")]
@@ -27,11 +28,15 @@ pub mod huya;
 pub mod inke;
 pub mod kuaishou;
 pub mod kugou;
+pub mod live17;
 pub mod maoer;
 pub mod netease;
+pub mod showroom;
 mod sign;
 pub mod sixroom;
+pub mod sooplive;
 pub mod tiktok;
+pub mod twitcasting;
 pub mod twitch;
 pub mod weibo;
 pub mod xiaohongshu;
@@ -83,6 +88,13 @@ pub enum Platform {
     Tiktok,
     Twitch,
     Youtube,
+    Sooplive,
+    Chzzk,
+    Twitcasting,
+    Showroom,
+    /// 17Live：平台键以数字开头，按 StreamCap 的 `17live` 序列化。
+    #[serde(rename = "17live")]
+    Live17,
     /// 端到端测试用的本地直播间（feature `e2e`），发布版没有。
     #[cfg(feature = "e2e")]
     E2e,
@@ -112,9 +124,21 @@ impl Platform {
             Platform::Tiktok => "tiktok",
             Platform::Twitch => "twitch",
             Platform::Youtube => "youtube",
+            Platform::Sooplive => "sooplive",
+            Platform::Chzzk => "chzzk",
+            Platform::Twitcasting => "twitcasting",
+            Platform::Showroom => "showroom",
+            Platform::Live17 => "17live",
             #[cfg(feature = "e2e")]
             Platform::E2e => "e2e",
         }
+    }
+
+    /// HLS segments whose extension does not match their container: the
+    /// recorder passes `-extension_picky 0`. StreamCap's
+    /// `RELAXED_HLS_EXTENSION_CHECK_PLATFORMS` (`["chzzk"]`).
+    pub fn relaxed_hls_extension(self) -> bool {
+        matches!(self, Platform::Chzzk)
     }
 
     /// Display name, matching the `platform` field StreamGet reports.
@@ -140,6 +164,11 @@ impl Platform {
             Platform::Tiktok => "TikTok",
             Platform::Twitch => "Twitch",
             Platform::Youtube => "YouTube",
+            Platform::Sooplive => "SOOP",
+            Platform::Chzzk => "CHZZK",
+            Platform::Twitcasting => "TwitCasting",
+            Platform::Showroom => "ShowRoom",
+            Platform::Live17 => "17Live",
             #[cfg(feature = "e2e")]
             Platform::E2e => "测试直播间",
         }
@@ -508,6 +537,11 @@ pub fn adapters() -> Vec<Box<dyn PlatformAdapter>> {
         Box::new(tiktok::TiktokAdapter::new()),
         Box::new(twitch::TwitchAdapter::new()),
         Box::new(youtube::YoutubeAdapter::new()),
+        Box::new(sooplive::SoopAdapter::new()),
+        Box::new(chzzk::ChzzkAdapter::new()),
+        Box::new(twitcasting::TwitcastingAdapter::new()),
+        Box::new(showroom::ShowroomAdapter::new()),
+        Box::new(live17::Live17Adapter::new()),
     ];
     #[cfg(feature = "e2e")]
     list.push(Box::new(e2e::E2eAdapter));

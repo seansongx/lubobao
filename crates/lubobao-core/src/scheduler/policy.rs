@@ -245,6 +245,7 @@ pub fn recording_request(
             platform: info.platform.display_name().to_string(),
             options: RecordOptions {
                 proxy,
+                relaxed_hls_extension: info.platform.relaxed_hls_extension(),
                 ..record_options(settings)
             },
         },

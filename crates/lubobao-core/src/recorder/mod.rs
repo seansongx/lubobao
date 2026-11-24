@@ -112,6 +112,9 @@ pub struct RecordOptions {
     pub stop_timeout_secs: u64,
     /// 看门狗时限（秒）。0 表示关闭；非 0 时不低于 [`MIN_STALL_TIMEOUT_SECS`]。
     pub stall_timeout_secs: u64,
+    /// HLS 输入不检查分片扩展名（`-extension_picky 0`），CHZZK 需要，见
+    /// [`crate::platforms::Platform::relaxed_hls_extension`]。
+    pub relaxed_hls_extension: bool,
 }
 
 impl Default for RecordOptions {
@@ -127,6 +130,7 @@ impl Default for RecordOptions {
             disk_check_interval_secs: DEFAULT_DISK_CHECK_INTERVAL_SECS,
             stop_timeout_secs: DEFAULT_STOP_TIMEOUT_SECS,
             stall_timeout_secs: DEFAULT_STALL_TIMEOUT_SECS,
+            relaxed_hls_extension: false,
         }
     }
 }
@@ -489,6 +493,7 @@ async fn start_inner(
         output_path: &ffmpeg_output,
         segment_secs: segmented.then_some(options.segment_secs),
         proxy: proxy.as_deref(),
+        relaxed_hls_extension: options.relaxed_hls_extension,
     });
 
     let mut command = Command::new(&request.ffmpeg_path);

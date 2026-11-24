@@ -203,9 +203,10 @@ pub fn assert_decodes(ffmpeg: &Path, file: &Path) {
         .lines()
         .filter(|line| line.contains(SOURCE_DTS))
         .count();
+    // FFmpeg folds repeats of the same message into a summary line.
     let errors: Vec<&str> = stderr
         .lines()
-        .filter(|line| !line.contains(SOURCE_DTS))
+        .filter(|line| !line.contains(SOURCE_DTS) && !line.contains("Last message repeated"))
         .collect();
     println!(
         "check exit={:?} stderr_lines={} repeated_source_dts={repeated}",

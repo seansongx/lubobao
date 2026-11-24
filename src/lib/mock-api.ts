@@ -43,6 +43,11 @@
 //   www.tiktok.com/@{用户名}[/live]     TikTok 直播间；vt.tiktok.com/… 分享短链演示为 @nbcnews
 //   www.twitch.tv/{频道名}             Twitch 频道
 //   www.youtube.com/@{名称}/live，watch?v={视频 id}，youtu.be/{视频 id}  YouTube 频道或直播视频；路径含 bot 返回 auth_required
+//   play.sooplive.com/{主播ID}[/{场次号}]    SOOP（原 AfreecaTV）主播；路径含 login 返回 auth_required（成人或年龄限制需要 Cookie）
+//   chzzk.naver.com/live/{频道ID}       CHZZK 频道（32 位十六进制 ID）；路径含 login 返回 auth_required（成人直播需要 Cookie）
+//   twitcasting.tv/{用户名}[/movie/{直播号}]  TwitCasting 用户；路径含 login 返回 auth_required（密码或成员限定直播需要 Cookie）
+//   www.showroom-live.com/r/{房间名}，/room/profile?room_id={房间号}  ShowRoom 直播间
+//   17.live/{语言}/live/{房间号}        17Live 直播间（数字房间号）
 //   路径含 login / timeout / busy / parse  分别返回 auth_required / network / rate_limited / parse
 //   其他域名                            unsupported_platform；无法解析的文本为 invalid_url
 //   分享文字（如「【xx的直播】 https://v.douyin.com/abc/ 复制此链接…」）先取出其中的链接；没有链接为 invalid_input
@@ -207,6 +212,11 @@ const mockPlatforms: Record<Platform, { name: string; roomUrl: (roomId: string) 
     roomUrl: (roomId) =>
       roomId.startsWith("@") ? `https://www.youtube.com/${roomId}/live` : `https://www.youtube.com/watch?v=${roomId}`,
   },
+  sooplive: { name: "SOOP", roomUrl: (roomId) => `https://play.sooplive.com/${roomId}` },
+  chzzk: { name: "CHZZK", roomUrl: (roomId) => `https://chzzk.naver.com/live/${roomId}` },
+  twitcasting: { name: "TwitCasting", roomUrl: (roomId) => `https://twitcasting.tv/${roomId}` },
+  showroom: { name: "ShowRoom", roomUrl: (roomId) => /^[0-9]+$/.test(roomId) ? `https://www.showroom-live.com/room/profile?room_id=${roomId}` : `https://www.showroom-live.com/r/${roomId}` },
+  "17live": { name: "17Live", roomUrl: (roomId) => `https://17.live/en/live/${roomId}` },
 };
 
 function snapshot(id: TaskId, seed: MockSeed, createdAt: number): TaskSnapshot {
@@ -461,6 +471,51 @@ function seedTasks(now: number): TaskSnapshot[] {
       roomId: "@lofigirl",
       anchorId: "UCSJ4gkVC6NrvII8umztf0Ow",
       platform: "youtube",
+      monitoring: "enabled",
+      live: { state: "offline", checkedAt: now - 2 * minute },
+      record: { state: "idle" },
+    },
+    {
+      anchorName: "조새TV",
+      roomId: "superbsw123",
+      anchorId: "9205794",
+      platform: "sooplive",
+      monitoring: "enabled",
+      live: { state: "offline", checkedAt: now - 2 * minute },
+      record: { state: "idle" },
+    },
+    {
+      anchorName: "울프",
+      roomId: "0b33823ac81de48d5b78a38cdbc0ab94",
+      anchorId: "0b33823ac81de48d5b78a38cdbc0ab94",
+      platform: "chzzk",
+      monitoring: "enabled",
+      live: { state: "offline", checkedAt: now - 2 * minute },
+      record: { state: "idle" },
+    },
+    {
+      anchorName: "ツイキャス公式",
+      roomId: "twitcasting_jp",
+      anchorId: "twitcasting_jp",
+      platform: "twitcasting",
+      monitoring: "enabled",
+      live: { state: "offline", checkedAt: now - 2 * minute },
+      record: { state: "idle" },
+    },
+    {
+      anchorName: "Award超ガチ一ノ瀬結衣",
+      roomId: "yuo0503",
+      anchorId: "520315",
+      platform: "showroom",
+      monitoring: "enabled",
+      live: { state: "offline", checkedAt: now - 2 * minute },
+      record: { state: "idle" },
+    },
+    {
+      anchorName: "沐辰Apo",
+      roomId: "321847",
+      anchorId: "3d006202-8c67-4524-6007-7fef16a0f9d8",
+      platform: "17live",
       monitoring: "enabled",
       live: { state: "offline", checkedAt: now - 2 * minute },
       record: { state: "idle" },
@@ -913,7 +968,7 @@ export function extractLink(input: string): string | null {
   return null;
 }
 
-/** 模拟 platforms::resolve：认抖音、快手和B站、虎牙、斗鱼、小红书、YY、网易CC、微博、AcFun、花椒、映客、酷狗、六间房、百度、知乎、猫耳FM、TikTok、Twitch、YouTube，按链接内容返回各类错误。 */
+/** 模拟 platforms::resolve：认抖音、快手和B站、虎牙、斗鱼、小红书、YY、网易CC、微博、AcFun、花椒、映客、酷狗、六间房、百度、知乎、猫耳FM、TikTok、Twitch、YouTube、SOOP、CHZZK、TwitCasting、ShowRoom、17Live，按链接内容返回各类错误。 */
 function resolveMock(input: string, tasks: TaskSnapshot[]): ResolvedRoom | CommandError {
   if (!input.trim()) return { kind: "invalid_input", message: "请输入直播间链接" };
   const url = extractLink(input);
@@ -967,7 +1022,17 @@ function resolveMock(input: string, tasks: TaskSnapshot[]): ResolvedRoom | Comma
                                       ? "twitch"
                                       : host === "youtube.com" || host.endsWith(".youtube.com") || host === "youtu.be"
                                         ? "youtube"
-                                        : null;
+                                        : host === "sooplive.com" || host.endsWith(".sooplive.com") || host === "sooplive.co.kr" || host.endsWith(".sooplive.co.kr")
+                                          ? "sooplive"
+                                          : host === "chzzk.naver.com" || host === "m.chzzk.naver.com"
+                                            ? "chzzk"
+                                            : host === "twitcasting.tv" || host.endsWith(".twitcasting.tv")
+                                              ? "twitcasting"
+                                              : host === "showroom-live.com" || host.endsWith(".showroom-live.com")
+                                                ? "showroom"
+                                                : host === "17.live" || host === "www.17.live"
+                                                  ? "17live"
+                                                  : null;
   if (!platform) return { kind: "unsupported_platform", message: `暂不支持 ${host} 的直播间` };
   if (platform === "youtube" && /bot/i.test(path)) {
     return { kind: "auth_required", message: "YouTube 要求登录确认不是机器人（代理节点的 IP 被 YouTube 风控）：请在设置里填写登录后的 YouTube Cookie，或换一个代理节点" };
@@ -1253,6 +1318,91 @@ function resolveMock(input: string, tasks: TaskSnapshot[]): ResolvedRoom | Comma
       anchorId: task?.anchorId ?? null,
       anchorName: task?.anchorName ?? roomId,
       liveUrl: mockPlatforms.youtube.roomUrl(roomId),
+    };
+  }
+  if (platform === "sooplive") {
+    const id = path.split("/").filter(Boolean)[0]?.toLowerCase() ?? "";
+    if (!/^[a-z0-9_]{2,20}$/.test(id) || ["directory", "player", "vod", "search"].includes(id)) {
+      return { kind: "invalid_url", message: `SOOP 链接里没有主播 ID，请复制形如 play.sooplive.com/主播ID 的链接: ${url}` };
+    }
+    const task = known(id);
+    return {
+      ...base,
+      roomId: id,
+      anchorId: task?.anchorId ?? null,
+      anchorName: task?.anchorName ?? id,
+      liveUrl: mockPlatforms.sooplive.roomUrl(id),
+    };
+  }
+  if (platform === "chzzk") {
+    const segments = path.split("/").filter(Boolean);
+    const id = (segments[0] === "live" ? segments[1] : segments[0])?.toLowerCase() ?? "";
+    if (!/^[0-9a-f]{32}$/.test(id)) {
+      return { kind: "invalid_url", message: `CHZZK 链接里没有频道 ID，请复制形如 chzzk.naver.com/live/频道ID 的链接: ${url}` };
+    }
+    const task = known(id);
+    return {
+      ...base,
+      roomId: id,
+      anchorId: task?.anchorId ?? id,
+      anchorName: task?.anchorName ?? id,
+      liveUrl: mockPlatforms.chzzk.roomUrl(id),
+    };
+  }
+  if (platform === "twitcasting") {
+    const id = decodeURIComponent(path.split("/").filter(Boolean)[0] ?? "").toLowerCase();
+    if (!/^[a-z0-9_][a-z0-9_:]{1,39}$/.test(id) || ["search", "ranking", "rankingindex", "login", "signup", "about"].includes(id)) {
+      return { kind: "invalid_url", message: `TwitCasting 链接里没有用户名，请复制形如 twitcasting.tv/用户名 的链接: ${url}` };
+    }
+    const task = known(id);
+    return {
+      ...base,
+      roomId: id,
+      anchorId: task?.anchorId ?? id,
+      anchorName: task?.anchorName ?? id,
+      liveUrl: mockPlatforms.twitcasting.roomUrl(id),
+    };
+  }
+  if (platform === "showroom") {
+    const segments = path.split("/").filter(Boolean);
+    const idParam = parsed.searchParams.get("room_id");
+    const key =
+      segments[0] === "room" && segments[1] === "profile"
+        ? idParam
+        : segments[0] === "r"
+          ? segments[1]
+          : segments.length === 1 && !["onlive", "room", "api", "event", "ranking"].includes(segments[0])
+            ? segments[0]
+            : null;
+    const id = key?.toLowerCase() ?? "";
+    if (!/^[a-z0-9_-]{1,64}$/.test(id)) {
+      return { kind: "invalid_url", message: `ShowRoom 链接里没有直播间，请复制形如 showroom-live.com/r/房间名 的链接: ${url}` };
+    }
+    const task = known(id);
+    return {
+      ...base,
+      roomId: id,
+      anchorId: task?.anchorId ?? null,
+      anchorName: task?.anchorName ?? id,
+      liveUrl: mockPlatforms.showroom.roomUrl(id),
+    };
+  }
+  if (platform === "17live") {
+    const segments = path.split("/").filter(Boolean);
+    const id =
+      segments[segments.length - 2] === "live" || (segments[segments.length - 3] === "profile" && segments[segments.length - 2] === "r")
+        ? segments[segments.length - 1]
+        : "";
+    if (!/^[0-9]{1,12}$/.test(id)) {
+      return { kind: "invalid_url", message: `17Live 链接里没有直播间号，请复制形如 17.live/zh-Hant/live/房间号 的链接: ${url}` };
+    }
+    const task = known(id);
+    return {
+      ...base,
+      roomId: id,
+      anchorId: task?.anchorId ?? null,
+      anchorName: task?.anchorName ?? id,
+      liveUrl: mockPlatforms["17live"].roomUrl(id),
     };
   }
   if (host === "v.douyin.com") {
