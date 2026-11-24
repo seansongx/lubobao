@@ -42,6 +42,7 @@
 //   fm.missevan.com/live/{房间号}       猫耳FM 直播间（音频）
 //   www.tiktok.com/@{用户名}[/live]     TikTok 直播间；vt.tiktok.com/… 分享短链演示为 @nbcnews
 //   www.twitch.tv/{频道名}             Twitch 频道
+//   www.youtube.com/@{名称}/live，watch?v={视频 id}，youtu.be/{视频 id}  YouTube 频道或直播视频；路径含 bot 返回 auth_required
 //   路径含 login / timeout / busy / parse  分别返回 auth_required / network / rate_limited / parse
 //   其他域名                            unsupported_platform；无法解析的文本为 invalid_url
 //   分享文字（如「【xx的直播】 https://v.douyin.com/abc/ 复制此链接…」）先取出其中的链接；没有链接为 invalid_input
@@ -201,6 +202,11 @@ const mockPlatforms: Record<Platform, { name: string; roomUrl: (roomId: string) 
   maoerfm: { name: "猫耳FM直播", roomUrl: (roomId) => `https://fm.missevan.com/live/${roomId}` },
   tiktok: { name: "TikTok", roomUrl: (roomId) => `https://www.tiktok.com/@${roomId}/live` },
   twitch: { name: "Twitch", roomUrl: (roomId) => `https://www.twitch.tv/${roomId}` },
+  youtube: {
+    name: "YouTube",
+    roomUrl: (roomId) =>
+      roomId.startsWith("@") ? `https://www.youtube.com/${roomId}/live` : `https://www.youtube.com/watch?v=${roomId}`,
+  },
 };
 
 function snapshot(id: TaskId, seed: MockSeed, createdAt: number): TaskSnapshot {
@@ -446,6 +452,15 @@ function seedTasks(now: number): TaskSnapshot[] {
       roomId: "shroud",
       anchorId: "37402112",
       platform: "twitch",
+      monitoring: "enabled",
+      live: { state: "offline", checkedAt: now - 2 * minute },
+      record: { state: "idle" },
+    },
+    {
+      anchorName: "Lofi Girl",
+      roomId: "@lofigirl",
+      anchorId: "UCSJ4gkVC6NrvII8umztf0Ow",
+      platform: "youtube",
       monitoring: "enabled",
       live: { state: "offline", checkedAt: now - 2 * minute },
       record: { state: "idle" },
@@ -898,7 +913,7 @@ export function extractLink(input: string): string | null {
   return null;
 }
 
-/** 模拟 platforms::resolve：认抖音、快手和B站、虎牙、斗鱼、小红书、YY、网易CC、微博、AcFun、花椒、映客、酷狗、六间房、百度、知乎、猫耳FM、TikTok、Twitch，按链接内容返回各类错误。 */
+/** 模拟 platforms::resolve：认抖音、快手和B站、虎牙、斗鱼、小红书、YY、网易CC、微博、AcFun、花椒、映客、酷狗、六间房、百度、知乎、猫耳FM、TikTok、Twitch、YouTube，按链接内容返回各类错误。 */
 function resolveMock(input: string, tasks: TaskSnapshot[]): ResolvedRoom | CommandError {
   if (!input.trim()) return { kind: "invalid_input", message: "请输入直播间链接" };
   const url = extractLink(input);
@@ -950,8 +965,13 @@ function resolveMock(input: string, tasks: TaskSnapshot[]): ResolvedRoom | Comma
                                     ? "tiktok"
                                     : host === "twitch.tv" || host.endsWith(".twitch.tv")
                                       ? "twitch"
-                                      : null;
+                                      : host === "youtube.com" || host.endsWith(".youtube.com") || host === "youtu.be"
+                                        ? "youtube"
+                                        : null;
   if (!platform) return { kind: "unsupported_platform", message: `暂不支持 ${host} 的直播间` };
+  if (platform === "youtube" && /bot/i.test(path)) {
+    return { kind: "auth_required", message: "YouTube 要求登录确认不是机器人（代理节点的 IP 被 YouTube 风控）：请在设置里填写登录后的 YouTube Cookie，或换一个代理节点" };
+  }
   if (/login/i.test(path)) return { kind: "auth_required", message: "该直播间需要登录后观看，请填写 Cookie" };
   if (/timeout|network/i.test(path)) return { kind: "network", message: `连接 ${host} 超时` };
   if (/busy/i.test(path)) return { kind: "rate_limited", message: "当前服务繁忙（10011），请稍后再试" };
@@ -1209,6 +1229,30 @@ function resolveMock(input: string, tasks: TaskSnapshot[]): ResolvedRoom | Comma
       anchorId: task?.anchorId ?? null,
       anchorName: task?.anchorName ?? login,
       liveUrl: mockPlatforms.twitch.roomUrl(login),
+    };
+  }
+  if (platform === "youtube") {
+    const segments = path.split("/").filter(Boolean);
+    const videoId =
+      host === "youtu.be"
+        ? segments[0]
+        : segments[0] === "watch"
+          ? parsed.searchParams.get("v")
+          : segments[0] === "live"
+            ? segments[1]
+            : null;
+    const handle = segments[0]?.startsWith("@") && segments[0].length > 1 ? segments[0].toLowerCase() : null;
+    const roomId = videoId && /^[\w-]{11}$/.test(videoId) ? videoId : handle;
+    if (!roomId) {
+      return { kind: "invalid_url", message: `YouTube 链接里没有频道或直播视频，请复制频道的 /@名称/live 链接或直播视频链接: ${url}` };
+    }
+    const task = known(roomId);
+    return {
+      ...base,
+      roomId,
+      anchorId: task?.anchorId ?? null,
+      anchorName: task?.anchorName ?? roomId,
+      liveUrl: mockPlatforms.youtube.roomUrl(roomId),
     };
   }
   if (host === "v.douyin.com") {

@@ -35,6 +35,7 @@ pub mod tiktok;
 pub mod twitch;
 pub mod weibo;
 pub mod xiaohongshu;
+pub mod youtube;
 pub mod yy;
 pub mod zhihu;
 
@@ -52,6 +53,10 @@ pub const READ_TIMEOUT: Duration = Duration::from_secs(20);
 /// 单个请求从发出到读完的总上限，防止服务端一点点挤数据让请求永远不结束。
 /// 60 秒够慢网下载几百 KB 的未压缩页面；调度器在请求结束后才排下一次检测，不会叠加。
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// HTTP/2 响应头总大小上限。hyper 默认 16 KiB，YouTube 页面的响应头约 19 KiB
+/// （几条很长的 CSP 报告头），超过时 h2 直接重置这个流，请求报「error sending request」。
+pub const MAX_HEADER_LIST_SIZE: u32 = 256 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -77,6 +82,7 @@ pub enum Platform {
     Maoer,
     Tiktok,
     Twitch,
+    Youtube,
     /// 端到端测试用的本地直播间（feature `e2e`），发布版没有。
     #[cfg(feature = "e2e")]
     E2e,
@@ -105,6 +111,7 @@ impl Platform {
             Platform::Maoer => "maoerfm",
             Platform::Tiktok => "tiktok",
             Platform::Twitch => "twitch",
+            Platform::Youtube => "youtube",
             #[cfg(feature = "e2e")]
             Platform::E2e => "e2e",
         }
@@ -132,6 +139,7 @@ impl Platform {
             Platform::Maoer => "猫耳FM直播",
             Platform::Tiktok => "TikTok",
             Platform::Twitch => "Twitch",
+            Platform::Youtube => "YouTube",
             #[cfg(feature = "e2e")]
             Platform::E2e => "测试直播间",
         }
@@ -493,6 +501,7 @@ pub fn adapters() -> Vec<Box<dyn PlatformAdapter>> {
         Box::new(maoer::MaoerAdapter::new()),
         Box::new(tiktok::TiktokAdapter::new()),
         Box::new(twitch::TwitchAdapter::new()),
+        Box::new(youtube::YoutubeAdapter::new()),
     ];
     #[cfg(feature = "e2e")]
     list.push(Box::new(e2e::E2eAdapter));
@@ -598,6 +607,7 @@ pub(crate) async fn follow_short_link(
         .connect_timeout(CONNECT_TIMEOUT)
         .read_timeout(READ_TIMEOUT)
         .timeout(REQUEST_TIMEOUT)
+        .http2_max_header_list_size(MAX_HEADER_LIST_SIZE)
         .redirect(reqwest::redirect::Policy::none());
     if let Some(proxy) = normalize_proxy(proxy.unwrap_or_default())? {
         let proxy = reqwest::Proxy::all(&proxy)
@@ -731,6 +741,7 @@ pub(crate) fn build_client(proxy: Option<&str>) -> Result<reqwest::Client, Platf
         .connect_timeout(CONNECT_TIMEOUT)
         .read_timeout(READ_TIMEOUT)
         .timeout(REQUEST_TIMEOUT)
+        .http2_max_header_list_size(MAX_HEADER_LIST_SIZE)
         .redirect(reqwest::redirect::Policy::limited(10));
     if let Some(proxy) = normalize_proxy(proxy.unwrap_or_default())? {
         let proxy = reqwest::Proxy::all(&proxy)

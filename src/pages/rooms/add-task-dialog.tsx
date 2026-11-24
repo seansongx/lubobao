@@ -55,6 +55,7 @@ const mockExamples: { label: string; url: string }[] = [
   { label: "猫耳FM", url: "https://fm.missevan.com/live/868895007" },
   { label: "TikTok", url: "https://www.tiktok.com/@nbcnews/live" },
   { label: "Twitch", url: "https://www.twitch.tv/shroud" },
+  { label: "YouTube", url: "https://www.youtube.com/@LofiGirl/live" },
   { label: "需要登录", url: "https://live.douyin.com/login-required" },
   { label: "不支持的平台", url: "https://www.example.com/live/1" },
   { label: "网络错误", url: "https://live.douyin.com/network-timeout" },
