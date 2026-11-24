@@ -46,6 +46,7 @@ const mockExamples: { label: string; url: string }[] = [
   { label: "网易CC", url: "https://cc.163.com/583946984" },
   { label: "微博", url: "https://weibo.com/l/wblive/p/show/1022:2321325026370190442592" },
   { label: "AcFun", url: "https://live.acfun.cn/live/179922" },
+  { label: "酷狗", url: "https://fanxing2.kugou.com/50428671?refer=2177&sourceFrom=" },
   { label: "需要登录", url: "https://live.douyin.com/login-required" },
   { label: "不支持的平台", url: "https://www.example.com/live/1" },
   { label: "网络错误", url: "https://live.douyin.com/network-timeout" },
