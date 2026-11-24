@@ -24,6 +24,7 @@ pub mod huya;
 pub mod kuaishou;
 pub mod netease;
 mod sign;
+pub mod sixroom;
 pub mod weibo;
 pub mod xiaohongshu;
 pub mod yy;
@@ -47,6 +48,9 @@ pub enum Platform {
     Netease,
     Weibo,
     Acfun,
+    /// 六间房：平台键以数字开头，按 StreamCap 的 `6room` 序列化。
+    #[serde(rename = "6room")]
+    SixRoom,
     /// 端到端测试用的本地直播间（feature `e2e`），发布版没有。
     #[cfg(feature = "e2e")]
     E2e,
@@ -66,6 +70,7 @@ impl Platform {
             Platform::Netease => "netease",
             Platform::Weibo => "weibo",
             Platform::Acfun => "acfun",
+            Platform::SixRoom => "6room",
             #[cfg(feature = "e2e")]
             Platform::E2e => "e2e",
         }
@@ -84,6 +89,7 @@ impl Platform {
             Platform::Netease => "网易CC直播",
             Platform::Weibo => "微博直播",
             Platform::Acfun => "Acfun",
+            Platform::SixRoom => "六间房直播",
             #[cfg(feature = "e2e")]
             Platform::E2e => "测试直播间",
         }
@@ -386,6 +392,7 @@ pub fn adapters() -> Vec<Box<dyn PlatformAdapter>> {
         Box::new(netease::NeteaseAdapter::new()),
         Box::new(weibo::WeiboAdapter::new()),
         Box::new(acfun::AcfunAdapter::new()),
+        Box::new(sixroom::SixRoomAdapter::new()),
     ];
     #[cfg(feature = "e2e")]
     list.push(Box::new(e2e::E2eAdapter));

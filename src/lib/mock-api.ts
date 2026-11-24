@@ -33,6 +33,7 @@
 //   cc.163.com/{CC号}，ds.163.com/glive/?ccid={CC号}  网易CC直播间
 //   weibo.com/l/wblive/p/show/{live_id}  微博直播间；主页 weibo.com/u/{uid} 返回 auth_required（需要登录 Cookie）
 //   live.acfun.cn/live/{用户 id}       AcFun 直播间
+//   v.6.cn/{房间号}                    六间房直播间
 //   路径含 login / timeout / busy / parse  分别返回 auth_required / network / rate_limited / parse
 //   其他域名                            unsupported_platform；无法解析的文本为 invalid_url
 //
@@ -182,6 +183,7 @@ const mockPlatforms: Record<Platform, { name: string; roomUrl: (roomId: string) 
   netease: { name: "网易CC直播", roomUrl: (roomId) => `https://cc.163.com/${roomId}/` },
   weibo: { name: "微博直播", roomUrl: (roomId) => `https://weibo.com/l/wblive/p/show/${roomId}` },
   acfun: { name: "Acfun", roomUrl: (roomId) => `https://live.acfun.cn/live/${roomId}` },
+  "6room": { name: "六间房直播", roomUrl: (roomId) => `https://v.6.cn/${roomId}` },
 };
 
 function snapshot(id: TaskId, seed: MockSeed, createdAt: number): TaskSnapshot {
@@ -348,6 +350,15 @@ function seedTasks(now: number): TaskSnapshot[] {
       roomId: "179922",
       anchorId: "179922",
       platform: "acfun",
+      monitoring: "enabled",
+      live: { state: "offline", checkedAt: now - 2 * minute },
+      record: { state: "idle" },
+    },
+    {
+      anchorName: "夜聊电台",
+      roomId: "58018",
+      anchorId: "58282317",
+      platform: "6room",
       monitoring: "enabled",
       live: { state: "offline", checkedAt: now - 2 * minute },
       record: { state: "idle" },
@@ -753,7 +764,7 @@ function normalizeUrl(url: string): string {
 const DEMO_ROOM = "745964462470";
 const DEMO_ANCHOR = `MS4wLjABAAAA-mock-anchor-${DEMO_ROOM}`;
 
-/** 模拟 platforms::resolve：认抖音、快手和B站、虎牙、斗鱼、小红书、YY、网易CC、微博、AcFun，按链接内容返回各类错误。 */
+/** 模拟 platforms::resolve：认抖音、快手和B站、虎牙、斗鱼、小红书、YY、网易CC、微博、AcFun、六间房，按链接内容返回各类错误。 */
 function resolveMock(input: string, tasks: TaskSnapshot[]): ResolvedRoom | CommandError {
   const url = input.trim();
   if (!url) return { kind: "invalid_input", message: "请输入直播间链接" };
@@ -786,7 +797,9 @@ function resolveMock(input: string, tasks: TaskSnapshot[]): ResolvedRoom | Comma
                   ? "weibo"
                   : host === "live.acfun.cn"
                     ? "acfun"
-                    : null;
+                    : host === "v.6.cn" || host === "m.v.6.cn"
+                      ? "6room"
+                      : null;
   if (!platform) return { kind: "unsupported_platform", message: `暂不支持 ${host} 的直播间` };
   if (/login/i.test(path)) return { kind: "auth_required", message: "该直播间需要登录后观看，请填写 Cookie" };
   if (/timeout|network/i.test(path)) return { kind: "network", message: `连接 ${host} 超时` };
@@ -917,6 +930,19 @@ function resolveMock(input: string, tasks: TaskSnapshot[]): ResolvedRoom | Comma
       anchorId: task?.anchorId ?? roomId,
       anchorName: task?.anchorName ?? `AcFun 主播 ${roomId}`,
       liveUrl: mockPlatforms.acfun.roomUrl(roomId),
+    };
+  }
+  if (platform === "6room") {
+    const match = /^\/(\d+)\/?$/.exec(path);
+    if (!match) return { kind: "invalid_url", message: `不是可识别的六间房直播链接: ${url}` };
+    const roomId = match[1];
+    const task = known(roomId);
+    return {
+      ...base,
+      roomId,
+      anchorId: task?.anchorId ?? `6room-${roomId}`,
+      anchorName: task?.anchorName ?? `六间房主播 ${roomId}`,
+      liveUrl: mockPlatforms["6room"].roomUrl(roomId),
     };
   }
   if (host === "v.douyin.com") {

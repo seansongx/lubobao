@@ -1,0 +1,29 @@
+{
+  "flag": "001",
+  "content": {
+    "roominfo": {
+      "id": "10000002",
+      "alias": "下播主播",
+      "rid": "10002",
+      "status": "1",
+      "rtype": "u1",
+      "rtypename": "舞区"
+    },
+    "liveinfo": {
+      "title": "",
+      "type": 0,
+      "recordtype": 1,
+      "videotype": 1,
+      "flvtitle": "",
+      "sound": "",
+      "uploadurl": "",
+      "spredPic": "https://vi0.6rooms.com/live/test.jpg",
+      "starttime": "",
+      "endtime": "",
+      "pospic": "https://vi0.6rooms.com/live/test.jpg",
+      "rioUid": 10000002,
+      "largepic": ""
+    },
+    "isFav": 0
+  }
+}

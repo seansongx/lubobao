@@ -1,0 +1,46 @@
+{
+  "flag": "001",
+  "content": {
+    "roominfo": {
+      "id": "10000001",
+      "alias": "测试主播🎤",
+      "rid": "10001",
+      "status": "1",
+      "rtype": "u2",
+      "rtypename": "脱口秀"
+    },
+    "liveinfo": {
+      "id": "200000001",
+      "rid": "10000001",
+      "title": "",
+      "category": "0",
+      "memo": {
+        "tplId": 0
+      },
+      "pic": "",
+      "starttime": "1795474660",
+      "endtime": "1795503460",
+      "type": "10",
+      "recordtype": 1,
+      "videotype": "1",
+      "livetype": "1",
+      "videotypes": "1",
+      "h264": "true",
+      "uploadip2": "",
+      "sound": "",
+      "flag": "0",
+      "automation": "0",
+      "isvideo": "0",
+      "flvtitle": "v10000001-200000001",
+      "xflvtitle": "",
+      "soundsize": "",
+      "proxyary": "",
+      "uploadurl": "",
+      "spredPic": "https://vi0.6rooms.com/live/test.jpg",
+      "pospic": "https://vi0.6rooms.com/live/test.jpg",
+      "rioUid": "10000001",
+      "largepic": ""
+    },
+    "isFav": 0
+  }
+}

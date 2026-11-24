@@ -14,6 +14,7 @@ LuBoBao (录播宝) is licensed under the MIT License (see [LICENSE](LICENSE)). 
 - Also used in: the NetEase CC adapter in `crates/lubobao-core/src/platforms/netease.rs` follows `streamget/platforms/netease/live_stream.py` (`NeteaseLiveStream`): the link form, request headers, result fields (`record_url = flv_url or m3u8_url`, `sharefile` as the HLS stream) and the position-based quality choice. The room data itself comes from CC's JSON APIs because the page StreamGet parses no longer exists.
 - Also used in: the Weibo adapter in `crates/lubobao-core/src/platforms/weibo.rs` is ported from `streamget/platforms/weibo/live_stream.py` (`WeiboLiveStream`): the link forms, request headers and default visitor cookie, the `mymblog` lookup for profile links, the `pc/anchor/live` room API and deriving the source stream by removing the transcode suffix.
 - Also used in: the AcFun adapter in `crates/lubobao-core/src/platforms/acfun.rs` is ported from `streamget/platforms/acfun/live_stream.py` (`AcfunLiveStream`): the page headers and default cookie, the `userInfo` live check, the visitor login with a random `_did`, the `startPlay` request and sorting its FLV representations by bitrate.
+- Also used in: the 六间房 (6.cn) adapter in `crates/lubobao-core/src/platforms/sixroom.rs` is ported from `streamget/platforms/sixroom/live_stream.py` (`SixRoomLiveStream`): the iOS app request headers, reading the anchor uid from the room page, the `coop-mobile-inroom` form request and building the FLV address from `flvtitle`.
 
 ```
 MIT License
