@@ -294,6 +294,7 @@ const supportedPlatforms: { key: Platform; name: string }[] = [
   { key: "acfun", name: "AcFun" },
   { key: "huajiao", name: "花椒" },
   { key: "inke", name: "映客" },
+  { key: "kugou", name: "酷狗" },
 ];
 
 export function NetworkSection({ ctx }: SectionProps) {
@@ -342,7 +343,7 @@ export function NetworkSection({ ctx }: SectionProps) {
       />
       <TextField
         label="走代理的平台"
-        description="用逗号分隔的平台标识。抖音、快手、B站、虎牙、斗鱼、小红书、YY、网易CC、微博、AcFun、花椒、映客是国内平台，通常不需要代理。"
+        description="用逗号分隔的平台标识。抖音、快手、B站、虎牙、斗鱼、小红书、YY、网易CC、微博、AcFun、花椒、映客、酷狗是国内平台，通常不需要代理。"
         value={platformList}
         disabled={!settings.enable_proxy}
         error={platforms.error}

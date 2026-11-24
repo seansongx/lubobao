@@ -1,0 +1,57 @@
+{
+  "code": 0,
+  "time": 1795487208,
+  "msg": "success",
+  "data": {
+    "videoAppId": 10000,
+    "status": 1,
+    "clientType": 1,
+    "liveType": 1,
+    "defLine": 5,
+    "width": 1440,
+    "height": 1080,
+    "lines": [
+      {
+        "sid": 5,
+        "streamProfiles": [
+          {
+            "layout": 1,
+            "codec": 1,
+            "streamName": "fx_hifi_1700000001",
+            "rate": 5,
+            "state": 0,
+            "hls": [],
+            "rtmp": ["rtmp://tx105.liveplay.live.kugou.com/live/fx_hifi_1700000001?cn=fx&fx-ps=5-0-1&token=a"],
+            "flv": ["http://tx105.liveplay.live.kugou.com/live/fx_hifi_1700000001.flv?cn=fx&fx-ps=5-0-1&token=b"],
+            "httpsFlv": ["https://tx105.liveplay.live.kugou.com/live/fx_hifi_1700000001.flv?cn=fx&fx-ps=5-0-1&token=b"],
+            "httpsHls": [],
+            "httpsQuicFlv": [],
+            "webrtc": []
+          }
+        ]
+      },
+      {
+        "sid": 40,
+        "streamProfiles": [
+          {
+            "layout": 1,
+            "codec": 1,
+            "streamName": "fx_hifi_1700000001",
+            "rate": 5,
+            "state": 0,
+            "hls": [],
+            "rtmp": ["rtmp://tx2.liveplay.live.kugou.com/live/fx_hifi_1700000001?cn=fx&fx-ps=40-0-1&token=a"],
+            "flv": ["http://tx2.liveplay.live.kugou.com/live/fx_hifi_1700000001.flv?cn=fx&fx-ps=40-0-1&token=b"],
+            "httpsFlv": ["https://tx2.liveplay.live.kugou.com/live/fx_hifi_1700000001.flv?cn=fx&fx-ps=40-0-1&token=b"],
+            "httpsHls": [],
+            "httpsQuicFlv": [],
+            "webrtc": []
+          }
+        ]
+      }
+    ],
+    "kugouId": 1700000001,
+    "roomId": 50000001,
+    "encryptMode": 0
+  }
+}

@@ -16,6 +16,7 @@ LuBoBao (录播宝) is licensed under the MIT License (see [LICENSE](LICENSE)). 
 - Also used in: the Inke adapter in `crates/lubobao-core/src/platforms/inke.rs` follows `streamget/platforms/inke/live_stream.py` (`InkeLiveStream`): the link form (`uid` and `id` query parameters), the request headers and the `live_share_pc` anchor lookup. The stream itself comes from Inke's `now_publish` app API because `live_share_pc` no longer returns stream addresses.
 - Also used in: the AcFun adapter in `crates/lubobao-core/src/platforms/acfun.rs` is ported from `streamget/platforms/acfun/live_stream.py` (`AcfunLiveStream`): the page headers and default cookie, the `userInfo` live check, the visitor login with a random `_did`, the `startPlay` request and sorting its FLV representations by bitrate.
 - Also used in: the Huajiao adapter in `crates/lubobao-core/src/platforms/huajiao.rs` follows `streamget/platforms/huajiao/live_stream.py` (`HuajiaoLiveStream`): the request headers, the `getUserFeeds` live check (`rtop`), the FLV URL (`pull_url` plus `&codec={encode}`) and the `getFeedInfo` lookup of a broadcast id.
+- Also used in: the Kugou adapter in `crates/lubobao-core/src/platforms/kugou.rs` is ported from `streamget/platforms/kugou/live_stream.py` (`KugouLiveStream`): the room id taken from the link, the page headers, the `getEnterRoomInfo` live check, the `mutiline/streamaddr` request parameters and taking the HTTPS FLV of the last stream line.
 
 ```
 MIT License

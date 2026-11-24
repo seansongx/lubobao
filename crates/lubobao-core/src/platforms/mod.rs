@@ -24,6 +24,7 @@ pub mod huajiao;
 pub mod huya;
 pub mod inke;
 pub mod kuaishou;
+pub mod kugou;
 pub mod netease;
 mod sign;
 pub mod weibo;
@@ -51,6 +52,7 @@ pub enum Platform {
     Acfun,
     Huajiao,
     Inke,
+    Kugou,
     /// 端到端测试用的本地直播间（feature `e2e`），发布版没有。
     #[cfg(feature = "e2e")]
     E2e,
@@ -72,6 +74,7 @@ impl Platform {
             Platform::Acfun => "acfun",
             Platform::Huajiao => "huajiao",
             Platform::Inke => "inke",
+            Platform::Kugou => "kugou",
             #[cfg(feature = "e2e")]
             Platform::E2e => "e2e",
         }
@@ -92,6 +95,7 @@ impl Platform {
             Platform::Acfun => "Acfun",
             Platform::Huajiao => "花椒直播",
             Platform::Inke => "映客直播",
+            Platform::Kugou => "酷狗直播",
             #[cfg(feature = "e2e")]
             Platform::E2e => "测试直播间",
         }
@@ -396,6 +400,7 @@ pub fn adapters() -> Vec<Box<dyn PlatformAdapter>> {
         Box::new(acfun::AcfunAdapter::new()),
         Box::new(huajiao::HuajiaoAdapter::new()),
         Box::new(inke::InkeAdapter::new()),
+        Box::new(kugou::KugouAdapter::new()),
     ];
     #[cfg(feature = "e2e")]
     list.push(Box::new(e2e::E2eAdapter));

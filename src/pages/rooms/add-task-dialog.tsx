@@ -48,6 +48,7 @@ const mockExamples: { label: string; url: string }[] = [
   { label: "AcFun", url: "https://live.acfun.cn/live/179922" },
   { label: "花椒", url: "https://www.huajiao.com/user/243575475" },
   { label: "映客", url: "https://www.inke.cn/liveroom/index.html?uid=22954469&id=1720860391070904" },
+  { label: "酷狗", url: "https://fanxing2.kugou.com/50428671?refer=2177&sourceFrom=" },
   { label: "需要登录", url: "https://live.douyin.com/login-required" },
   { label: "不支持的平台", url: "https://www.example.com/live/1" },
   { label: "网络错误", url: "https://live.douyin.com/network-timeout" },
