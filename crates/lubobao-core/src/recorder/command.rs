@@ -40,6 +40,9 @@ pub struct CommandSpec<'a> {
     pub segment_secs: Option<u64>,
     /// 已经过 [`ffmpeg_proxy`] 规范化的 HTTP 代理地址。
     pub proxy: Option<&'a str>,
+    /// HLS 分片扩展名与容器不符时也照常读取（`-extension_picky 0`），StreamCap
+    /// `RELAXED_HLS_EXTENSION_CHECK_PLATFORMS`（CHZZK）。只对 HLS 输入生效。
+    pub relaxed_hls_extension: bool,
 }
 
 /// 生成 ffmpeg 的参数列表（不含程序路径）。
@@ -91,6 +94,10 @@ pub fn build_args(spec: &CommandSpec<'_>) -> Vec<OsString> {
     ]);
     if spec.source_format == SourceFormat::Hls {
         push(&["-m3u8_hold_counters", HLS_HOLD_COUNTERS]);
+        if spec.relaxed_hls_extension {
+            // FFmpeg 8 起 HLS 解复用器默认检查分片扩展名与容器是否一致。
+            push(&["-extension_picky", "0"]);
+        }
     }
     push(&["-i", spec.source_url]);
 
@@ -243,6 +250,7 @@ mod tests {
             output_path: &output,
             segment_secs: None,
             proxy: None,
+            relaxed_hls_extension: false,
         });
 
         let input = position(&args, "-i");
@@ -268,6 +276,30 @@ mod tests {
     }
 
     #[test]
+    fn relaxed_hls_extension_is_an_input_option_of_hls_only() {
+        let headers = BTreeMap::new();
+        let output = PathBuf::from("out.ts");
+        let spec = |format, relaxed| CommandSpec {
+            source_url: "https://pull.example.com/live/abc.m3u8",
+            source_format: format,
+            headers: &headers,
+            output_path: &output,
+            segment_secs: None,
+            proxy: None,
+            relaxed_hls_extension: relaxed,
+        };
+        let args = args_of(&spec(SourceFormat::Hls, true));
+        assert_eq!(value_after(&args, "-extension_picky"), Some("0"));
+        assert!(position(&args, "-extension_picky") < position(&args, "-i"));
+        for other in [
+            spec(SourceFormat::Hls, false),
+            spec(SourceFormat::Flv, true),
+        ] {
+            assert!(!args_of(&other).iter().any(|arg| arg == "-extension_picky"));
+        }
+    }
+
+    #[test]
     fn hls_command_limits_playlist_hold() {
         let headers = BTreeMap::new();
         let output = PathBuf::from("out.ts");
@@ -278,6 +310,7 @@ mod tests {
             output_path: &output,
             segment_secs: None,
             proxy: None,
+            relaxed_hls_extension: false,
         });
         let input = position(&args, "-i");
         assert!(position(&args, "-m3u8_hold_counters") < input);
@@ -307,6 +340,7 @@ mod tests {
             output_path: &output,
             segment_secs: None,
             proxy: Some("http://127.0.0.1:7890"),
+            relaxed_hls_extension: false,
         });
         let input = position(&args, "-i");
         assert_eq!(
@@ -358,6 +392,7 @@ mod tests {
             output_path: &output,
             segment_secs: Some(1800),
             proxy: None,
+            relaxed_hls_extension: false,
         });
         assert_eq!(value_after(&args, "-f"), Some("segment"));
         assert_eq!(value_after(&args, "-segment_time"), Some("1800"));
@@ -377,6 +412,7 @@ mod tests {
             output_path: &output,
             segment_secs: Some(0),
             proxy: None,
+            relaxed_hls_extension: false,
         });
         assert_eq!(value_after(&args, "-segment_time"), Some("1"));
     }

@@ -303,6 +303,7 @@ const supportedPlatforms: { key: Platform; name: string }[] = [
   { key: "twitch", name: "Twitch" },
   { key: "youtube", name: "YouTube" },
   { key: "sooplive", name: "SOOP" },
+  { key: "chzzk", name: "CHZZK" },
 ];
 
 export function NetworkSection({ ctx }: SectionProps) {
@@ -338,7 +339,7 @@ export function NetworkSection({ ctx }: SectionProps) {
         label="代理地址"
         description={
           /^socks/i.test(settings.proxy_address ?? "")
-            ? "当前是 SOCKS 代理：只用于检测开播，录制时不走代理，TikTok、Twitch、YouTube、SOOP 在中国大陆会录制失败。Clash 等代理软件的混合端口也支持 HTTP，可改填 http:// 地址"
+            ? "当前是 SOCKS 代理：只用于检测开播，录制时不走代理，TikTok、Twitch、YouTube、SOOP、CHZZK 在中国大陆会录制失败。Clash 等代理软件的混合端口也支持 HTTP，可改填 http:// 地址"
             : "例如 http://127.0.0.1:7890"
         }
         placeholder="http://127.0.0.1:7890"
@@ -351,7 +352,7 @@ export function NetworkSection({ ctx }: SectionProps) {
       />
       <TextField
         label="走代理的平台"
-        description="用逗号分隔的平台标识。抖音、快手、B站、虎牙、斗鱼、小红书、YY、网易CC、微博、AcFun、花椒、映客、酷狗、六间房、百度、知乎、猫耳FM是国内平台，通常不需要代理；TikTok、Twitch、YouTube、SOOP 在中国大陆要走代理。"
+        description="用逗号分隔的平台标识。抖音、快手、B站、虎牙、斗鱼、小红书、YY、网易CC、微博、AcFun、花椒、映客、酷狗、六间房、百度、知乎、猫耳FM是国内平台，通常不需要代理；TikTok、Twitch、YouTube、SOOP、CHZZK 在中国大陆要走代理。"
         value={platformList}
         disabled={!settings.enable_proxy}
         error={platforms.error}

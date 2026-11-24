@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 pub mod acfun;
 pub mod baidu;
 pub mod bilibili;
+pub mod chzzk;
 pub mod douyin;
 pub mod douyu;
 #[cfg(feature = "e2e")]
@@ -85,6 +86,7 @@ pub enum Platform {
     Twitch,
     Youtube,
     Sooplive,
+    Chzzk,
     /// 端到端测试用的本地直播间（feature `e2e`），发布版没有。
     #[cfg(feature = "e2e")]
     E2e,
@@ -115,9 +117,17 @@ impl Platform {
             Platform::Twitch => "twitch",
             Platform::Youtube => "youtube",
             Platform::Sooplive => "sooplive",
+            Platform::Chzzk => "chzzk",
             #[cfg(feature = "e2e")]
             Platform::E2e => "e2e",
         }
+    }
+
+    /// HLS segments whose extension does not match their container: the
+    /// recorder passes `-extension_picky 0`. StreamCap's
+    /// `RELAXED_HLS_EXTENSION_CHECK_PLATFORMS` (`["chzzk"]`).
+    pub fn relaxed_hls_extension(self) -> bool {
+        matches!(self, Platform::Chzzk)
     }
 
     /// Display name, matching the `platform` field StreamGet reports.
@@ -144,6 +154,7 @@ impl Platform {
             Platform::Twitch => "Twitch",
             Platform::Youtube => "YouTube",
             Platform::Sooplive => "SOOP",
+            Platform::Chzzk => "CHZZK",
             #[cfg(feature = "e2e")]
             Platform::E2e => "测试直播间",
         }
@@ -513,6 +524,7 @@ pub fn adapters() -> Vec<Box<dyn PlatformAdapter>> {
         Box::new(twitch::TwitchAdapter::new()),
         Box::new(youtube::YoutubeAdapter::new()),
         Box::new(sooplive::SoopAdapter::new()),
+        Box::new(chzzk::ChzzkAdapter::new()),
     ];
     #[cfg(feature = "e2e")]
     list.push(Box::new(e2e::E2eAdapter));
