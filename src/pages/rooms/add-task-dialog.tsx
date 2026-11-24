@@ -60,6 +60,7 @@ const mockExamples: { label: string; url: string }[] = [
   { label: "CHZZK", url: "https://chzzk.naver.com/live/0b33823ac81de48d5b78a38cdbc0ab94" },
   { label: "TwitCasting", url: "https://twitcasting.tv/twitcasting_jp" },
   { label: "ShowRoom", url: "https://www.showroom-live.com/r/yuo0503" },
+  { label: "17Live", url: "https://17.live/en/live/321847" },
   { label: "需要登录", url: "https://live.douyin.com/login-required" },
   { label: "不支持的平台", url: "https://www.example.com/live/1" },
   { label: "网络错误", url: "https://live.douyin.com/network-timeout" },

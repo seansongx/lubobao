@@ -306,6 +306,7 @@ const supportedPlatforms: { key: Platform; name: string }[] = [
   { key: "chzzk", name: "CHZZK" },
   { key: "twitcasting", name: "TwitCasting" },
   { key: "showroom", name: "ShowRoom" },
+  { key: "17live", name: "17Live" },
 ];
 
 export function NetworkSection({ ctx }: SectionProps) {
