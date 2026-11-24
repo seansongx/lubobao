@@ -38,8 +38,17 @@ pub mod zhihu;
 /// Boxed future returned by adapter methods so adapters can be used as trait objects.
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
-/// Request timeout used for page and API requests (StreamGet uses 15–20 s).
-pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
+/// 连接（DNS、TCP、TLS、代理握手）的时限。国内平台正常在 1 秒内连上，10 秒连不上
+/// 基本就是网络或代理不通，早点失败好让调度器按网络错误重试。
+pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// 两次读之间最长停顿多久算失败（StreamGet 整请求 15–20 秒，这里改成按停顿计时）。
+/// 慢网下大响应要持续下载很久，只要数据还在来就不应中断；20 秒一个字节都没有才算卡住。
+pub const READ_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// 单个请求从发出到读完的总上限，防止服务端一点点挤数据让请求永远不结束。
+/// 60 秒够慢网下载几百 KB 的未压缩页面；调度器在请求结束后才排下一次检测，不会叠加。
+pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -359,14 +368,64 @@ impl std::error::Error for PlatformError {}
 
 impl From<reqwest::Error> for PlatformError {
     fn from(error: reqwest::Error) -> Self {
-        if error.is_decode() {
-            return PlatformError::Parse(error.to_string());
-        }
         if let Some(status) = error.status() {
             return classify_http_status(status.as_u16(), &error.to_string());
         }
+        let host = error
+            .url()
+            .and_then(|url| url.host_str())
+            .map(|host| format!("（{host}）"))
+            .unwrap_or_default();
+        // 超时在 reqwest 里可能报成「error decoding response body」（读 body 时到时），
+        // 先按超时归类，给出看得懂的原因。
+        if error.is_timeout() {
+            return PlatformError::Network(format!(
+                "请求超时{host}：网络较慢或平台没有响应，稍后会自动重试"
+            ));
+        }
+        if error.is_connect() {
+            return PlatformError::Network(format!(
+                "无法连接平台{host}：请检查网络或代理设置（{}）",
+                error_chain(&error)
+            ));
+        }
+        if error.is_decode() {
+            // `.json()` 解析失败才是平台返回的数据变了；其余是读 body 时连接中断。
+            if has_source::<serde_json::Error>(&error) {
+                return PlatformError::Parse(error.to_string());
+            }
+            return PlatformError::Network(format!(
+                "读取平台响应时连接中断{host}：网络不稳定（{}）",
+                error_chain(&error)
+            ));
+        }
         PlatformError::Network(error.to_string())
     }
+}
+
+/// Whether the error's source chain contains an error of type `T`.
+fn has_source<T: std::error::Error + 'static>(error: &(dyn std::error::Error + 'static)) -> bool {
+    let mut current = error.source();
+    while let Some(source) = current {
+        if source.is::<T>() {
+            return true;
+        }
+        current = source.source();
+    }
+    false
+}
+
+/// The error and its sources joined with「: 」, since reqwest's own message
+/// (such as "error sending request") hides the actual cause.
+fn error_chain(error: &(dyn std::error::Error + 'static)) -> String {
+    let mut message = error.to_string();
+    let mut current = error.source();
+    while let Some(source) = current {
+        message.push_str(": ");
+        message.push_str(&source.to_string());
+        current = source.source();
+    }
+    message
 }
 
 /// Map an HTTP error status to an error kind.
@@ -517,6 +576,8 @@ pub fn normalize_proxy(proxy: &str) -> Result<Option<String>, PlatformError> {
 /// Build an HTTP client that follows redirects and uses the given proxy.
 pub(crate) fn build_client(proxy: Option<&str>) -> Result<reqwest::Client, PlatformError> {
     let mut builder = reqwest::Client::builder()
+        .connect_timeout(CONNECT_TIMEOUT)
+        .read_timeout(READ_TIMEOUT)
         .timeout(REQUEST_TIMEOUT)
         .redirect(reqwest::redirect::Policy::limited(10));
     if let Some(proxy) = normalize_proxy(proxy.unwrap_or_default())? {
@@ -737,5 +798,112 @@ mod tests {
         assert_eq!(classify_http_status(429, "x").kind(), "rate_limited");
         assert_eq!(classify_http_status(404, "x").kind(), "invalid_url");
         assert_eq!(classify_http_status(502, "x").kind(), "network");
+    }
+
+    /// One-shot local HTTP server: answers the first request with `head` and
+    /// `body`, then keeps the connection open for `linger` before closing.
+    /// Returns the URL and the request head it received.
+    async fn one_shot_server(
+        head: String,
+        body: Vec<u8>,
+        linger: Duration,
+    ) -> (String, tokio::sync::oneshot::Receiver<String>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            let mut chunk = [0u8; 1024];
+            while !request.windows(4).any(|w| w == b"\r\n\r\n") {
+                let read = stream.read(&mut chunk).await.unwrap();
+                if read == 0 {
+                    break;
+                }
+                request.extend_from_slice(&chunk[..read]);
+            }
+            let _ = sender.send(String::from_utf8_lossy(&request).to_string());
+            stream.write_all(head.as_bytes()).await.unwrap();
+            stream.write_all(&body).await.unwrap();
+            stream.flush().await.unwrap();
+            tokio::time::sleep(linger).await;
+        });
+        (format!("http://{addr}/api"), receiver)
+    }
+
+    #[tokio::test]
+    async fn platform_client_asks_for_gzip_and_decodes_it() {
+        use flate2::{Compression, write::GzEncoder};
+        use std::io::Write;
+        let json = format!(r#"{{"data":"{}"}}"#, "直播".repeat(2000));
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(json.as_bytes()).unwrap();
+        let gzipped = encoder.finish().unwrap();
+        assert!(gzipped.len() < json.len() / 10);
+        let head = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Encoding: gzip\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            gzipped.len()
+        );
+        let (url, request) = one_shot_server(head, gzipped, Duration::ZERO).await;
+
+        let client = build_client(None).unwrap();
+        let text = client.get(&url).send().await.unwrap().text().await.unwrap();
+
+        assert_eq!(text, json);
+        let request = request.await.unwrap().to_ascii_lowercase();
+        assert!(
+            request
+                .lines()
+                .any(|line| line.starts_with("accept-encoding:") && line.contains("gzip")),
+            "{request}"
+        );
+    }
+
+    #[tokio::test]
+    async fn stalled_body_is_a_readable_network_timeout() {
+        // 头已发出、body 卡住：reqwest 报「error decoding response body」，要归为网络超时。
+        let head = "HTTP/1.1 200 OK\r\nContent-Length: 1000\r\nConnection: close\r\n\r\n";
+        let (url, _request) =
+            one_shot_server(head.into(), b"{\"a\":".to_vec(), Duration::from_secs(5)).await;
+        let client = reqwest::Client::builder()
+            .read_timeout(Duration::from_millis(200))
+            .build()
+            .unwrap();
+
+        let error = client
+            .get(&url)
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap_err();
+        let error = PlatformError::from(error);
+
+        assert_eq!(error.kind(), "network", "{error:?}");
+        assert!(error.message().contains("请求超时"), "{error:?}");
+        assert!(error.message().contains("127.0.0.1"), "{error:?}");
+    }
+
+    #[tokio::test]
+    async fn truncated_body_is_a_network_error_not_parse() {
+        let head = "HTTP/1.1 200 OK\r\nContent-Length: 1000\r\nConnection: close\r\n\r\n";
+        let (url, _request) =
+            one_shot_server(head.into(), b"{\"a\":".to_vec(), Duration::ZERO).await;
+
+        let client = build_client(None).unwrap();
+        let error = client
+            .get(&url)
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap_err();
+        let error = PlatformError::from(error);
+
+        assert_eq!(error.kind(), "network", "{error:?}");
+        assert!(error.message().contains("连接中断"), "{error:?}");
     }
 }

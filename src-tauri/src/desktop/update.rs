@@ -360,8 +360,11 @@ fn build_updater<R: Runtime>(
         .updater_builder()
         .endpoints(vec![endpoint])?
         .timeout(check_timeout)
+        // 工作区为平台请求打开了 reqwest 的 gzip，这里关掉自动解压：更新包按原始字节验签，
+        // 行为与打开前相同（不发 Accept-Encoding）。
         .configure_client(|client| {
             client
+                .no_gzip()
                 .connect_timeout(CONNECT_TIMEOUT)
                 .read_timeout(READ_TIMEOUT)
         });
