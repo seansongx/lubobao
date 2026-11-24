@@ -9,7 +9,12 @@ use lubobao_core::platforms::{
 };
 
 /// The five README link types, each with the room id (web_rid or 抖音号) it must resolve to.
-const README_LINKS: [(&str, &str, &str); 5] = [
+const README_LINKS: [(&str, &str, &str); 6] = [
+    (
+        "web room from category page (live_web_rid)",
+        "https://live.douyin.com/?anchor_id=2292900791589195&category_name=all&is_vs=0&live_web_rid=228052615835&page_type=main_category_page&vs_ep_group_id=&vs_episode_id=&vs_episode_stage=&vs_season_id=",
+        "228052615835",
+    ),
     (
         "web room",
         "https://live.douyin.com/745964462470",

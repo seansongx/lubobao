@@ -451,7 +451,7 @@ function LoadError({ error, onRetry }: { error: unknown; onRetry: () => void }) 
           <AlertTriangle className="size-5" aria-hidden />
         </span>
         <p className="m-0 text-sm font-medium">无法读取直播间列表</p>
-        <p className="m-0 break-words text-muted-foreground">{view.message || view.title}</p>
+        <p className="m-0 wrap-anywhere text-muted-foreground">{view.message || view.title}</p>
         <Button className="mt-2" onClick={onRetry}>
           重试
         </Button>

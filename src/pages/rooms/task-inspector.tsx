@@ -114,7 +114,7 @@ function StateCell({ label, value, reason }: { label: string; value: string; rea
     <div className="min-w-0 rounded-md border border-black/5 bg-card px-2.5 py-1.5 dark:border-white/5">
       <small className="block text-xs text-muted-foreground">{label}</small>
       <b className="block truncate text-[12.5px] font-medium">{value}</b>
-      {reason && <span className="mt-0.5 block text-xs leading-snug break-words text-muted-foreground">{reason}</span>}
+      {reason && <span className="mt-0.5 block text-xs leading-snug wrap-anywhere text-muted-foreground">{reason}</span>}
     </div>
   );
 }
@@ -261,7 +261,7 @@ export const TaskInspector = memo(function TaskInspector({ task, onClose, onEdit
                     {formatClock(entry.at)}
                   </time>
                   <span className={cn("mt-1.5 size-2 rounded-full", activityDot[entry.kind])} aria-hidden />
-                  <span className="break-words select-text">{entry.message}</span>
+                  <span className="wrap-anywhere select-text">{entry.message}</span>
                 </li>
               ))}
             </ul>

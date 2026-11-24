@@ -108,7 +108,20 @@ pub fn parse_link(input: &str) -> Result<DouyinLink, PlatformError> {
     match host.as_str() {
         "live.douyin.com" => {
             // StreamGet takes the last path segment of the URL without its query.
-            let id = segments.last().ok_or_else(invalid)?.to_string();
+            let id = match segments.last() {
+                Some(id) => id.to_string(),
+                // Links opened from the category pages have no path and carry the room
+                // in `live_web_rid` (an intentional extension over StreamCap).
+                None => url
+                    .query_pairs()
+                    .find(|(key, value)| {
+                        key == "live_web_rid"
+                            && !value.is_empty()
+                            && value.chars().all(|c| c.is_ascii_digit())
+                    })
+                    .map(|(_, value)| value.into_owned())
+                    .ok_or_else(invalid)?,
+            };
             if id.chars().all(|c| c.is_ascii_digit()) {
                 Ok(DouyinLink::WebRoom { web_rid: id })
             } else {
@@ -899,6 +912,37 @@ mod tests {
                 .unwrap()
                 .normalized_url(),
             "https://v.douyin.com/iQFeBnt/"
+        );
+    }
+
+    #[test]
+    fn reads_live_web_rid_from_category_page_links() {
+        let input = "https://live.douyin.com/?anchor_id=2292900791589195&category_name=all&is_vs=0&live_web_rid=228052615835&page_type=main_category_page&vs_ep_group_id=&vs_episode_id=&vs_episode_stage=&vs_season_id=";
+        let link = parse_link(input).unwrap();
+        assert_eq!(
+            link,
+            DouyinLink::WebRoom {
+                web_rid: "228052615835".into()
+            }
+        );
+        assert_eq!(
+            link.normalized_url(),
+            "https://live.douyin.com/228052615835"
+        );
+        assert!(DouyinAdapter::new().matches(input));
+        for bad in [
+            "https://live.douyin.com/?live_web_rid=abc",
+            "https://live.douyin.com/?live_web_rid=",
+            "https://live.douyin.com/?foo=1",
+        ] {
+            assert_eq!(parse_link(bad).unwrap_err().kind(), "invalid_url", "{bad}");
+        }
+        // A non-empty path wins over the query.
+        assert_eq!(
+            parse_link("https://live.douyin.com/745964462470?live_web_rid=1").unwrap(),
+            DouyinLink::WebRoom {
+                web_rid: "745964462470".into()
+            }
         );
     }
 

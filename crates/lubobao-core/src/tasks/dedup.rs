@@ -160,6 +160,14 @@ mod tests {
         let same = config("live.douyin.com/745964462470?from=share", None, None);
         assert_eq!(find_duplicates(&tasks, &same, None), vec![1]);
 
+        // 分类页进入的链接把房间号放在 live_web_rid 参数里。
+        let category = config(
+            "https://live.douyin.com/?anchor_id=1&category_name=all&live_web_rid=745964462470&page_type=main_category_page",
+            None,
+            None,
+        );
+        assert_eq!(find_duplicates(&tasks, &category, None), vec![1]);
+
         // 用户输入的短链与平台返回的规范地址相同也算重复。
         let via_live_url = config(
             "https://v.douyin.com/abc",
