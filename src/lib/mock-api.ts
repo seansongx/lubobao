@@ -36,6 +36,7 @@
 //   www.huajiao.com/user/{主播ID}       花椒主播；/l/{直播ID} 演示为主播 243575475，README 示例 /l/345096174 返回 invalid_url（直播已结束）
 //   www.inke.cn/liveroom/index.html?uid={主播 uid}[&id={直播 id}]  映客直播间（按 uid 识别）
 //   fanxing.kugou.com/{房间号}，…?roomId={房间号}  酷狗直播间
+//   v.6.cn/{房间号}                    六间房直播间
 //   路径含 login / timeout / busy / parse  分别返回 auth_required / network / rate_limited / parse
 //   其他域名                            unsupported_platform；无法解析的文本为 invalid_url
 //
@@ -188,6 +189,7 @@ const mockPlatforms: Record<Platform, { name: string; roomUrl: (roomId: string) 
   huajiao: { name: "花椒直播", roomUrl: (roomId) => `https://www.huajiao.com/user/${roomId}` },
   inke: { name: "映客直播", roomUrl: (roomId) => `https://www.inke.cn/liveroom/index.html?uid=${roomId}` },
   kugou: { name: "酷狗直播", roomUrl: (roomId) => `https://fanxing.kugou.com/${roomId}` },
+  "6room": { name: "六间房直播", roomUrl: (roomId) => `https://v.6.cn/${roomId}` },
 };
 
 function snapshot(id: TaskId, seed: MockSeed, createdAt: number): TaskSnapshot {
@@ -381,6 +383,15 @@ function seedTasks(now: number): TaskSnapshot[] {
       roomId: "50428671",
       anchorId: "1533092999",
       platform: "kugou",
+      monitoring: "enabled",
+      live: { state: "offline", checkedAt: now - 2 * minute },
+      record: { state: "idle" },
+    },
+    {
+      anchorName: "夜聊电台",
+      roomId: "58018",
+      anchorId: "58282317",
+      platform: "6room",
       monitoring: "enabled",
       live: { state: "offline", checkedAt: now - 2 * minute },
       record: { state: "idle" },
@@ -786,7 +797,7 @@ function normalizeUrl(url: string): string {
 const DEMO_ROOM = "745964462470";
 const DEMO_ANCHOR = `MS4wLjABAAAA-mock-anchor-${DEMO_ROOM}`;
 
-/** 模拟 platforms::resolve：认抖音、快手和B站、虎牙、斗鱼、小红书、YY、网易CC、微博、AcFun、花椒、映客、酷狗，按链接内容返回各类错误。 */
+/** 模拟 platforms::resolve：认抖音、快手和B站、虎牙、斗鱼、小红书、YY、网易CC、微博、AcFun、花椒、映客、酷狗、六间房，按链接内容返回各类错误。 */
 function resolveMock(input: string, tasks: TaskSnapshot[]): ResolvedRoom | CommandError {
   const url = input.trim();
   if (!url) return { kind: "invalid_input", message: "请输入直播间链接" };
@@ -825,7 +836,9 @@ function resolveMock(input: string, tasks: TaskSnapshot[]): ResolvedRoom | Comma
                         ? "inke"
                         : host.endsWith(".kugou.com")
                           ? "kugou"
-                          : null;
+                          : host === "v.6.cn" || host === "m.v.6.cn"
+                            ? "6room"
+                            : null;
   if (!platform) return { kind: "unsupported_platform", message: `暂不支持 ${host} 的直播间` };
   if (/login/i.test(path)) return { kind: "auth_required", message: "该直播间需要登录后观看，请填写 Cookie" };
   if (/timeout|network/i.test(path)) return { kind: "network", message: `连接 ${host} 超时` };
@@ -1003,6 +1016,19 @@ function resolveMock(input: string, tasks: TaskSnapshot[]): ResolvedRoom | Comma
       anchorId: task?.anchorId ?? `kugou-${roomId}`,
       anchorName: task?.anchorName ?? `酷狗主播 ${roomId}`,
       liveUrl: mockPlatforms.kugou.roomUrl(roomId),
+    };
+  }
+  if (platform === "6room") {
+    const match = /^\/(\d+)\/?$/.exec(path);
+    if (!match) return { kind: "invalid_url", message: `不是可识别的六间房直播链接: ${url}` };
+    const roomId = match[1];
+    const task = known(roomId);
+    return {
+      ...base,
+      roomId,
+      anchorId: task?.anchorId ?? `6room-${roomId}`,
+      anchorName: task?.anchorName ?? `六间房主播 ${roomId}`,
+      liveUrl: mockPlatforms["6room"].roomUrl(roomId),
     };
   }
   if (host === "v.douyin.com") {
