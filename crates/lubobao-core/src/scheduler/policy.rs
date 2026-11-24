@@ -124,7 +124,7 @@ pub fn fetch_options(task: &TaskSnapshot, settings: &Map<String, Value>) -> Fetc
 
 /// StreamCap `is_flv_preferred_platform`：这些平台默认录 FLV。
 pub fn flv_preferred(platform: Platform) -> bool {
-    matches!(platform, Platform::Douyin)
+    matches!(platform, Platform::Douyin | Platform::Tiktok)
 }
 
 /// 录制选项。格式目前只有 TS；其余格式要等转码功能。代理由 [`recording_proxy`] 另行决定。
@@ -304,6 +304,13 @@ mod tests {
         assert_eq!(recheck_delay(1, interval).as_secs(), 5);
         assert_eq!(recheck_delay(3, interval).as_secs(), 20);
         assert_eq!(recheck_delay(20, interval), interval);
+    }
+
+    #[test]
+    fn douyin_and_tiktok_record_flv_by_default_like_streamcap() {
+        assert!(flv_preferred(Platform::Douyin));
+        assert!(flv_preferred(Platform::Tiktok));
+        assert!(!flv_preferred(Platform::Huya));
     }
 
     #[test]

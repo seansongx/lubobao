@@ -40,6 +40,7 @@
 //   live.baidu.com/…live.html?room_id={房间号}  百度直播间
 //   www.zhihu.com/theater/{直播间号}   知乎直播间
 //   fm.missevan.com/live/{房间号}       猫耳FM 直播间（音频）
+//   www.tiktok.com/@{用户名}[/live]     TikTok 直播间；vt.tiktok.com/… 分享短链演示为 @nbcnews
 //   路径含 login / timeout / busy / parse  分别返回 auth_required / network / rate_limited / parse
 //   其他域名                            unsupported_platform；无法解析的文本为 invalid_url
 //   分享文字（如「【xx的直播】 https://v.douyin.com/abc/ 复制此链接…」）先取出其中的链接；没有链接为 invalid_input
@@ -197,6 +198,7 @@ const mockPlatforms: Record<Platform, { name: string; roomUrl: (roomId: string) 
   baidu: { name: "百度直播", roomUrl: (roomId) => `https://live.baidu.com/m/media/pclive/pchome/live.html?room_id=${roomId}` },
   zhihu: { name: "知乎直播", roomUrl: (roomId) => `https://www.zhihu.com/theater/${roomId}` },
   maoerfm: { name: "猫耳FM直播", roomUrl: (roomId) => `https://fm.missevan.com/live/${roomId}` },
+  tiktok: { name: "TikTok", roomUrl: (roomId) => `https://www.tiktok.com/@${roomId}/live` },
 };
 
 function snapshot(id: TaskId, seed: MockSeed, createdAt: number): TaskSnapshot {
@@ -424,6 +426,15 @@ function seedTasks(now: number): TaskSnapshot[] {
       roomId: "869138407",
       anchorId: "34312404",
       platform: "maoerfm",
+      monitoring: "enabled",
+      live: { state: "offline", checkedAt: now - 2 * minute },
+      record: { state: "idle" },
+    },
+    {
+      anchorName: "nbcnews",
+      roomId: "nbcnews",
+      anchorId: "6652774777768427525",
+      platform: "tiktok",
       monitoring: "enabled",
       live: { state: "offline", checkedAt: now - 2 * minute },
       record: { state: "idle" },
@@ -876,7 +887,7 @@ export function extractLink(input: string): string | null {
   return null;
 }
 
-/** 模拟 platforms::resolve：认抖音、快手和B站、虎牙、斗鱼、小红书、YY、网易CC、微博、AcFun、花椒、映客、酷狗、六间房、百度、知乎、猫耳FM，按链接内容返回各类错误。 */
+/** 模拟 platforms::resolve：认抖音、快手和B站、虎牙、斗鱼、小红书、YY、网易CC、微博、AcFun、花椒、映客、酷狗、六间房、百度、知乎、猫耳FM、TikTok，按链接内容返回各类错误。 */
 function resolveMock(input: string, tasks: TaskSnapshot[]): ResolvedRoom | CommandError {
   if (!input.trim()) return { kind: "invalid_input", message: "请输入直播间链接" };
   const url = extractLink(input);
@@ -924,7 +935,9 @@ function resolveMock(input: string, tasks: TaskSnapshot[]): ResolvedRoom | Comma
                                 ? "zhihu"
                                 : host === "fm.missevan.com"
                                   ? "maoerfm"
-                                  : null;
+                                  : host === "tiktok.com" || host.endsWith(".tiktok.com")
+                                    ? "tiktok"
+                                    : null;
   if (!platform) return { kind: "unsupported_platform", message: `暂不支持 ${host} 的直播间` };
   if (/login/i.test(path)) return { kind: "auth_required", message: "该直播间需要登录后观看，请填写 Cookie" };
   if (/timeout|network/i.test(path)) return { kind: "network", message: `连接 ${host} 超时` };
@@ -1153,6 +1166,22 @@ function resolveMock(input: string, tasks: TaskSnapshot[]): ResolvedRoom | Comma
       anchorId: task?.anchorId ?? null,
       anchorName: task?.anchorName ?? `猫耳FM 主播 ${roomId.slice(-4)}`,
       liveUrl: mockPlatforms.maoerfm.roomUrl(roomId),
+    };
+  }
+  if (platform === "tiktok") {
+    const shortLink = host === "vt.tiktok.com" || host === "vm.tiktok.com";
+    const match = /^[/]@([A-Za-z0-9_.]{1,24})(?:[/]|$)/.exec(path);
+    if (!shortLink && !match) {
+      return { kind: "invalid_url", message: `TikTok 链接里没有主播用户名，请复制形如 tiktok.com/@用户名/live 的链接: ${url}` };
+    }
+    const roomId = shortLink ? "nbcnews" : match![1].toLowerCase();
+    const task = known(roomId);
+    return {
+      ...base,
+      roomId,
+      anchorId: task?.anchorId ?? null,
+      anchorName: task?.anchorName ?? roomId,
+      liveUrl: mockPlatforms.tiktok.roomUrl(roomId),
     };
   }
   if (host === "v.douyin.com") {
