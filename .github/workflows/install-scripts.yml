@@ -1,8 +1,7 @@
-# 测试官网的一键安装脚本和服务器部署脚本，全部离线：
+# 测试官网的一键安装脚本，全部离线：
 # 用 python3 -m http.server 在 127.0.0.1 上提供假的 /asset 纯文本和安装包，通过 LUBOBAO_API_BASE 指过去。
 #   macos：website/install.sh（假 dmg 里放假的「录播宝.app」）
 #   linux：website/install-cli.sh 和 shellcheck
-#   site-deploy：deploy/site-setup.sh 建受限用户，再用与 deploy-site.yml 相同的 rsync 命令经 rrsync 同步 website/
 
 name: Install scripts
 
@@ -10,15 +9,11 @@ on:
   push:
     paths:
       - "website/install*.sh"
-      - "deploy/site-setup.sh"
       - ".github/workflows/install-scripts.yml"
-      - ".github/workflows/deploy-site.yml"
   pull_request:
     paths:
       - "website/install*.sh"
-      - "deploy/site-setup.sh"
       - ".github/workflows/install-scripts.yml"
-      - ".github/workflows/deploy-site.yml"
   workflow_dispatch:
 
 concurrency:
@@ -211,16 +206,16 @@ jobs:
         run: |
           command -v shellcheck >/dev/null || { sudo apt-get update && sudo apt-get install -y shellcheck; }
           shellcheck --version
-          shellcheck website/install.sh website/install-cli.sh deploy/site-setup.sh
+          shellcheck website/install.sh website/install-cli.sh
           # /bin/sh 是 dash：确认脚本只用了 POSIX 语法
-          for f in website/install.sh website/install-cli.sh deploy/site-setup.sh; do dash -n "$f"; done
+          for f in website/install.sh website/install-cli.sh; do dash -n "$f"; done
 
       # macOS 的 /bin/sh 是 bash 3.2：$var 后面直接跟中文时，会把中文的第一个字节算进变量名
       # （例如变量 base 后面紧跟全角括号时报 unbound variable）。这类位置一律写成 ${var}。
       - name: Check $var followed by non-ASCII
         run: |
           pattern='\$[A-Za-z_][A-Za-z0-9_]*(?=[^\x00-\x7F])'
-          if grep -nP "$pattern" website/install.sh website/install-cli.sh deploy/site-setup.sh .github/workflows/*.yml; then
+          if grep -nP "$pattern" website/install.sh website/install-cli.sh .github/workflows/*.yml; then
             echo "::error::上面这些行的 \$变量 后面直接跟着非 ASCII 字符，请改成 \${变量}"
             exit 1
           fi
@@ -328,59 +323,3 @@ jobs:
           echo "::endgroup::"
 
           if ls "${TMPDIR:-/tmp}" | grep -q '^lubobao-cli-install\.'; then fail "临时目录没有清理"; fi
-
-  site-deploy:
-    name: site-setup.sh and rrsync deploy (Linux)
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Start sshd
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y openssh-server rsync
-          sudo systemctl start ssh
-          sudo systemctl is-active ssh
-
-      - name: Run site-setup.sh twice
-        run: |
-          set -euo pipefail
-          ssh-keygen -q -t ed25519 -N '' -C lubobao-site-ci -f "$RUNNER_TEMP/site_key"
-          sudo sh deploy/site-setup.sh "$RUNNER_TEMP/site_key.pub" 127.0.0.1
-          # 可重复执行
-          sudo sh deploy/site-setup.sh "$(cat "$RUNNER_TEMP/site_key.pub")" 127.0.0.1 | tee "$RUNNER_TEMP/setup.log"
-          grep '^127\.0\.0\.1 ' "$RUNNER_TEMP/setup.log" > "$RUNNER_TEMP/known_hosts"
-          [ -s "$RUNNER_TEMP/known_hosts" ] || { echo "::error::没有打印 known_hosts"; exit 1; }
-          sudo cat /var/lib/lubobao-site/.ssh/authorized_keys
-          [ "$(sudo grep -c '^command=' /var/lib/lubobao-site/.ssh/authorized_keys)" = 1 ] || { echo "::error::authorized_keys 应只有一行"; exit 1; }
-
-      - name: Deploy with rrsync
-        run: |
-          set -euo pipefail
-          ssh_cmd="ssh -i $RUNNER_TEMP/site_key -p 22 -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$RUNNER_TEMP/known_hosts -o ConnectTimeout=20"
-          sync() {
-            rsync -rlz --checksum --delete --delay-updates --chmod=D755,F644 -p \
-              --exclude='.*' -e "$ssh_cmd" --itemize-changes "$1" "lubobao-site@127.0.0.1:./"
-          }
-          fail() { echo "::error::$*"; exit 1; }
-
-          # 先放一个多余的文件，再同步一次，确认 --delete 生效
-          extra="$RUNNER_TEMP/site-extra"
-          cp -r website "$extra"
-          echo stale > "$extra/stale.txt"
-          sync "$extra/"
-          [ -f /var/www/lubobao/stale.txt ] || fail "第一次同步没有写入文件"
-          sync website/
-          [ ! -e /var/www/lubobao/stale.txt ] || fail "--delete 没有删除多余的文件"
-          diff -r website /var/www/lubobao || fail "同步后的内容与 website/ 不一致"
-          stat -c '%U %a %n' /var/www/lubobao /var/www/lubobao/index.html
-
-          # 这把钥匙不能执行其他命令，也不能写到网站目录以外
-          if $ssh_cmd lubobao-site@127.0.0.1 id; then fail "受限的钥匙可以执行任意命令"; fi
-          if rsync -r -e "$ssh_cmd" website/favicon.svg "lubobao-site@127.0.0.1:../escape.svg"; then
-            [ ! -e /var/www/escape.svg ] || fail "可以写到网站目录以外"
-          fi
-          [ ! -e /var/www/escape.svg ] || fail "可以写到网站目录以外"
