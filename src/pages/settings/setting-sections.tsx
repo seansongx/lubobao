@@ -291,6 +291,7 @@ const supportedPlatforms: { key: Platform; name: string }[] = [
   { key: "yy", name: "YY" },
   { key: "netease", name: "网易CC" },
   { key: "weibo", name: "微博" },
+  { key: "acfun", name: "AcFun" },
 ];
 
 export function NetworkSection({ ctx }: SectionProps) {
@@ -339,7 +340,7 @@ export function NetworkSection({ ctx }: SectionProps) {
       />
       <TextField
         label="走代理的平台"
-        description="用逗号分隔的平台标识。抖音、快手、B站、虎牙、斗鱼、小红书、YY、网易CC、微博是国内平台，通常不需要代理。"
+        description="用逗号分隔的平台标识。抖音、快手、B站、虎牙、斗鱼、小红书、YY、网易CC、微博、AcFun是国内平台，通常不需要代理。"
         value={platformList}
         disabled={!settings.enable_proxy}
         error={platforms.error}

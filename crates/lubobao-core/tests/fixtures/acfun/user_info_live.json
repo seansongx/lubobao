@@ -1,0 +1,12 @@
+{
+  "result": 0,
+  "host-name": "node",
+  "profile": {
+    "userId": 100001,
+    "name": "测试主播🎤",
+    "liveId": "liveAbC123x",
+    "following": "10",
+    "followed": "1万",
+    "headUrl": "https://imgs.example.acfun.cn/a.png"
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "result": 1,
+  "data": {
+    "liveId": "liveAbC123x",
+    "availableTickets": [
+      "dGlja2V0"
+    ],
+    "enterRoomAttach": "YXR0YWNo",
+    "videoPlayRes": "{\"liveAdaptiveManifest\": [{\"freeTrafficCdn\": false, \"version\": \"2.0\", \"type\": \"dynamic\", \"hideAuto\": false, \"adaptationSet\": {\"gopDuration\": 3000, \"representation\": [{\"id\": 0, \"url\": \"https://pull.example.acfun.cn/livecloud/kszt_testStream_sd1000.flv?auth_key=1798076429-0-0-0123456789abcdef&oidc=alihb&tsc=origin\", \"bitrate\": 1000, \"qualityType\": \"STANDARD\", \"mediaType\": \"HYBRID\", \"level\": 30, \"name\": \"高清\", \"hidden\": false, \"enableAdaptive\": true, \"defaultSelect\": false}, {\"id\": 1, \"url\": \"https://pull.example.acfun.cn/livecloud/kszt_testStream_hd2000.flv?auth_key=1798076429-0-0-0123456789abcdef&oidc=alihb&tsc=origin\", \"bitrate\": 2000, \"qualityType\": \"HIGH\", \"mediaType\": \"HYBRID\", \"level\": 50, \"name\": \"超清\", \"hidden\": false, \"enableAdaptive\": true, \"defaultSelect\": true}, {\"id\": 2, \"url\": \"https://pull.example.acfun.cn/livecloud/kszt_testStream_hd4000.flv?auth_key=1798076429-0-0-0123456789abcdef&oidc=alihb&tsc=origin\", \"bitrate\": 4000, \"qualityType\": \"SUPER\", \"mediaType\": \"HYBRID\", \"level\": 70, \"name\": \"蓝光 4M\", \"hidden\": false, \"enableAdaptive\": true, \"defaultSelect\": false}, {\"id\": 3, \"url\": \"https://pull.example.acfun.cn/livecloud/kszt_testStream_GameAvcFhdL3.flv?auth_key=1798076429-0-0-0123456789abcdef&oidc=alihb&tsc=origin\", \"bitrate\": 8000, \"qualityType\": \"BLUE_RAY\", \"mediaType\": \"HYBRID\", \"level\": 130, \"name\": \"蓝光 8M\", \"hidden\": false, \"enableAdaptive\": true, \"defaultSelect\": false}]}}], \"liveAdaptiveConfig\": \"{\\\"ver\\\": 1}\", \"streamName\": \"kszt_testStream\"}",
+    "caption": "测试🎮标题",
+    "ticketRetryCount": 2,
+    "ticketRetryIntervalMs": 2000,
+    "notices": [],
+    "config": {
+      "giftSlotSize": 2
+    },
+    "liveStartTime": 1795478431705,
+    "panoramic": false
+  },
+  "host": "node"
+}
