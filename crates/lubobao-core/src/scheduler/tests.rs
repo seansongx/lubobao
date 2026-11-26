@@ -1306,9 +1306,9 @@ async fn finished_recordings_are_converted_to_mp4_with_activity() {
     assert_eq!(
         messages,
         [
-            "已转为 MP4，已删除原 TS 文件",
+            "已转为 MP4，已删除原文件",
             "开始转为 MP4",
-            "已转为 MP4，已删除原 TS 文件",
+            "已转为 MP4，已删除原文件",
             "开始转为 MP4",
         ]
     );
@@ -1357,7 +1357,7 @@ async fn no_conversion_when_disabled_or_the_disk_is_full() {
     assert_eq!(entries[0].kind, ActivityKind::Warning);
     assert_eq!(
         entries[0].message,
-        "磁盘空间不足，未转为 MP4，原 TS 文件已保留"
+        "磁盘空间不足，未转为 MP4，原文件已保留"
     );
     assert_eq!(activity_of(&h, ActivityKind::Warning).len(), 1);
     assert_eq!(h.scheduler.post_processor().pending(), 0);
@@ -1396,7 +1396,7 @@ async fn a_recording_that_ends_during_shutdown_leaves_a_warning() {
     assert_eq!(entries.len(), 1, "{entries:?}");
     assert_eq!(
         entries[0].message,
-        "应用正在退出，未转为 MP4，原 TS 文件已保留"
+        "应用正在退出，未转为 MP4，原文件已保留"
     );
     for file in &files {
         assert!(file.exists());

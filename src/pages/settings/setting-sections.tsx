@@ -179,14 +179,14 @@ export function RecordSection({ ctx }: SectionProps) {
       />
       <SwitchField
         label="录制完成后转为 MP4"
-        description="录制结束后逐个转成同名 MP4，只换封装不重新编码；转换失败时保留 TS 原文件"
+        description="录制结束后逐个转成同名 MP4，只换封装不重新编码；转换失败时保留 原文件"
         checked={settings.convert_to_mp4}
         error={ctx.errors.convert_to_mp4}
         onChange={(value) => bind(ctx, "convert_to_mp4").save(value)}
       />
       <SwitchField
         label="转换后删除原文件"
-        description="只在转换成功后删除 TS 原文件"
+        description="只在转换成功后删除 原文件"
         checked={settings.delete_original}
         disabled={!settings.convert_to_mp4}
         error={ctx.errors.delete_original}

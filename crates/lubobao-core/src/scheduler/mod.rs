@@ -836,7 +836,7 @@ impl Core {
             self.record_conversion(
                 task,
                 ActivityKind::Warning,
-                format!("{message}，原 TS 文件已保留"),
+                format!("{message}，原文件已保留"),
                 serde_json::json!({ "filePath": files[0], "files": files, "kind": "convert" }),
             );
         };
@@ -1080,8 +1080,8 @@ fn describe_conversion(event: &ConvertEvent) -> (ActivityKind, String, serde_jso
             delete_error,
         } => {
             let message = match (original_deleted, delete_error) {
-                (true, _) => "已转为 MP4，已删除原 TS 文件".to_string(),
-                (false, Some(error)) => format!("已转为 MP4，但删除原 TS 文件失败：{error}"),
+                (true, _) => "已转为 MP4，已删除原文件".to_string(),
+                (false, Some(error)) => format!("已转为 MP4，但删除原文件失败：{error}"),
                 (false, None) => "已转为 MP4".to_string(),
             };
             (
@@ -1102,7 +1102,7 @@ fn describe_conversion(event: &ConvertEvent) -> (ActivityKind, String, serde_jso
         } => (
             ActivityKind::Failure,
             if *original_kept {
-                format!("转为 MP4 失败：{message}。原 TS 文件已保留")
+                format!("转为 MP4 失败：{message}。原文件已保留")
             } else {
                 format!("转为 MP4 失败：{message}")
             },
@@ -1111,9 +1111,9 @@ fn describe_conversion(event: &ConvertEvent) -> (ActivityKind, String, serde_jso
         ConvertEvent::Cancelled { source, started } => (
             ActivityKind::Warning,
             if *started {
-                "应用退出，转为 MP4 已中止，原 TS 文件已保留".to_string()
+                "应用退出，转为 MP4 已中止，原文件已保留".to_string()
             } else {
-                "应用退出，未转为 MP4，原 TS 文件已保留".to_string()
+                "应用退出，未转为 MP4，原文件已保留".to_string()
             },
             json!({ "filePath": source, "kind": "convert" }),
         ),
