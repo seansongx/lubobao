@@ -1,9 +1,4 @@
-    let title = if options.filename_includes_title {
-        parts.title_label(options)
-    } else {
-        None
-    };
-    match title {        dir.push(platform_label(parts.platform, options.remove_emojis));//! 录像目录与文件命名。
+//! 录像目录与文件命名。
 //!
 //! 参照 StreamCap `StreamManager._get_filename`、`_get_output_dir`、`_get_save_path`
 //! 和 `utils.clean_name`：文件名为「主播名_YYYY-MM-DD_HH-MM-SS」，分段时追加 `_%03d`；
