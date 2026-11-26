@@ -129,9 +129,9 @@ xiaofany.com 后台还要先建好软件：slug `lubobao`、框架 `tauri`，「
 
 本地 `npm run tauri build` 默认会生成更新包，需要签名私钥；没有时加 `--config '{"bundle":{"createUpdaterArtifacts":false}}'` 跳过更新包。
 
-## 只能等第一次正式发布时验证的部分
+## 尚未实测的部分
 
-- release.yml 在真实 Secret 下的签名、改名和 `.sig` 校验（macOS `.app.tar.gz`、Linux AppImage 的路径在本机没有跑过）；
-- publish-xiaofany.yml 的上传、发布和发布后核对；
-- GitHub 兜底：Release 上的 `latest.json` 内容，以及发布后 `https://github.com/seansongx/lubobao/releases/latest/download/latest.json` 能下载到（重定向到 GitHub 的文件服务器）。实测时可以在调试构建里设 `LUBOBAO_UPDATER_ENDPOINT=https://127.0.0.1:1/x,https://github.com/seansongx/lubobao/releases/latest/download/latest.json`，并把应用版本临时改低，在 设置 → 关于 检查更新；下载兜底从真实 GitHub Release 下载安装包（重定向到 `objects.githubusercontent.com`）也要等那时实测；
+v0.1.0 正式发布时已经跑通 release.yml 的签名、改名和 `.sig` 校验，publish-xiaofany.yml 的上传、发布和发布后核对，以及 `latest.json` 写入更新说明（记录见 `docs/specs/feature-map.md`）。还没有实测的：
+
+- GitHub 兜底线路：发布后 `https://github.com/seansongx/lubobao/releases/latest/download/latest.json` 能下载到（重定向到 GitHub 的文件服务器）。实测时可以在调试构建里设 `LUBOBAO_UPDATER_ENDPOINT=https://127.0.0.1:1/x,https://github.com/seansongx/lubobao/releases/latest/download/latest.json`，并把应用版本临时改低，在 设置 → 关于 检查更新；下载兜底从真实 GitHub Release 下载安装包（重定向到 `objects.githubusercontent.com`）也还没有实测；
 - macOS、Linux AppImage 的应用内升级（Windows 已在本机用测试密钥和本地假服务器验证，见 `docs/specs/feature-map.md`）。
