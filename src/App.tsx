@@ -13,7 +13,6 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { useTaskList } from "@/lib/use-backend";
 import { ActivityPage } from "@/pages/activity/activity-page";
 import { LibraryPage } from "@/pages/library/library-page";
-import { PagePlaceholder } from "@/pages/page-placeholder";
 import { pages, type PageId } from "@/pages/pages";
 import { isRecordingActive } from "@/pages/rooms/format";
 import { RoomsPage } from "@/pages/rooms/rooms-page";
@@ -76,10 +75,6 @@ export default function App() {
         return <ActivityPage onNavigate={navigate} focusTask={activityFocus} />;
       case "settings":
         return <SettingsPage focusGroup={settingsFocus} />;
-      default: {
-        const page = pages.find((item) => item.id === id) ?? pages[0];
-        return <PagePlaceholder page={page} />;
-      }
     }
   };
 
