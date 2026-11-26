@@ -1557,3 +1557,109 @@ async fn start_recording_clears_a_failure_and_skips_paused_and_notify_only_tasks
     assert_eq!(h.engine.starts(), 2);
     assert_eq!(h.task(paused).display, DisplayStatus::Paused);
 }
+
+// ---- 录后脚本 ----
+//
+// 用真实的系统命令行和真实时钟；关闭转 MP4，不需要 ffmpeg。
+
+/// 两个真实存在的分段，关闭转 MP4。返回录像目录和文件。
+fn script_harness() -> (Harness, PathBuf, Vec<PathBuf>) {
+    let h = harness();
+    let dir = h._dir.path().join("videos").join("douyin").join("anchor");
+    std::fs::create_dir_all(&dir).unwrap();
+    let files = vec![dir.join("rec_000.ts"), dir.join("rec_001.ts")];
+    for file in &files {
+        std::fs::write(file, b"x").unwrap();
+    }
+    *h.engine.files.lock().unwrap() = Some(files.clone());
+    h.update_settings(json!({ "convert_to_mp4": false }));
+    (h, dir, files)
+}
+
+/// 把 `LUBOBAO_FILES` 写进工作目录下的 `script-out.txt`。
+fn files_script() -> &'static str {
+    if cfg!(windows) {
+        "set LUBOBAO_FILES> script-out.txt"
+    } else {
+        r#"printf 'LUBOBAO_FILES=%s\n' "$LUBOBAO_FILES" > script-out.txt"#
+    }
+}
+
+#[tokio::test]
+async fn a_finished_recording_runs_the_script_once_with_its_files() {
+    let (h, dir, files) = script_harness();
+    h.update_settings(json!({
+        "execute_custom_script": true,
+        "custom_script_command": files_script(),
+    }));
+    let (id, _) = h.add("3001", Reply::Live, false);
+    h.start();
+    until(SHORT, "开始录制", || h.engine.starts() == 1).await;
+    h.tasks.stop_recording(&[id]).unwrap();
+    until(Duration::from_secs(30), "执行录后脚本", || {
+        !activity_of(&h, ActivityKind::Script).is_empty()
+    })
+    .await;
+
+    let entries = activity_of(&h, ActivityKind::Script);
+    assert_eq!(entries[0].kind, ActivityKind::Script);
+    assert_eq!(entries[0].message, "录后脚本已执行");
+    assert_eq!(entries[0].task_id, Some(id));
+    let output = std::fs::read_to_string(dir.join("script-out.txt"))
+        .unwrap()
+        .replace("\r\n", "\n");
+    let (first, second) = (files[0].display(), files[1].display());
+    assert_eq!(output, format!("LUBOBAO_FILES={first}\n{second}\n"));
+    // 分段录制也只执行一次。
+    sleep(Duration::from_millis(500)).await;
+    assert_eq!(activity_of(&h, ActivityKind::Script).len(), 1);
+    h.scheduler.shutdown().await;
+}
+
+#[tokio::test]
+async fn no_script_when_disabled_or_the_command_is_blank() {
+    let (h, dir, _) = script_harness();
+    h.update_settings(json!({
+        "execute_custom_script": true,
+        "custom_script_command": "   ",
+    }));
+    let (id, url) = h.add("3002", Reply::Live, false);
+    h.start();
+    until(SHORT, "开始录制", || h.engine.starts() == 1).await;
+    h.tasks.stop_recording(&[id]).unwrap();
+    until(SHORT, "收尾", || h.task(id).record == RecordState::Idle).await;
+
+    // 有命令但开关关闭：也不执行。
+    h.update_settings(json!({
+        "execute_custom_script": false,
+        "custom_script_command": files_script(),
+    }));
+    h.tasks.set_monitoring(&[id], false).unwrap();
+    h.source.set(&url, Reply::Live);
+    h.tasks.set_monitoring(&[id], true).unwrap();
+    until(SHORT, "再次录制", || h.engine.starts() == 2).await;
+    h.tasks.stop_recording(&[id]).unwrap();
+    until(SHORT, "收尾", || h.task(id).record == RecordState::Idle).await;
+    sleep(Duration::from_millis(500)).await;
+
+    assert!(activity_of(&h, ActivityKind::Script).is_empty());
+    assert!(!dir.join("script-out.txt").exists());
+    assert_eq!(h.scheduler.core.script.pending(), 0);
+    h.scheduler.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_recording_ended_by_shutdown_does_not_run_the_script() {
+    let (h, dir, _) = script_harness();
+    h.update_settings(json!({
+        "execute_custom_script": true,
+        "custom_script_command": files_script(),
+    }));
+    h.add("3003", Reply::Live, false);
+    h.start();
+    until(SHORT, "开始录制", || h.engine.starts() == 1).await;
+    h.scheduler.shutdown().await;
+    sleep(Duration::from_millis(500)).await;
+    assert!(activity_of(&h, ActivityKind::Script).is_empty());
+    assert!(!dir.join("script-out.txt").exists());
+}
