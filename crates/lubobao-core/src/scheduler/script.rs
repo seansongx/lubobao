@@ -106,9 +106,12 @@ pub fn environment(
         }
         list.push(file.as_os_str());
     }
-    let first = files.first().map(PathBuf::as_os_str).unwrap_or_default();
+    let first = match files.first() {
+        Some(file) => file.as_os_str().to_owned(),
+        None => OsString::new(),
+    };
     vec![
-        ("LUBOBAO_FILE", first.to_owned()),
+        ("LUBOBAO_FILE", first),
         ("LUBOBAO_FILES", list),
         ("LUBOBAO_DIR", dir.as_os_str().to_owned()),
         ("LUBOBAO_ANCHOR", vars.anchor.clone().into()),
