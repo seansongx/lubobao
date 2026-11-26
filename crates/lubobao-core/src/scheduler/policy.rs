@@ -163,7 +163,11 @@ pub fn record_options(settings: &Map<String, Value>) -> RecordOptions {
             defaults.filename_includes_title,
         ),
         remove_emojis: flag(settings, "remove_emojis", defaults.remove_emojis),
-        time_subtitle: flag(settings, "generate_time_subtitle_file", defaults.time_subtitle),
+        time_subtitle: flag(
+            settings,
+            "generate_time_subtitle_file",
+            defaults.time_subtitle,
+        ),
         ..defaults
     }
 }

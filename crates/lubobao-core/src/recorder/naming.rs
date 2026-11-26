@@ -312,7 +312,10 @@ mod tests {
     #[test]
     fn clean_name_truncates_long_names() {
         let long = "长".repeat(100);
-        assert_eq!(clean_name(&long, true).unwrap().chars().count(), MAX_NAME_CHARS);
+        assert_eq!(
+            clean_name(&long, true).unwrap().chars().count(),
+            MAX_NAME_CHARS
+        );
     }
 
     fn parts<'a>(anchor: &'a str, title: Option<&'a str>) -> NameParts<'a> {
