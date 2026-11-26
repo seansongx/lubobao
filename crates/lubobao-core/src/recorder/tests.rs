@@ -1107,8 +1107,14 @@ async fn time_subtitle_is_written_next_to_the_unsegmented_recording() {
     let name = video.file_name().unwrap().to_str().unwrap();
     assert!(name.starts_with("测试主播_小明_今晚唱歌_"), "{name}");
     let text = std::fs::read_to_string(&srt).unwrap();
-    assert!(text.contains("\n2\n00:00:01,000 --> 00:00:02,000\n"), "{text}");
-    assert!(text.contains("\n3\n00:00:02,000 --> 00:00:03,000\n"), "{text}");
+    assert!(
+        text.contains("\n2\n00:00:01,000 --> 00:00:02,000\n"),
+        "{text}"
+    );
+    assert!(
+        text.contains("\n3\n00:00:02,000 --> 00:00:03,000\n"),
+        "{text}"
+    );
     assert_playable(&ffmpeg, &video);
 }
 

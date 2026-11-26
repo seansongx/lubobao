@@ -285,7 +285,10 @@ mod tests {
     #[test]
     fn clean_name_removes_emoji_and_control_characters() {
         assert_eq!(clean_name("小🐟儿🎉", true).as_deref(), Some("小_儿"));
-        assert_eq!(clean_name("a\tb\nc\u{7}d", true).as_deref(), Some("a_b_c_d"));
+        assert_eq!(
+            clean_name("a\tb\nc\u{7}d", true).as_deref(),
+            Some("a_b_c_d")
+        );
         assert_eq!(clean_name("❤️love", true).as_deref(), Some("love"));
     }
 
