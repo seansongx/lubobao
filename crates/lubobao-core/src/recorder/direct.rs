@@ -416,8 +416,9 @@ impl Supervisor {
         }
     }
 
+    /// 收到数据满一秒后才报告：时间太短时算出的码率没有意义。
     fn report_progress(&self, state: &mut RunState, output: &Output) {
-        let Some(duration_secs) = output.duration_secs() else {
+        let Some(duration_secs) = output.duration_secs().filter(|secs| *secs >= 1.0) else {
             return;
         };
         let mut progress = Progress {
