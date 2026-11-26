@@ -50,7 +50,10 @@ async fn wait_for(limit: Duration, what: &str, cond: impl Fn() -> bool) {
 const LIMIT: Duration = Duration::from_secs(30);
 
 async fn wait_events(events: &Events, count: usize) -> Vec<ScriptEvent> {
-    wait_for(LIMIT, "脚本结果", || events.lock().unwrap().len() >= count).await;
+    wait_for(LIMIT, "脚本结果", || {
+        events.lock().unwrap().len() >= count
+    })
+    .await;
     events.lock().unwrap().clone()
 }
 

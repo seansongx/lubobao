@@ -399,7 +399,11 @@ impl Db<'_> {
                     .iter()
                     .map(|kind| SqlValue::Text(kind.as_str().to_string())),
             );
-            args.extend(linked.into_iter().map(|kind| SqlValue::Text(kind.to_string())));
+            args.extend(
+                linked
+                    .into_iter()
+                    .map(|kind| SqlValue::Text(kind.to_string())),
+            );
         }
         // 多取一条判断是否还有下一页。
         sql.push_str(" ORDER BY id DESC LIMIT ?");
