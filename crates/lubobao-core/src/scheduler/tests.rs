@@ -1355,10 +1355,7 @@ async fn no_conversion_when_disabled_or_the_disk_is_full() {
     let entries = activity_of(&h, ActivityKind::Convert);
     assert_eq!(entries.len(), 1, "{entries:?}");
     assert_eq!(entries[0].kind, ActivityKind::Warning);
-    assert_eq!(
-        entries[0].message,
-        "磁盘空间不足，未转为 MP4，原文件已保留"
-    );
+    assert_eq!(entries[0].message, "磁盘空间不足，未转为 MP4，原文件已保留");
     assert_eq!(activity_of(&h, ActivityKind::Warning).len(), 1);
     assert_eq!(h.scheduler.post_processor().pending(), 0);
     for file in &files {
@@ -1394,10 +1391,7 @@ async fn a_recording_that_ends_during_shutdown_leaves_a_warning() {
     h.scheduler.shutdown().await;
     let entries = activity_of(&h, ActivityKind::Convert);
     assert_eq!(entries.len(), 1, "{entries:?}");
-    assert_eq!(
-        entries[0].message,
-        "应用正在退出，未转为 MP4，原文件已保留"
-    );
+    assert_eq!(entries[0].message, "应用正在退出，未转为 MP4，原文件已保留");
     for file in &files {
         assert!(file.exists());
     }
