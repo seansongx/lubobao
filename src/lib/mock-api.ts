@@ -1993,8 +1993,9 @@ export function createMockBackend(): Backend {
           (query.before === undefined || entry.id < query.before) &&
           (!query.kinds?.length ||
             query.kinds.includes(entry.kind) ||
-            // 与 Rust 一致：「转为 MP4」也包括转换的失败和提醒。
-            (query.kinds.includes("convert") && entry.detail?.kind === "convert")),
+            // 与 Rust 一致：「转为 MP4」「录后脚本」也包括它们的失败和提醒。
+            (query.kinds.includes("convert") && entry.detail?.kind === "convert") ||
+            (query.kinds.includes("script") && entry.detail?.kind === "script")),
       );
       const items = matching.slice(0, limit);
       return {
@@ -2210,6 +2211,7 @@ export function createMockBackend(): Backend {
         warning: "代理是 SOCKS，录制不支持，本次直连录制",
         user_action: "修改任务",
         convert: "已转为 MP4",
+        script: "录后脚本已执行",
       };
       log(task, kind, messages[kind]);
     },

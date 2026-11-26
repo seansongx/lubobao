@@ -1,4 +1,4 @@
-// 动态：按时间倒序列出开播、下播、录制、转为 MP4、失败和用户操作，向下滚动分页加载，收到 activity 事件实时插入。
+// 动态：按时间倒序列出开播、下播、录制、转为 MP4、录后脚本、失败和用户操作，向下滚动分页加载，收到 activity 事件实时插入。
 // 数据来自 Rust TaskManager::list_activity（src-tauri/src/tasks/activity.rs）。
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -13,6 +13,7 @@ import {
   Radio,
   RotateCw,
   Square,
+  SquareTerminal,
   type LucideIcon,
 } from "lucide-react";
 
@@ -50,6 +51,7 @@ const KIND_FILTERS: { value: ActivityKind; label: string }[] = [
   { value: "record_start", label: "开始录制" },
   { value: "record_end", label: "录制结束" },
   { value: "convert", label: "转为 MP4" },
+  { value: "script", label: "录后脚本" },
   { value: "failure", label: "失败" },
   { value: "warning", label: "提醒" },
   { value: "user_action", label: "用户操作" },
@@ -104,6 +106,9 @@ function visual(entry: ActivityEntry): { icon: LucideIcon; tone: Tone; label: st
     // 录后转 MP4 的开始和完成；转换失败记为 failure（detail.kind 为 convert）。
     case "convert":
       return { icon: FileVideo, tone: "notify", label: "转为 MP4" };
+    // 录后脚本执行成功；失败和退出时中止记为 warning（detail.kind 为 script）。
+    case "script":
+      return { icon: SquareTerminal, tone: "notify", label: "录后脚本" };
     case "user_action":
       return { icon: MousePointerClick, tone: "muted", label: "用户操作" };
     // 录制仍在进行，只是有需要留意的情况（例如 SOCKS 代理无法用于录制，已直连）。
@@ -151,7 +156,10 @@ interface Filter {
 function matches(entry: ActivityEntry, filter: Filter): boolean {
   return (
     (filter.taskId === null || entry.taskId === filter.taskId) &&
-    (filter.kind === null || entry.kind === filter.kind)
+    (filter.kind === null ||
+      entry.kind === filter.kind ||
+      // 与 Rust 一致：「转为 MP4」「录后脚本」也包括它们的失败和提醒。
+      ((filter.kind === "convert" || filter.kind === "script") && entry.detail?.kind === filter.kind))
   );
 }
 

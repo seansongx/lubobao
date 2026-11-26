@@ -377,21 +377,32 @@ impl Db<'_> {
         }
         if !query.kinds.is_empty() {
             let marks = vec!["?"; query.kinds.len()].join(", ");
-            if query.kinds.contains(&ActivityKind::Convert) {
-                // 「转为 MP4」也包括转换的失败和提醒（detail.kind 为 convert），让一次转换的
-                // 结局在这个筛选下看得到；它们仍分别出现在「失败」「提醒」里。
+            // 「转为 MP4」「录后脚本」也包括它们的失败和提醒（detail.kind 为 convert、script），
+            // 让一次转换或脚本的结局在这个筛选下看得到；它们仍分别出现在「失败」「提醒」里。
+            let linked: Vec<&str> = [ActivityKind::Convert, ActivityKind::Script]
+                .into_iter()
+                .filter(|kind| query.kinds.contains(kind))
+                .map(|kind| kind.as_str())
+                .collect();
+            if linked.is_empty() {
+                sql.push_str(&format!(" AND kind IN ({marks})"));
+            } else {
+                let linked_marks = vec!["?"; linked.len()].join(", ");
                 sql.push_str(&format!(
                     " AND (kind IN ({marks}) OR (json_valid(detail) \
-                     AND json_extract(detail, '$.kind') = 'convert'))"
+                     AND json_extract(detail, '$.kind') IN ({linked_marks})))"
                 ));
-            } else {
-                sql.push_str(&format!(" AND kind IN ({marks})"));
             }
             args.extend(
                 query
                     .kinds
                     .iter()
                     .map(|kind| SqlValue::Text(kind.as_str().to_string())),
+            );
+            args.extend(
+                linked
+                    .into_iter()
+                    .map(|kind| SqlValue::Text(kind.to_string())),
             );
         }
         // 多取一条判断是否还有下一页。

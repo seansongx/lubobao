@@ -1,4 +1,4 @@
-//! 动态记录：开播、下播、开始录制、录制结束、转为 MP4、失败和用户操作。
+//! 动态记录：开播、下播、开始录制、录制结束、转为 MP4、录后脚本、失败和用户操作。
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -18,6 +18,8 @@ pub enum ActivityKind {
     UserAction,
     /// 录后转 MP4：开始和完成。转换失败记为 `Failure`，退出时中止记为 `Warning`。
     Convert,
+    /// 录后脚本执行成功。失败和退出时中止记为 `Warning`（`detail.kind` 为 `script`）。
+    Script,
 }
 
 impl ActivityKind {
@@ -31,6 +33,7 @@ impl ActivityKind {
             ActivityKind::Warning => "warning",
             ActivityKind::UserAction => "user_action",
             ActivityKind::Convert => "convert",
+            ActivityKind::Script => "script",
         }
     }
 
@@ -44,6 +47,7 @@ impl ActivityKind {
             ActivityKind::Warning,
             ActivityKind::UserAction,
             ActivityKind::Convert,
+            ActivityKind::Script,
         ]
         .into_iter()
         .find(|kind| kind.as_str() == value)
