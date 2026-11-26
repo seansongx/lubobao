@@ -1511,7 +1511,10 @@ async fn direct_download_saves_the_flv_body_until_the_server_closes() {
     // 请求头与 ffmpeg 录制相同。
     let request_text = server.requests.lock().unwrap()[0].to_ascii_lowercase();
     assert!(
-        request_text.contains(&format!("user-agent: {}", TEST_USER_AGENT.to_ascii_lowercase())),
+        request_text.contains(&format!(
+            "user-agent: {}",
+            TEST_USER_AGENT.to_ascii_lowercase()
+        )),
         "{request_text}"
     );
     assert!(
@@ -1632,12 +1635,7 @@ async fn direct_download_http_errors_fail_without_leaving_a_file() {
         .port();
     let url = format!("http://127.0.0.1:{port}/live/test.flv");
     let handle = start(
-        request(
-            &no_ffmpeg(temp.path()),
-            &url,
-            temp.path(),
-            direct_options(),
-        ),
+        request(&no_ffmpeg(temp.path()), &url, temp.path(), direct_options()),
         quiet_listener(),
     )
     .await;
