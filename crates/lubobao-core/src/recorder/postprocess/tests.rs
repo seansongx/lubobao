@@ -36,6 +36,22 @@ fn make_ts(ffmpeg: &Path, path: &Path, secs: u32) {
 }
 
 fn make_ts_with(ffmpeg: &Path, path: &Path, secs: u32, video: &[&str], audio: &[&str]) {
+    make_media(ffmpeg, path, secs, video, audio, "mpegts");
+}
+
+/// 生成 FLV 样本，代替直接下载得到的录像（FLV 里的 AAC 不是 ADTS）。
+fn make_flv_with(ffmpeg: &Path, path: &Path, secs: u32, video: &[&str]) {
+    make_media(ffmpeg, path, secs, video, &["-c:a", "aac"], "flv");
+}
+
+fn make_media(
+    ffmpeg: &Path,
+    path: &Path,
+    secs: u32,
+    video: &[&str],
+    audio: &[&str],
+    container: &str,
+) {
     let output = std::process::Command::new(ffmpeg)
         .args(["-hide_banner", "-loglevel", "error", "-y"])
         .args(["-f", "lavfi", "-i", "testsrc=size=320x240:rate=25"])
@@ -44,7 +60,7 @@ fn make_ts_with(ffmpeg: &Path, path: &Path, secs: u32, video: &[&str], audio: &[
         .args(video)
         .args(["-preset", "veryfast", "-pix_fmt", "yuv420p", "-g", "25"])
         .args(audio)
-        .args(["-b:a", "96k", "-f", "mpegts"])
+        .args(["-b:a", "96k", "-f", container])
         .arg(path)
         .output()
         .expect("run ffmpeg to create sample");
@@ -553,6 +569,64 @@ async fn hevc_video_is_tagged_hvc1_and_aac_still_converts() {
         matches!(finals(&events)[..], [ConvertEvent::Succeeded { .. }]),
         "{events:?}"
     );
+    let target = source.with_extension("mp4");
+    assert_playable(&ffmpeg, &target);
+    let header = header_of(&ffmpeg, &target);
+    assert!(
+        header.contains("Video: hevc") && header.contains("hvc1"),
+        "{header}"
+    );
+    assert!(header.contains("Audio: aac"), "{header}");
+}
+
+#[tokio::test]
+async fn converts_directly_downloaded_flv_to_a_playable_mp4() {
+    let Some(ffmpeg) = test_ffmpeg() else { return };
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("rec.flv");
+    make_flv_with(&ffmpeg, &source, 4, &["-c:v", "libx264"]);
+    let processor = PostProcessor::default();
+    let (listener, events) = collector();
+    assert!(processor.enqueue(vec![source.clone()], options(&ffmpeg, true), listener));
+    drain(&processor).await;
+
+    let target = temp.path().join("rec.mp4");
+    let events = lock(&events).clone();
+    match events.last() {
+        Some(ConvertEvent::Succeeded {
+            target: t,
+            duration_secs,
+            original_deleted,
+            ..
+        }) => {
+            assert_eq!(*t, target);
+            assert!((3.5..4.6).contains(duration_secs), "{duration_secs}");
+            assert!(*original_deleted);
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(!source.exists(), "确认 MP4 有效后应删除 FLV");
+    assert_playable(&ffmpeg, &target);
+    assert_has_av(&ffmpeg, &target);
+    assert!(leftover_parts(temp.path()).is_empty());
+}
+
+#[tokio::test]
+async fn hevc_flv_is_tagged_hvc1() {
+    let Some(ffmpeg) = test_ffmpeg() else { return };
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("hevc.flv");
+    make_flv_with(&ffmpeg, &source, 2, &["-c:v", "libx265"]);
+    let processor = PostProcessor::default();
+    let (listener, events) = collector();
+    assert!(processor.enqueue(vec![source.clone()], options(&ffmpeg, false), listener));
+    drain(&processor).await;
+    let events = lock(&events).clone();
+    assert!(
+        matches!(finals(&events)[..], [ConvertEvent::Succeeded { .. }]),
+        "{events:?}"
+    );
+    assert!(source.exists(), "不删除原件时应保留 FLV");
     let target = source.with_extension("mp4");
     assert_playable(&ffmpeg, &target);
     let header = header_of(&ffmpeg, &target);

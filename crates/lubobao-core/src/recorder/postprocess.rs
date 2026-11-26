@@ -1,4 +1,4 @@
-//! 录后处理：把录好的 TS 逐个转成同名 MP4（只换封装，不重新编码）。
+//! 录后处理：把录好的 TS（或直接下载的 FLV）逐个转成同名 MP4（只换封装，不重新编码）。
 //!
 //! 调用 [`PostProcessor::enqueue`] 把一次录制的文件排进队列，转换在后台按顺序进行，
 //! 结果通过 [`ConvertListener`] 回调发出。应用退出时调用 [`PostProcessor::shutdown`]：

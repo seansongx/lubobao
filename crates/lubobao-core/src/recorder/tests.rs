@@ -136,6 +136,10 @@ enum ServeMode {
     Html,
     /// 模拟刚下播的 CDN：返回 200 和空内容。
     Empty,
+    /// 返回 404。
+    NotFound,
+    /// 先把 `/live/test.flv` 重定向到 `/live/moved.flv`，那里按 `Live` 发送。
+    Redirect,
 }
 
 struct LiveServer {
@@ -222,7 +226,20 @@ async fn serve_connection(
             let _ = socket.shutdown().await;
             return false;
         }
-        ServeMode::Live => u32::MAX,
+        ServeMode::NotFound => {
+            let response =
+                b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+            let _ = socket.write_all(response).await;
+            let _ = socket.shutdown().await;
+            return false;
+        }
+        ServeMode::Redirect if request.starts_with(b"GET /live/test.flv ") => {
+            let response = b"HTTP/1.1 302 Found\r\nLocation: /live/moved.flv\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+            let _ = socket.write_all(response).await;
+            let _ = socket.shutdown().await;
+            return false;
+        }
+        ServeMode::Live | ServeMode::Redirect => u32::MAX,
         ServeMode::CutAfter(secs) | ServeMode::StallAfter(secs) => secs * 1000,
     };
     let response = b"HTTP/1.1 200 OK\r\nContent-Type: video/x-flv\r\nConnection: close\r\n\r\n";
@@ -1183,13 +1200,14 @@ fn stall_timeout_zero_disables_and_small_values_are_raised() {
 fn concurrent_starts_reserve_distinct_file_names() {
     let temp = tempfile::tempdir().unwrap();
     let dir = temp.path();
-    let (first, first_guard) = reserve_stem(dir, "主播_2026-11-22_10-00-00", true);
-    let (second, _second_guard) = reserve_stem(dir, "主播_2026-11-22_10-00-00", true);
+    let ts = naming::TS_EXTENSION;
+    let (first, first_guard) = reserve_stem(dir, "主播_2026-11-22_10-00-00", true, ts);
+    let (second, _second_guard) = reserve_stem(dir, "主播_2026-11-22_10-00-00", true, ts);
     assert_eq!(first, "主播_2026-11-22_10-00-00");
     assert_eq!(second, "主播_2026-11-22_10-00-00_2");
     // 释放后同名可以再次使用。
     drop(first_guard);
-    let (third, _third_guard) = reserve_stem(dir, "主播_2026-11-22_10-00-00", true);
+    let (third, _third_guard) = reserve_stem(dir, "主播_2026-11-22_10-00-00", true, ts);
     assert_eq!(third, first);
 }
 
@@ -1361,4 +1379,495 @@ async fn live_douyin_recording() {
             size as f64 * 8.0 / duration / 1000.0
         );
     }
+}
+
+// FLV 直接下载（`direct.rs`）。除最后一个外都不需要 ffmpeg：用合成的 FLV 字节流。
+
+/// 合成一段 FLV：文件头加每 100 毫秒一个 2000 字节的视频 tag。内容不能解码，
+/// 只用来检查原样保存。
+fn synthetic_flv(dir: &Path, secs: u32) -> PathBuf {
+    let mut bytes = b"FLV\x01\x05\x00\x00\x00\x09\x00\x00\x00\x00".to_vec();
+    for index in 0..secs * 10 {
+        let timestamp = index * 100;
+        let payload: Vec<u8> = (0..2000u32).map(|i| (i + index) as u8).collect();
+        let size = payload.len() as u32;
+        bytes.push(9);
+        bytes.extend_from_slice(&size.to_be_bytes()[1..]);
+        bytes.extend_from_slice(&timestamp.to_be_bytes()[1..]);
+        bytes.push((timestamp >> 24) as u8);
+        bytes.extend_from_slice(&[0, 0, 0]);
+        bytes.extend_from_slice(&payload);
+        bytes.extend_from_slice(&(11 + size).to_be_bytes());
+    }
+    let path = dir.join("synthetic.flv");
+    std::fs::write(&path, bytes).unwrap();
+    path
+}
+
+/// 服务端在 `CutAfter(secs)` 模式下发出的全部字节。
+fn served_prefix(sample: &Path, secs: u32) -> Vec<u8> {
+    let flv = parse_flv(&std::fs::read(sample).unwrap());
+    let mut bytes = flv.header;
+    for (timestamp, tag) in &flv.tags {
+        if *timestamp >= secs * 1000 {
+            break;
+        }
+        bytes.extend_from_slice(tag);
+    }
+    bytes
+}
+
+fn direct_options() -> RecordOptions {
+    RecordOptions {
+        direct_download: true,
+        ..unsegmented()
+    }
+}
+
+/// 目录里的全部文件（不含子目录）。
+fn files_in(dir: &Path) -> Vec<PathBuf> {
+    match std::fs::read_dir(dir) {
+        Ok(entries) => entries
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| path.is_file())
+            .collect(),
+        Err(_) => Vec::new(),
+    }
+}
+
+fn no_ffmpeg(temp: &Path) -> PathBuf {
+    temp.join("no-ffmpeg.exe")
+}
+
+#[tokio::test]
+async fn direct_download_saves_the_flv_body_until_the_server_closes() {
+    let temp = tempfile::tempdir().unwrap();
+    let sample = synthetic_flv(temp.path(), 10);
+    let server = start_server(&sample, ServeMode::CutAfter(3)).await;
+    let (listener, events) = recording_listener();
+    // 分段开关打开也不分段。
+    let options = RecordOptions {
+        segment_enabled: true,
+        segment_secs: 1,
+        ..direct_options()
+    };
+
+    let handle = start(
+        request(&no_ffmpeg(temp.path()), &server.url, temp.path(), options),
+        listener,
+    )
+    .await;
+    let outcome = wait_outcome(&handle, 30).await;
+
+    assert_eq!(outcome.reason, EndReason::StreamEnded, "{outcome:?}");
+    assert_eq!(outcome.exit_code, None);
+    assert_eq!(outcome.files.len(), 1, "{outcome:?}");
+    let file = &outcome.files[0];
+    let expected_dir = temp
+        .path()
+        .join("录像 测试")
+        .join("抖音")
+        .join("测试主播_小明");
+    assert_eq!(file.parent().unwrap(), expected_dir);
+    let name = file.file_name().unwrap().to_str().unwrap();
+    assert!(
+        name.starts_with("测试主播_小明_") && name.ends_with(".flv"),
+        "{name}"
+    );
+    let expected = served_prefix(&sample, 3);
+    assert_eq!(std::fs::read(file).unwrap(), expected);
+    assert_eq!(outcome.bytes_written, expected.len() as u64);
+    assert!(outcome.duration_secs.unwrap() > 0.5, "{outcome:?}");
+    assert_eq!(files_in(&expected_dir), vec![file.clone()]);
+
+    let events = events.lock().unwrap();
+    match events.first() {
+        Some(RecorderEvent::Started {
+            output_path,
+            source_format,
+            segmented,
+            pid,
+            ..
+        }) => {
+            assert_eq!(output_path, file);
+            assert_eq!(*source_format, SourceFormat::Flv);
+            assert!(!segmented);
+            assert_eq!(*pid, None);
+        }
+        other => panic!("{other:?}"),
+    }
+    let progress = events
+        .iter()
+        .find_map(|event| match event {
+            RecorderEvent::Progress { progress } => Some(progress.clone()),
+            _ => None,
+        })
+        .expect("progress event");
+    assert!(progress.size_bytes.unwrap() > 0, "{progress:?}");
+    assert!(progress.bitrate_kbps.unwrap() > 0.0, "{progress:?}");
+    assert!(matches!(events.last(), Some(RecorderEvent::Finished { outcome: o }) if o == &outcome));
+
+    // 请求头与 ffmpeg 录制相同。
+    let request_text = server.requests.lock().unwrap()[0].to_ascii_lowercase();
+    assert!(
+        request_text.contains(&format!("user-agent: {}", TEST_USER_AGENT.to_ascii_lowercase())),
+        "{request_text}"
+    );
+    assert!(
+        request_text.contains(&format!("referer: {TEST_REFERER}")),
+        "{request_text}"
+    );
+}
+
+#[tokio::test]
+async fn direct_download_follows_redirects_with_the_default_user_agent() {
+    let temp = tempfile::tempdir().unwrap();
+    let sample = synthetic_flv(temp.path(), 30);
+    let server = start_server(&sample, ServeMode::Redirect).await;
+    let handle = start(
+        RecordingRequest {
+            headers: BTreeMap::from([("Referer".to_string(), TEST_REFERER.to_string())]),
+            ..request(
+                &no_ffmpeg(temp.path()),
+                &server.url,
+                temp.path(),
+                direct_options(),
+            )
+        },
+        quiet_listener(),
+    )
+    .await;
+    wait_for_duration(&handle, 1.0).await;
+    let outcome = handle.stop_and_wait().await;
+    assert_eq!(outcome.reason, EndReason::UserStopped, "{outcome:?}");
+    assert_eq!(outcome.files.len(), 1);
+
+    let requests = server.requests.lock().unwrap().clone();
+    assert_eq!(requests.len(), 2, "{requests:?}");
+    let moved = requests[1].to_ascii_lowercase();
+    assert!(moved.starts_with("get /live/moved.flv "), "{moved}");
+    let user_agent = command::DEFAULT_USER_AGENT.to_ascii_lowercase();
+    assert!(
+        moved.contains(&format!("user-agent: {user_agent}")),
+        "{moved}"
+    );
+    // 跳转后仍带原来的 Referer，不换成跳转前的地址。
+    assert!(
+        moved.contains(&format!("referer: {TEST_REFERER}")),
+        "{moved}"
+    );
+}
+
+#[tokio::test]
+async fn direct_download_user_stop_closes_the_file_immediately() {
+    let temp = tempfile::tempdir().unwrap();
+    let sample = synthetic_flv(temp.path(), 30);
+    let server = start_server(&sample, ServeMode::Live).await;
+    let (listener, events) = recording_listener();
+    let handle = start(
+        request(
+            &no_ffmpeg(temp.path()),
+            &server.url,
+            temp.path(),
+            direct_options(),
+        ),
+        listener,
+    )
+    .await;
+    wait_for_duration(&handle, 2.0).await;
+    let stop_requested = Instant::now();
+    let outcome = handle.stop_and_wait().await;
+    let elapsed = stop_requested.elapsed();
+
+    assert!(elapsed < Duration::from_secs(1), "took {elapsed:?}");
+    assert_eq!(outcome.reason, EndReason::UserStopped, "{outcome:?}");
+    assert_eq!(outcome.files.len(), 1);
+    let saved = std::fs::read(&outcome.files[0]).unwrap();
+    assert!(saved.starts_with(b"FLV"));
+    assert_eq!(saved.len() as u64, outcome.bytes_written);
+    assert!(outcome.duration_secs.unwrap() >= 2.0, "{outcome:?}");
+    assert_eq!(handle.snapshot().state, RecorderState::Finished);
+    let causes: Vec<StopCause> = events
+        .lock()
+        .unwrap()
+        .iter()
+        .filter_map(|event| match event {
+            RecorderEvent::Stopping { cause } => Some(*cause),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(causes, vec![StopCause::User]);
+}
+
+#[tokio::test]
+async fn direct_download_http_errors_fail_without_leaving_a_file() {
+    let temp = tempfile::tempdir().unwrap();
+    let sample = synthetic_flv(temp.path(), 3);
+    let server = start_server(&sample, ServeMode::NotFound).await;
+    let handle = start(
+        request(
+            &no_ffmpeg(temp.path()),
+            &server.url,
+            temp.path(),
+            direct_options(),
+        ),
+        quiet_listener(),
+    )
+    .await;
+    let outcome = wait_outcome(&handle, 30).await;
+    assert_eq!(outcome.reason, EndReason::NetworkError, "{outcome:?}");
+    assert!(
+        outcome.message.as_deref().unwrap().contains("404"),
+        "{outcome:?}"
+    );
+    assert!(outcome.files.is_empty());
+    assert!(files_in(&outcome.output_dir.unwrap()).is_empty());
+
+    // 连不上：同样是网络错误。
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let url = format!("http://127.0.0.1:{port}/live/test.flv");
+    let handle = start(
+        request(
+            &no_ffmpeg(temp.path()),
+            &url,
+            temp.path(),
+            direct_options(),
+        ),
+        quiet_listener(),
+    )
+    .await;
+    let outcome = wait_outcome(&handle, 30).await;
+    assert_eq!(outcome.reason, EndReason::NetworkError, "{outcome:?}");
+    assert!(outcome.files.is_empty());
+    assert!(files_in(&outcome.output_dir.unwrap()).is_empty());
+}
+
+#[tokio::test]
+async fn direct_download_of_html_or_empty_responses_is_stream_end_without_a_file() {
+    let temp = tempfile::tempdir().unwrap();
+    let sample = synthetic_flv(temp.path(), 3);
+    for mode in [ServeMode::Html, ServeMode::Empty] {
+        let server = start_server(&sample, mode).await;
+        let handle = start(
+            request(
+                &no_ffmpeg(temp.path()),
+                &server.url,
+                temp.path(),
+                direct_options(),
+            ),
+            quiet_listener(),
+        )
+        .await;
+        let outcome = wait_outcome(&handle, 30).await;
+        assert_eq!(outcome.reason, EndReason::StreamEnded, "{outcome:?}");
+        assert!(outcome.message.is_some());
+        assert!(outcome.files.is_empty());
+        assert!(files_in(&outcome.output_dir.unwrap()).is_empty());
+    }
+}
+
+#[tokio::test]
+async fn direct_download_watchdog_stops_a_stalled_stream() {
+    let temp = tempfile::tempdir().unwrap();
+    let sample = synthetic_flv(temp.path(), 30);
+    let server = start_server(&sample, ServeMode::StallAfter(2)).await;
+    let (listener, events) = recording_listener();
+    let options = RecordOptions {
+        stall_timeout_secs: 2,
+        ..direct_options()
+    };
+    let begin = Instant::now();
+    let handle = start_inner(
+        request(&no_ffmpeg(temp.path()), &server.url, temp.path(), options),
+        listener,
+        default_space_probe(),
+        1,
+    )
+    .await;
+    let outcome = wait_outcome(&handle, 30).await;
+    let elapsed = begin.elapsed();
+
+    // 读超时要 15 秒；这么快结束说明是看门狗停的。
+    assert!(elapsed < Duration::from_secs(10), "took {elapsed:?}");
+    assert_eq!(outcome.reason, EndReason::NetworkError, "{outcome:?}");
+    assert_eq!(
+        outcome.message.as_deref(),
+        Some("长时间没有收到新数据，已停止录制")
+    );
+    assert_eq!(outcome.files.len(), 1);
+    let saved = std::fs::read(&outcome.files[0]).unwrap();
+    assert!(saved.starts_with(b"FLV"));
+    assert!(events.lock().unwrap().iter().any(|event| matches!(
+        event,
+        RecorderEvent::Stopping {
+            cause: StopCause::Stalled
+        }
+    )));
+}
+
+#[tokio::test]
+async fn direct_download_stops_when_disk_space_runs_low() {
+    let temp = tempfile::tempdir().unwrap();
+    let sample = synthetic_flv(temp.path(), 30);
+    let server = start_server(&sample, ServeMode::Live).await;
+    let disk_low = Arc::new(AtomicBool::new(false));
+    let flag = disk_low.clone();
+    let probe: SpaceProbe = Arc::new(move |_: &Path| {
+        Ok(if flag.load(Ordering::SeqCst) {
+            1 << 30
+        } else {
+            10 << 30
+        })
+    });
+    let options = RecordOptions {
+        disk_threshold_bytes: DEFAULT_DISK_THRESHOLD_BYTES,
+        disk_check_interval_secs: 1,
+        ..direct_options()
+    };
+    let handle = start_with_probe(
+        request(&no_ffmpeg(temp.path()), &server.url, temp.path(), options),
+        quiet_listener(),
+        probe,
+    )
+    .await;
+    wait_for_duration(&handle, 1.0).await;
+    disk_low.store(true, Ordering::SeqCst);
+    let outcome = wait_outcome(&handle, 30).await;
+    assert_eq!(outcome.reason, EndReason::DiskFull, "{outcome:?}");
+    assert_eq!(outcome.files.len(), 1);
+}
+
+#[tokio::test]
+async fn direct_download_writes_the_time_subtitle_and_follows_naming_options() {
+    let temp = tempfile::tempdir().unwrap();
+    let sample = synthetic_flv(temp.path(), 30);
+    let server = start_server(&sample, ServeMode::Live).await;
+    let handle = start(
+        RecordingRequest {
+            title: Some("今晚唱歌".to_string()),
+            ..request(
+                &no_ffmpeg(temp.path()),
+                &server.url,
+                temp.path(),
+                RecordOptions {
+                    direct_download: true,
+                    ..naming_options()
+                },
+            )
+        },
+        quiet_listener(),
+    )
+    .await;
+    wait_for_duration(&handle, 2.5).await;
+    let video = handle.snapshot().output_path.unwrap();
+    let outcome = handle.stop_and_wait().await;
+
+    assert_eq!(outcome.files, vec![video.clone()]);
+    let started = Local
+        .timestamp_millis_opt(outcome.started_at_ms)
+        .unwrap()
+        .format("%Y-%m-%d")
+        .to_string();
+    assert_eq!(
+        video.parent().unwrap(),
+        temp.path()
+            .join("录像 测试")
+            .join("抖音")
+            .join("测试主播_小明")
+            .join(started)
+            .join("今晚唱歌_测试主播_小明")
+    );
+    let name = video.file_name().unwrap().to_str().unwrap();
+    assert!(
+        name.starts_with("测试主播_小明_今晚唱歌_") && name.ends_with(".flv"),
+        "{name}"
+    );
+    let text = std::fs::read_to_string(video.with_extension("srt")).unwrap();
+    assert!(
+        text.starts_with("1\n00:00:00,000 --> 00:00:01,000\n20"),
+        "{text}"
+    );
+    assert!(
+        text.contains("\n2\n00:00:01,000 --> 00:00:02,000\n"),
+        "{text}"
+    );
+}
+
+#[tokio::test]
+async fn direct_download_uses_socks_proxies() {
+    let temp = tempfile::tempdir().unwrap();
+    // 没有服务在监听的端口：代理连不上。
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let options = RecordOptions {
+        proxy: Some(format!("socks5://127.0.0.1:{port}")),
+        ..direct_options()
+    };
+    let handle = start(
+        request(
+            &no_ffmpeg(temp.path()),
+            "http://127.0.0.1:1/x.flv",
+            temp.path(),
+            options,
+        ),
+        quiet_listener(),
+    )
+    .await;
+    let outcome = wait_outcome(&handle, 30).await;
+    // ffmpeg 录制会在启动前拒绝 SOCKS 代理（`socks_proxy_is_rejected_before_launch`）。
+    assert_eq!(outcome.reason, EndReason::NetworkError, "{outcome:?}");
+    assert!(outcome.files.is_empty());
+}
+
+#[tokio::test]
+async fn hls_sources_are_not_downloaded_directly() {
+    let temp = tempfile::tempdir().unwrap();
+    let handle = start(
+        RecordingRequest {
+            source_format: SourceFormat::Hls,
+            ..request(
+                &no_ffmpeg(temp.path()),
+                "http://127.0.0.1:1/live.m3u8",
+                temp.path(),
+                direct_options(),
+            )
+        },
+        quiet_listener(),
+    )
+    .await;
+    let outcome = handle.wait().await;
+    // 交给了 ffmpeg（这里故意不存在）。
+    assert_eq!(outcome.reason, EndReason::FfmpegFailed);
+    assert!(outcome.message.unwrap().contains("无法启动 ffmpeg"));
+}
+
+#[tokio::test]
+async fn direct_download_of_a_real_stream_is_playable() {
+    let Some(ffmpeg) = test_ffmpeg() else { return };
+    let temp = tempfile::tempdir().unwrap();
+    let sample = make_sample(&ffmpeg, temp.path());
+    let server = start_server(&sample, ServeMode::CutAfter(5)).await;
+    let handle = start(
+        request(&ffmpeg, &server.url, temp.path(), direct_options()),
+        quiet_listener(),
+    )
+    .await;
+    let outcome = wait_outcome(&handle, 30).await;
+
+    assert_eq!(outcome.reason, EndReason::StreamEnded, "{outcome:?}");
+    assert_eq!(outcome.files.len(), 1);
+    let file = &outcome.files[0];
+    assert!(file.to_string_lossy().ends_with(".flv"));
+    assert_eq!(std::fs::read(file).unwrap(), served_prefix(&sample, 5));
+    assert_playable(&ffmpeg, file);
+    let duration = media_duration(&ffmpeg, file);
+    assert!((4.0..=5.5).contains(&duration), "duration {duration}");
 }

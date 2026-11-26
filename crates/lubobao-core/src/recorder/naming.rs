@@ -29,8 +29,11 @@ pub const DATE_FORMAT: &str = "%Y-%m-%d";
 /// 时间部分的格式，与 StreamCap 相同。
 pub const TIME_FORMAT: &str = "%Y-%m-%d_%H-%M-%S";
 
-/// 录像文件扩展名（目前只支持 TS）。
+/// ffmpeg 录制的扩展名。
 pub const TS_EXTENSION: &str = "ts";
+
+/// FLV 直接下载（不经 ffmpeg，见 [`super::direct`]）的扩展名。
+pub const FLV_EXTENSION: &str = "flv";
 
 /// StreamCap `clean_name` 替换为 `_` 的字符，另加 `%`（分段文件名会被 FFmpeg 当作格式串）
 /// 和 `'`、`` ` ``（避免脚本处理路径时出错）。
@@ -168,12 +171,13 @@ pub fn recording_dir(output_root: &Path, parts: &NameParts, options: &RecordOpti
     dir
 }
 
-/// 交给 FFmpeg 的输出路径。分段时为 `stem_%03d.ts`，由 segment 封装器编号。
-pub fn output_path(dir: &Path, stem: &str, segmented: bool) -> PathBuf {
+/// 录像的输出路径，`extension` 为 [`TS_EXTENSION`] 或 [`FLV_EXTENSION`]。分段时为
+/// `stem_%03d.ts`，由 segment 封装器编号（只有 ffmpeg 录制会分段）。
+pub fn output_path(dir: &Path, stem: &str, segmented: bool, extension: &str) -> PathBuf {
     if segmented {
-        dir.join(format!("{stem}_%03d.{TS_EXTENSION}"))
+        dir.join(format!("{stem}_%03d.{extension}"))
     } else {
-        dir.join(format!("{stem}.{TS_EXTENSION}"))
+        dir.join(format!("{stem}.{extension}"))
     }
 }
 
@@ -189,11 +193,11 @@ pub fn ffmpeg_segment_pattern(dir: &Path, stem: &str) -> PathBuf {
 }
 
 /// 第一个文件的实际路径，用于判断是否与已有录像重名。
-pub fn first_file_path(dir: &Path, stem: &str, segmented: bool) -> PathBuf {
+pub fn first_file_path(dir: &Path, stem: &str, segmented: bool, extension: &str) -> PathBuf {
     if segmented {
-        dir.join(format!("{stem}_000.{TS_EXTENSION}"))
+        dir.join(format!("{stem}_000.{extension}"))
     } else {
-        dir.join(format!("{stem}.{TS_EXTENSION}"))
+        dir.join(format!("{stem}.{extension}"))
     }
 }
 
@@ -572,19 +576,41 @@ mod tests {
     #[test]
     fn output_path_adds_segment_pattern() {
         let dir = Path::new("out");
-        assert_eq!(output_path(dir, "a_1", false), dir.join("a_1.ts"));
-        assert_eq!(output_path(dir, "a_1", true), dir.join("a_1_%03d.ts"));
-        assert_eq!(first_file_path(dir, "a_1", true), dir.join("a_1_000.ts"));
+        assert_eq!(
+            output_path(dir, "a_1", false, TS_EXTENSION),
+            dir.join("a_1.ts")
+        );
+        assert_eq!(
+            output_path(dir, "a_1", true, TS_EXTENSION),
+            dir.join("a_1_%03d.ts")
+        );
+        assert_eq!(
+            first_file_path(dir, "a_1", true, TS_EXTENSION),
+            dir.join("a_1_000.ts")
+        );
+    }
+
+    #[test]
+    fn direct_download_files_use_the_same_name_with_flv_extension() {
+        let dir = Path::new("out");
+        assert_eq!(
+            output_path(dir, "a_1", false, FLV_EXTENSION),
+            dir.join("a_1.flv")
+        );
+        assert_eq!(
+            first_file_path(dir, "a_1", false, FLV_EXTENSION),
+            dir.join("a_1.flv")
+        );
     }
 
     #[test]
     fn first_segment_path_expands_only_the_file_name() {
         let dir = Path::new(r"D:\100% 录像\a_%03d.x");
         assert_eq!(
-            first_segment_path(&output_path(dir, "主播_1", true)),
+            first_segment_path(&output_path(dir, "主播_1", true, TS_EXTENSION)),
             dir.join("主播_1_000.ts")
         );
-        let plain = output_path(dir, "主播_1", false);
+        let plain = output_path(dir, "主播_1", false, TS_EXTENSION);
         assert_eq!(first_segment_path(&plain), plain);
     }
 
@@ -628,7 +654,7 @@ mod tests {
         let plain = Path::new(r"D:\录像");
         assert_eq!(
             ffmpeg_segment_pattern(plain, "a"),
-            output_path(plain, "a", true)
+            output_path(plain, "a", true, TS_EXTENSION)
         );
     }
 }
