@@ -1,4 +1,4 @@
-// 平台与窗口材质。说明见 docs/design/native-ui.md。
+// 平台与窗口材质。说明见 docs/specs/native-ui.md。
 //
 // data-platform 由 index.html 的内联脚本在首帧前按 UA 写入（浏览器假数据模式可用 ?platform= 覆盖），
 // 这里只读取。data-material 由 Rust 决定（Windows 11 的 Mica、macOS 的 vibrancy），拿到结果前按 none 渲染。

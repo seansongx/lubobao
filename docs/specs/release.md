@@ -1,3 +1,8 @@
+---
+status: shipped
+scope: 发版流程、一次性准备、出问题时的处理和应用内更新的工作方式；不含每个版本的更新内容（见 docs/release-notes/）
+---
+
 # 发版流程
 
 录播宝的安装包在 GitHub Actions 里构建，GitHub Release 人工审核发布后，自动上传到 xiaofany.com 分发平台（R2，`dl.xiaofany.cn`），官网和应用内更新都走 xiaofany.com，GitHub Release 作为备用线路：下载地址的备用，以及应用内更新的第二个接口（Release 上的 `latest.json`）。
@@ -79,7 +84,7 @@ xiaofany.com 后台还要先建好软件：slug `lubobao`、框架 `tauri`，「
 
 ## 每次发版
 
-1. **改版本号、写更新说明**：`node scripts/set-version.mjs 0.1.1`（同时改 package.json、package-lock.json、tauri.conf.json、Cargo.toml、Cargo.lock），`node scripts/check-version.mjs` 核对。在 `docs/release-notes/<版本>.md`（例如 `docs/release-notes/0.1.1.md`）写好本版本的更新说明，和版本号一起提交并合入 main。这个文件只写「更新内容」标题下面的正文，不带标题和分隔注释；只用纯文本和简单的 Markdown（标题、列表、粗体、链接），应用的更新对话框只认这些。0.1.0 的说明见 [docs/release-notes/0.1.0.md](release-notes/0.1.0.md)。
+1. **改版本号、写更新说明**：`node scripts/set-version.mjs 0.1.1`（同时改 package.json、package-lock.json、tauri.conf.json、Cargo.toml、Cargo.lock），`node scripts/check-version.mjs` 核对。在 `docs/release-notes/<版本>.md`（例如 `docs/release-notes/0.1.1.md`）写好本版本的更新说明，和版本号一起提交并合入 main。这个文件只写「更新内容」标题下面的正文，不带标题和分隔注释；只用纯文本和简单的 Markdown（标题、列表、粗体、链接），应用的更新对话框只认这些。0.1.0 的说明见 [docs/release-notes/0.1.0.md](../release-notes/0.1.0.md)。
 2. **打标签**：`git tag v0.1.1`，`git push origin v0.1.1`。release.yml 先检查标签与版本号一致、`docs/release-notes/<版本>.md` 存在且有内容（没有就立即失败，不会白打包），再在 Windows、macOS（arm64、x64）、Linux 上打包，用 tauri.conf.json 里的公钥校验每个 `.sig`（私钥和公钥不是一对时失败），用 `scripts/updater-latest-json.mjs` 生成 GitHub 兜底更新清单 `latest.json`（四个平台的签名和 Release 下载地址，缺任何一个平台的更新包或 `.sig` 都失败；此时还没有更新说明），然后建草稿 Release，附上全部文件、`SHA256SUMS.txt` 和 `latest.json`。草稿正文的「## 更新内容」下面直接是 `docs/release-notes/<版本>.md` 的内容，接着是 `<!-- 以上为应用内更新说明 -->` 和安装说明。`latest.json` 不在 `SHA256SUMS.txt` 里：发布后它会被改写。Docker 镜像以 `<版本>` 推到 GHCR。
 3. **审核草稿**：在 GitHub 的 Releases 页面打开草稿。
    - 看一遍「更新内容」：`<!-- 以上为应用内更新说明 -->` 以上的部分会显示在应用的更新对话框里，也是 xiaofany.com 和官网上的版本说明；以下的安装说明不会。一般不用改；要改的话，先改 `docs/release-notes/<版本>.md` 并提交，再在草稿里改成同样的内容，保持仓库和发布出去的一致（保留标题和分隔注释）。
@@ -129,4 +134,4 @@ xiaofany.com 后台还要先建好软件：slug `lubobao`、框架 `tauri`，「
 - release.yml 在真实 Secret 下的签名、改名和 `.sig` 校验（macOS `.app.tar.gz`、Linux AppImage 的路径在本机没有跑过）；
 - publish-xiaofany.yml 的上传、发布和发布后核对；
 - GitHub 兜底：Release 上的 `latest.json` 内容，以及发布后 `https://github.com/seansongx/lubobao/releases/latest/download/latest.json` 能下载到（重定向到 GitHub 的文件服务器）。实测时可以在调试构建里设 `LUBOBAO_UPDATER_ENDPOINT=https://127.0.0.1:1/x,https://github.com/seansongx/lubobao/releases/latest/download/latest.json`，并把应用版本临时改低，在 设置 → 关于 检查更新；下载兜底从真实 GitHub Release 下载安装包（重定向到 `objects.githubusercontent.com`）也要等那时实测；
-- macOS、Linux AppImage 的应用内升级（Windows 已在本机用测试密钥和本地假服务器验证，见 `docs/feature-map.md`）。
+- macOS、Linux AppImage 的应用内升级（Windows 已在本机用测试密钥和本地假服务器验证，见 `docs/specs/feature-map.md`）。

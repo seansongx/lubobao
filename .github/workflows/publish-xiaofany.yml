@@ -4,7 +4,7 @@ name: Publish to xiaofany.com
 # GitHub Release 登记为备用线路。手动触发只用于已经正式发布的 Release（草稿的 GitHub 下载地址
 # 是 404，备用线路会失效），草稿一律拒绝。发布脚本 scripts/publish-xiaofany.mjs 拷自 xiaofany.com。
 # 没有 Secret RELEASE_TOKEN 时（例如 fork）给出 notice 后跳过。另一个 job 把更新说明写进 Release 上的
-# GitHub 兜底更新清单 latest.json（不需要 RELEASE_TOKEN）。流程见 docs/release.md。
+# GitHub 兜底更新清单 latest.json（不需要 RELEASE_TOKEN）。流程见 docs/specs/release.md。
 on:
   release:
     types: [published]

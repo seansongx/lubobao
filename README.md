@@ -99,8 +99,8 @@ npm run tauri build -- --config '{"bundle":{"createUpdaterArtifacts":false}}'
 ## 参与开发
 
 - 仓库结构、技术选型、代码风格、测试和提交前检查见 [AGENTS.md](AGENTS.md)。
-- 功能范围、验收状态和与 StreamCap 的有意差异见[功能地图](docs/feature-map.md)。
-- 发版流程见 [docs/release.md](docs/release.md)。fork 后自己发版时，要把 `src-tauri/tauri.conf.json` 里 `plugins.updater` 的更新接口（xiaofany.com 和 GitHub `latest.json` 两个地址）和公钥 `pubkey` 换成自己的，否则装了你的版本的用户会从本仓库检查更新，签名也对不上。
+- 功能范围、验收状态和与 StreamCap 的有意差异见[功能地图](docs/specs/feature-map.md)。
+- 发版流程见 [docs/specs/release.md](docs/specs/release.md)。fork 后自己发版时，要把 `src-tauri/tauri.conf.json` 里 `plugins.updater` 的更新接口（xiaofany.com 和 GitHub `latest.json` 两个地址）和公钥 `pubkey` 换成自己的，否则装了你的版本的用户会从本仓库检查更新，签名也对不上。
 - 平台解析参考了 [StreamGet](https://github.com/ihmily/streamget)，界面和功能参考了 [StreamCap](https://github.com/ihmily/StreamCap)。
 
 ## 许可证
