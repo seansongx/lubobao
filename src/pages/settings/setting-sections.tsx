@@ -27,7 +27,15 @@ export const groupKeys = {
     "delete_original",
     "folder_name_platform",
     "folder_name_author",
+    "folder_name_time",
+    "folder_name_title",
+    "filename_includes_title",
+    "remove_emojis",
+    "generate_time_subtitle_file",
+    "flv_use_direct_download",
+    "only_notify_no_record",
   ],
+  script: ["execute_custom_script", "custom_script_command"],
   check: ["loop_time_seconds", "platform_max_concurrent_requests", "default_live_source", "force_https_recording"],
   network: ["enable_proxy", "proxy_address", "default_platform_with_proxy"],
   accounts: ["platform_cookies"],
@@ -171,14 +179,14 @@ export function RecordSection({ ctx }: SectionProps) {
       />
       <SwitchField
         label="录制完成后转为 MP4"
-        description="录制结束后逐个转成同名 MP4，只换封装不重新编码；转换失败时保留 TS 原文件"
+        description="录制结束后逐个转成同名 MP4，只换封装不重新编码；转换失败时保留 原文件"
         checked={settings.convert_to_mp4}
         error={ctx.errors.convert_to_mp4}
         onChange={(value) => bind(ctx, "convert_to_mp4").save(value)}
       />
       <SwitchField
         label="转换后删除原文件"
-        description="只在转换成功后删除 TS 原文件"
+        description="只在转换成功后删除 原文件"
         checked={settings.delete_original}
         disabled={!settings.convert_to_mp4}
         error={ctx.errors.delete_original}
@@ -197,6 +205,101 @@ export function RecordSection({ ctx }: SectionProps) {
         checked={settings.folder_name_author}
         error={ctx.errors.folder_name_author}
         onChange={(value) => bind(ctx, "folder_name_author").save(value)}
+      />
+      <SwitchField
+        label="按日期建子目录"
+        description="主播目录下再按开始录制的日期（如 2026-11-26）分目录"
+        checked={settings.folder_name_time}
+        error={ctx.errors.folder_name_time}
+        onChange={(value) => bind(ctx, "folder_name_time").save(value)}
+      />
+      <SwitchField
+        label="按标题建子目录"
+        description="再按「标题_主播名」分目录，直播间没有标题时不建"
+        checked={settings.folder_name_title}
+        error={ctx.errors.folder_name_title}
+        onChange={(value) => bind(ctx, "folder_name_title").save(value)}
+      />
+      <SwitchField
+        label="文件名包含标题"
+        description="文件名为「主播名_标题_时间」"
+        checked={settings.filename_includes_title}
+        error={ctx.errors.filename_includes_title}
+        onChange={(value) => bind(ctx, "filename_includes_title").save(value)}
+      />
+      <SwitchField
+        label="去除表情符号"
+        description="文件名和目录名里的表情符号换成下划线"
+        checked={settings.remove_emojis}
+        error={ctx.errors.remove_emojis}
+        onChange={(value) => bind(ctx, "remove_emojis").save(value)}
+      />
+      <SwitchField
+        label="生成时间字幕"
+        description="在录像旁生成同名 .srt，每秒显示当时的时间；仅在关闭分段录制时生效"
+        checked={settings.generate_time_subtitle_file}
+        error={ctx.errors.generate_time_subtitle_file}
+        onChange={(value) => bind(ctx, "generate_time_subtitle_file").save(value)}
+      />
+      <SwitchField
+        label="FLV 直接下载"
+        description="直播源是 FLV 时不经 FFmpeg，直接保存为 .flv；此时不分段"
+        checked={settings.flv_use_direct_download}
+        error={ctx.errors.flv_use_direct_download}
+        onChange={(value) => bind(ctx, "flv_use_direct_download").save(value)}
+      />
+      <SwitchField
+        label="新直播间默认仅通知"
+        description="添加直播间时默认勾选「仅通知，不录制」，可在添加时修改"
+        checked={settings.only_notify_no_record}
+        error={ctx.errors.only_notify_no_record}
+        onChange={(value) => bind(ctx, "only_notify_no_record").save(value)}
+      />
+    </SettingsCard>
+  );
+}
+
+const scriptVariables = [
+  ["LUBOBAO_FILE", "第一个文件"],
+  ["LUBOBAO_FILES", "全部文件，每行一个"],
+  ["LUBOBAO_DIR", "所在目录"],
+  ["LUBOBAO_ANCHOR", "主播名"],
+  ["LUBOBAO_PLATFORM", "平台"],
+  ["LUBOBAO_TITLE", "标题"],
+  ["LUBOBAO_ROOM_URL", "直播间链接"],
+] as const;
+
+export function ScriptSection({ ctx }: SectionProps) {
+  const { settings } = ctx;
+  const command = bind(ctx, "custom_script_command");
+  return (
+    <SettingsCard title="录后脚本" onReset={() => void ctx.reset(groupKeys.script)}>
+      <SwitchField
+        label="录制结束后执行脚本"
+        description="录制和转换完成后运行下方的命令"
+        checked={settings.execute_custom_script}
+        error={ctx.errors.execute_custom_script}
+        onChange={(value) => bind(ctx, "execute_custom_script").save(value)}
+      />
+      <TextField
+        label="脚本命令"
+        description={
+          <>
+            录制和转换完成后通过系统命令行执行。录像信息通过环境变量传入：
+            {scriptVariables.map(([name, meaning], index) => (
+              <span key={name}>
+                {index > 0 ? "；" : ""}
+                <code>{name}</code>（{meaning}）
+              </span>
+            ))}
+          </>
+        }
+        value={settings.custom_script_command ?? ""}
+        disabled={!settings.execute_custom_script}
+        error={command.error}
+        stacked
+        onError={command.onError}
+        onCommit={command.save}
       />
     </SettingsCard>
   );

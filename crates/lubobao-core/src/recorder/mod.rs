@@ -1,4 +1,6 @@
-//! 录制引擎：用 ffmpeg 把一路直播流复制成本地 TS 文件。
+//! 录制引擎：用 ffmpeg 把一路直播流复制成本地 TS 文件；开启
+//! [`RecordOptions::direct_download`] 且源是 HTTP(S) FLV 时改为直接下载成 FLV（[`direct`]），
+//! 对外的句柄、事件和结果相同。
 //!
 //! 调用 [`start`] 得到 [`RecordingHandle`]，用它停止录制、读取快照或等待结束；
 //! 过程中的状态通过 [`EventListener`] 回调发出（[`RecorderEvent`] 可直接用 serde 序列化）。
@@ -25,11 +27,13 @@
 //!   segment 封装器时转义为 `%%`。
 
 pub mod command;
+pub mod direct;
 pub mod naming;
 pub mod outcome;
 pub mod postprocess;
 pub mod process_guard;
 pub mod progress;
+pub mod subtitle;
 
 #[cfg(test)]
 mod tests;
@@ -56,6 +60,7 @@ pub use progress::Progress;
 use command::CommandSpec;
 use outcome::ExitSummary;
 use progress::{ErrorTail, LineSplitter};
+use subtitle::SubtitleWriter;
 
 /// 默认分段时长（秒），StreamCap `video_segment_time`。
 pub const DEFAULT_SEGMENT_SECS: u64 = 1800;
@@ -102,12 +107,30 @@ pub struct RecordOptions {
     pub segment_secs: u64,
     /// 磁盘剩余空间低于该值时不开始录制，录制中则正常停止。0 表示不检查。
     pub disk_threshold_bytes: u64,
-    /// HTTP 代理地址；为空或 `None` 时不用代理。
+    /// 代理地址；为空或 `None` 时不用代理。ffmpeg 录制只支持 HTTP 代理，直接下载
+    /// （[`direct_download`](Self::direct_download)）还支持 HTTPS 和 SOCKS 代理。
     pub proxy: Option<String>,
+    /// 源是 HTTP(S) 的 FLV 时不经 ffmpeg，直接把响应体保存为 `.flv`，不分段，见 [`direct`]。
+    /// 其他源忽略这一项。
+    pub direct_download: bool,
     /// 目录是否包含平台名，StreamCap `folder_name_platform` 默认 `true`。
     pub folder_by_platform: bool,
     /// 目录是否包含主播名，StreamCap `folder_name_author` 默认 `true`。
     pub folder_by_anchor: bool,
+    /// 目录是否再加开始录制当天的日期（`YYYY-MM-DD`），StreamCap `folder_name_time`
+    /// 默认 `false`。
+    pub folder_by_date: bool,
+    /// 目录是否再加 `标题_主播名` 一层（标题清理后为空时不加），StreamCap
+    /// `folder_name_title` 默认 `false`。
+    pub folder_by_title: bool,
+    /// 文件名是否带直播标题，StreamCap `filename_includes_title` 默认 `false`。
+    pub filename_includes_title: bool,
+    /// 名称里是否去掉 emoji。StreamCap `remove_emojis` 默认 `false`；录播宝一直去掉，
+    /// 默认保持 `true`，让已有用户的目录名不变。
+    pub remove_emojis: bool,
+    /// 未分段录制时是否在录像旁写每秒一条的时间字幕（`.srt`），StreamCap
+    /// `generate_time_subtitle_file` 默认 `false`。分段录制不生成。
+    pub time_subtitle: bool,
     pub disk_check_interval_secs: u64,
     pub stop_timeout_secs: u64,
     /// 看门狗时限（秒）。0 表示关闭；非 0 时不低于 [`MIN_STALL_TIMEOUT_SECS`]。
@@ -125,8 +148,14 @@ impl Default for RecordOptions {
             segment_secs: DEFAULT_SEGMENT_SECS,
             disk_threshold_bytes: DEFAULT_DISK_THRESHOLD_BYTES,
             proxy: None,
+            direct_download: false,
             folder_by_platform: true,
             folder_by_anchor: true,
+            folder_by_date: false,
+            folder_by_title: false,
+            filename_includes_title: false,
+            remove_emojis: true,
+            time_subtitle: false,
             disk_check_interval_secs: DEFAULT_DISK_CHECK_INTERVAL_SECS,
             stop_timeout_secs: DEFAULT_STOP_TIMEOUT_SECS,
             stall_timeout_secs: DEFAULT_STALL_TIMEOUT_SECS,
@@ -150,10 +179,13 @@ pub struct RecordingRequest {
     pub source_format: SourceFormat,
     /// 取流请求头，通常是 `LiveInfo::stream_headers`。
     pub headers: BTreeMap<String, String>,
-    /// 录像根目录；相对路径按当前工作目录转为绝对路径。引擎在其下按平台和主播建子目录。
+    /// 录像根目录；相对路径按当前工作目录转为绝对路径。引擎在其下按平台、主播、日期、
+    /// 标题建子目录（见 [`naming::recording_dir`]）。
     pub output_dir: PathBuf,
     /// 主播名，用于目录和文件名。
     pub anchor_name: String,
+    /// 直播标题，来自检测结果；`filename_includes_title`、`folder_by_title` 用它命名。
+    pub title: Option<String>,
     /// 平台显示名（例如 `抖音`），用于目录名。
     pub platform: String,
     pub options: RecordOptions,
@@ -356,13 +388,18 @@ impl Drop for NameReservation {
 }
 
 /// 选一个既不在磁盘上、也没被本进程其他录制占用的文件名主体，并占用它。
-fn reserve_stem(dir: &Path, base: &str, segmented: bool) -> (String, NameReservation) {
+fn reserve_stem(
+    dir: &Path,
+    base: &str,
+    segmented: bool,
+    extension: &str,
+) -> (String, NameReservation) {
     let mut reserved = lock(&RESERVED_FILES);
     let stem = naming::unique_stem(base, |candidate| {
-        let first = naming::first_file_path(dir, candidate, segmented);
+        let first = naming::first_file_path(dir, candidate, segmented, extension);
         reserved.contains(&first) || first.exists()
     });
-    let first_file = naming::first_file_path(dir, &stem, segmented);
+    let first_file = naming::first_file_path(dir, &stem, segmented, extension);
     reserved.insert(first_file.clone());
     (stem, NameReservation { first_file })
 }
@@ -406,6 +443,7 @@ async fn start_inner(
     };
     let started_at = Local::now();
     let started_at_ms = started_at.timestamp_millis();
+    let started_instant = Instant::now();
     let early_failure = |reason: EndReason, message: String, output_dir: Option<PathBuf>| {
         let outcome = RecordingOutcome {
             reason,
@@ -422,11 +460,17 @@ async fn start_inner(
     };
 
     let options = &request.options;
-    let proxy = match command::ffmpeg_proxy(options.proxy.as_deref().unwrap_or_default()) {
-        Ok(proxy) => proxy,
-        Err(message) => {
-            early_failure(EndReason::FfmpegFailed, message, None);
-            return handle;
+    let direct = direct::applies(&request);
+    // 直接下载由 reqwest 连接，代理在 `direct::Download::prepare` 里检查。
+    let proxy = if direct {
+        None
+    } else {
+        match command::ffmpeg_proxy(options.proxy.as_deref().unwrap_or_default()) {
+            Ok(proxy) => proxy,
+            Err(message) => {
+                early_failure(EndReason::FfmpegFailed, message, None);
+                return handle;
+            }
         }
     };
 
@@ -442,13 +486,13 @@ async fn start_inner(
             return handle;
         }
     };
-    let dir = naming::recording_dir(
-        &root,
-        &request.platform,
-        &request.anchor_name,
-        options.folder_by_platform,
-        options.folder_by_anchor,
-    );
+    let name_parts = naming::NameParts {
+        platform: &request.platform,
+        anchor_name: &request.anchor_name,
+        title: request.title.as_deref(),
+        started: started_at.naive_local(),
+    };
+    let dir = naming::recording_dir(&root, &name_parts, options);
     if let Err(error) = tokio::fs::create_dir_all(&dir).await {
         early_failure(
             EndReason::FfmpegFailed,
@@ -477,56 +521,76 @@ async fn start_inner(
         SpaceCheck::Enough | SpaceCheck::Skipped => {}
     }
 
-    let segmented = options.segment_enabled;
-    let base_stem = naming::file_stem(&request.anchor_name, started_at.naive_local());
-    let (stem, reservation) = reserve_stem(&dir, &base_stem, segmented);
-    let output_path = naming::output_path(&dir, &stem, segmented);
-    let ffmpeg_output = if segmented {
-        naming::ffmpeg_segment_pattern(&dir, &stem)
+    // 直接下载不分段。
+    let segmented = options.segment_enabled && !direct;
+    let extension = if direct {
+        naming::FLV_EXTENSION
     } else {
-        output_path.clone()
+        naming::TS_EXTENSION
     };
-    let args = command::build_args(&CommandSpec {
-        source_url: &request.source_url,
-        source_format: request.source_format,
-        headers: &request.headers,
-        output_path: &ffmpeg_output,
-        segment_secs: segmented.then_some(options.segment_secs),
-        proxy: proxy.as_deref(),
-        relaxed_hls_extension: options.relaxed_hls_extension,
-    });
-
-    let mut command = Command::new(&request.ffmpeg_path);
-    command
-        .args(&args)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
-    #[cfg(windows)]
-    {
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        command.creation_flags(CREATE_NO_WINDOW);
-    }
-    process_guard::configure(&mut command);
-    let child = match command.spawn() {
-        Ok(child) => child,
-        Err(error) => {
-            early_failure(
-                EndReason::FfmpegFailed,
-                format!(
-                    "无法启动 ffmpeg（{}）：{error}",
-                    request.ffmpeg_path.display()
-                ),
-                Some(dir),
-            );
-            return handle;
+    let base_stem = naming::file_stem(&name_parts, options);
+    let (stem, reservation) = reserve_stem(&dir, &base_stem, segmented, extension);
+    let output_path = naming::output_path(&dir, &stem, segmented, extension);
+    let engine = if direct {
+        match direct::Download::prepare(&request) {
+            Ok(download) => Engine::Direct(download),
+            Err(message) => {
+                early_failure(EndReason::FfmpegFailed, message, Some(dir));
+                return handle;
+            }
         }
+    } else {
+        let ffmpeg_output = if segmented {
+            naming::ffmpeg_segment_pattern(&dir, &stem)
+        } else {
+            output_path.clone()
+        };
+        let args = command::build_args(&CommandSpec {
+            source_url: &request.source_url,
+            source_format: request.source_format,
+            headers: &request.headers,
+            output_path: &ffmpeg_output,
+            segment_secs: segmented.then_some(options.segment_secs),
+            proxy: proxy.as_deref(),
+            relaxed_hls_extension: options.relaxed_hls_extension,
+        });
+
+        let mut command = Command::new(&request.ffmpeg_path);
+        command
+            .args(&args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+        #[cfg(windows)]
+        {
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            command.creation_flags(CREATE_NO_WINDOW);
+        }
+        process_guard::configure(&mut command);
+        let child = match command.spawn() {
+            Ok(child) => child,
+            Err(error) => {
+                early_failure(
+                    EndReason::FfmpegFailed,
+                    format!(
+                        "无法启动 ffmpeg（{}）：{error}",
+                        request.ffmpeg_path.display()
+                    ),
+                    Some(dir),
+                );
+                return handle;
+            }
+        };
+        if let Err(message) = process_guard::attach(&child) {
+            warnings.push(message);
+        }
+        Engine::Ffmpeg(child)
     };
-    if let Err(message) = process_guard::attach(&child) {
-        warnings.push(message);
-    }
-    let pid = child.id();
+    let pid = match &engine {
+        Engine::Ffmpeg(child) => child.id(),
+        Engine::Direct(_) => None,
+    };
 
     let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
     lock(&ACTIVE).insert(id, handle.clone());
@@ -548,6 +612,9 @@ async fn start_inner(
         listener(&RecorderEvent::Warning { message });
     }
 
+    // 分段录制时不生成字幕（与 StreamCap 一致）。
+    let subtitle = (options.time_subtitle && !segmented)
+        .then(|| SubtitleWriter::new(&output_path, started_at));
     let supervisor = Supervisor {
         id,
         listener,
@@ -564,10 +631,22 @@ async fn start_inner(
         stop_timeout: Duration::from_secs(options.stop_timeout_secs.max(1)),
         stall_timeout: effective_stall_timeout(options.stall_timeout_secs, min_stall_secs),
         started_at_ms,
+        started_instant,
+        subtitle,
         _reservation: reservation,
     };
-    tokio::spawn(supervisor.run(child));
+    match engine {
+        Engine::Ffmpeg(child) => tokio::spawn(supervisor.run(child)),
+        Engine::Direct(download) => tokio::spawn(supervisor.run_direct(download)),
+    };
     handle
+}
+
+/// 这次录制由谁写文件。
+enum Engine {
+    Ffmpeg(Child),
+    /// FLV 直接下载，见 [`direct`]。
+    Direct(direct::Download),
 }
 
 fn finish(
@@ -634,6 +713,10 @@ struct Supervisor {
     stop_timeout: Duration,
     stall_timeout: Option<Duration>,
     started_at_ms: i64,
+    /// 开始录制的时刻，时间字幕的时间轴从这里算起。
+    started_instant: Instant,
+    /// 时间字幕写入器；只在未分段且开启 `time_subtitle` 时有。
+    subtitle: Option<SubtitleWriter>,
     /// 录制结束前一直占用文件名。
     _reservation: NameReservation,
 }
@@ -694,6 +777,9 @@ impl Supervisor {
                     }
                 }
                 _ = tick.tick() => {
+                    if let Some(writer) = self.subtitle.as_mut() {
+                        writer.write_until(self.started_instant.elapsed().as_secs()).await;
+                    }
                     if self.segmented {
                         state.segment_bytes =
                             collect_files(&self.dir, &self.stem, &self.output_path, true)
@@ -737,6 +823,9 @@ impl Supervisor {
         drop(stdin);
 
         let files = collect_files(&self.dir, &self.stem, &self.output_path, self.segmented).await;
+        if let Some(writer) = self.subtitle.take() {
+            writer.finish(!files.is_empty()).await;
+        }
         let bytes_written = files.iter().map(|(_, size)| size).sum::<u64>();
         let tail = state.tail.lines();
         let exit_code = status.ok().and_then(|status| status.code());

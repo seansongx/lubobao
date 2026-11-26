@@ -1,4 +1,4 @@
-// 去掉网页感的全局行为，说明见 docs/design/native-ui.md「去网页感的行为清单」。
+// 去掉网页感的全局行为，说明见 docs/specs/native-ui.md「去网页感的行为清单」。
 // 在 main.tsx 里、React 渲染前安装一次。
 
 import { hasModifier, isMac } from "@/lib/platform";

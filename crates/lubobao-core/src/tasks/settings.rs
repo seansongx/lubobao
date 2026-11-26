@@ -32,7 +32,8 @@ pub fn defaults(save_dir: &Path) -> Map<String, Value> {
         "generate_time_subtitle_file": false,
         "only_notify_no_record": false,
         "filename_includes_title": false,
-        "remove_emojis": false,
+        // 上游默认 false；录播宝一直去掉名称里的 emoji，默认保持，已有目录名不变。
+        "remove_emojis": true,
         "folder_name_platform": true,
         "folder_name_author": true,
         "folder_name_time": false,

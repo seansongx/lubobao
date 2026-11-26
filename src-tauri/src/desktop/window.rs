@@ -1,5 +1,5 @@
 //! 主窗口：按平台创建窗口、应用窗口材质，并在正式构建里关闭 WebView2 的浏览器快捷键。
-//! 设计说明见 docs/design/native-ui.md。
+//! 设计说明见 docs/specs/native-ui.md。
 //!
 //! - Windows：保留系统标题栏（贴靠布局等系统行为不受影响）。Mica 只在 Windows 11（build 22000 起）
 //!   可用，所以建窗前先判断系统版本：Windows 11 才建透明窗口并应用 Mica；Windows 10 建普通的不透明

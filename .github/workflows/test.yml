@@ -55,6 +55,10 @@ jobs:
       - name: Release script tests
         run: node --test scripts/updater-latest-json.test.mjs scripts/version-site-assets.test.mjs
 
+      # 文档位置、spec 元信息和链接检查（规则见 AGENTS.md「文档」）。
+      - name: Docs check
+        run: npm run docs:check
+
       - name: Install test FFmpeg
         run: |
           dir="$RUNNER_TEMP/test-ffmpeg"

@@ -155,6 +155,19 @@ pub fn record_options(settings: &Map<String, Value>) -> RecordOptions {
             defaults.folder_by_platform,
         ),
         folder_by_anchor: flag(settings, "folder_name_author", defaults.folder_by_anchor),
+        folder_by_date: flag(settings, "folder_name_time", defaults.folder_by_date),
+        folder_by_title: flag(settings, "folder_name_title", defaults.folder_by_title),
+        filename_includes_title: flag(
+            settings,
+            "filename_includes_title",
+            defaults.filename_includes_title,
+        ),
+        remove_emojis: flag(settings, "remove_emojis", defaults.remove_emojis),
+        time_subtitle: flag(
+            settings,
+            "generate_time_subtitle_file",
+            defaults.time_subtitle,
+        ),
         ..defaults
     }
 }
@@ -178,15 +191,16 @@ pub fn wants_conversion(settings: &Map<String, Value>) -> bool {
     flag(settings, "convert_to_mp4", true)
 }
 
-/// 一次录制里要转 MP4 的文件：磁盘上存在的 TS，保持原顺序。引擎目前只录 TS
-/// （`video_format` 暂时忽略），所以按扩展名判断，与 StreamCap `save_format == "ts"` 等价。
+/// 一次录制里要转 MP4 的文件：磁盘上存在的 TS 和 FLV（直接下载），保持原顺序。引擎只录这
+/// 两种（`video_format` 暂时忽略），所以按扩展名判断，与 StreamCap `save_format == "ts"` 等价。
 pub fn convertible_files(files: &[PathBuf]) -> Vec<PathBuf> {
     files
         .iter()
         .filter(|path| {
-            path.extension()
-                .is_some_and(|ext| ext.eq_ignore_ascii_case("ts"))
-                && path.is_file()
+            path.extension().is_some_and(|ext| {
+                ext.eq_ignore_ascii_case(crate::recorder::naming::TS_EXTENSION)
+                    || ext.eq_ignore_ascii_case(crate::recorder::naming::FLV_EXTENSION)
+            }) && path.is_file()
         })
         .cloned()
         .collect()
@@ -233,7 +247,14 @@ pub fn recording_request(
     } else {
         PathBuf::from(save_dir)
     };
-    let (proxy, warning) = recording_proxy(settings, info.platform);
+    // FLV 直接下载（设置 `flv_use_direct_download`）用 reqwest，SOCKS 代理也能用。
+    let direct_download = flag(settings, "flv_use_direct_download", false)
+        && crate::recorder::direct::is_direct_source(source_format, &source_url);
+    let (proxy, warning) = if direct_download {
+        crate::recorder::direct::recording_proxy(proxy(settings, info.platform))
+    } else {
+        recording_proxy(settings, info.platform)
+    };
     Ok(RecordingPlan {
         request: RecordingRequest {
             ffmpeg_path,
@@ -242,9 +263,11 @@ pub fn recording_request(
             headers: info.stream_headers.clone(),
             output_dir,
             anchor_name,
+            title: info.title.clone(),
             platform: info.platform.display_name().to_string(),
             options: RecordOptions {
                 proxy,
+                direct_download,
                 relaxed_hls_extension: info.platform.relaxed_hls_extension(),
                 ..record_options(settings)
             },
@@ -427,5 +450,140 @@ mod tests {
             record_options(&settings(json!({}))).disk_threshold_bytes,
             2 << 30
         );
+    }
+
+    #[test]
+    fn naming_options_default_to_the_current_behavior() {
+        let options = record_options(&settings(json!({})));
+        assert!(options.folder_by_platform && options.folder_by_anchor);
+        assert!(!options.folder_by_date);
+        assert!(!options.folder_by_title);
+        assert!(!options.filename_includes_title);
+        assert!(!options.time_subtitle);
+        // 与 StreamCap 默认值不同：保持一直以来去掉 emoji 的目录名。
+        assert!(options.remove_emojis);
+    }
+
+    #[test]
+    fn maps_naming_and_subtitle_settings_to_record_options() {
+        let options = record_options(&settings(json!({
+            "folder_name_time": true,
+            "folder_name_title": true,
+            "filename_includes_title": true,
+            "remove_emojis": false,
+            "generate_time_subtitle_file": true,
+        })));
+        assert!(options.folder_by_date);
+        assert!(options.folder_by_title);
+        assert!(options.filename_includes_title);
+        assert!(!options.remove_emojis);
+        assert!(options.time_subtitle);
+    }
+
+    #[test]
+    fn recording_request_carries_the_detected_title_and_naming_options() {
+        let info = crate::scheduler::tests::live_info("https://live.douyin.com/1", true);
+        let task = crate::scheduler::tests::snapshot_for(&info);
+        let map = settings(json!({ "filename_includes_title": true }));
+        let plan = recording_request(
+            &task,
+            &info,
+            &map,
+            PathBuf::from("ffmpeg"),
+            Path::new("C:/Videos"),
+        )
+        .unwrap();
+        assert_eq!(plan.request.title.as_deref(), Some("标题"));
+        assert!(plan.request.options.filename_includes_title);
+        // 检测结果没有标题时不带标题。
+        let untitled = LiveInfo {
+            title: None,
+            ..info
+        };
+        let plan = recording_request(
+            &task,
+            &untitled,
+            &map,
+            PathBuf::from("ffmpeg"),
+            Path::new("C:/Videos"),
+        )
+        .unwrap();
+        assert_eq!(plan.request.title, None);
+    }
+
+    fn plan_with(info: &LiveInfo, overrides: Value) -> RecordingPlan {
+        let task = crate::scheduler::tests::snapshot_for(info);
+        recording_request(
+            &task,
+            info,
+            &settings(overrides),
+            PathBuf::from("ffmpeg"),
+            Path::new("C:/Videos"),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn direct_download_needs_the_switch_and_an_flv_source() {
+        use crate::platforms::SourceFormat;
+        // 抖音默认录 FLV。
+        let info = crate::scheduler::tests::live_info("https://live.douyin.com/1", true);
+        let off = plan_with(&info, json!({}));
+        assert_eq!(off.request.source_format, SourceFormat::Flv);
+        assert!(!off.request.options.direct_download);
+        let on = plan_with(&info, json!({ "flv_use_direct_download": true }));
+        assert_eq!(on.request.source_format, SourceFormat::Flv);
+        assert!(on.request.options.direct_download);
+        // force_https_recording 在 policy 层处理，直接下载用处理后的地址。
+        assert_eq!(on.request.source_url, "https://cdn.example/1.flv");
+        // 选了 HLS：照常交给 ffmpeg。
+        let hls = plan_with(
+            &info,
+            json!({ "flv_use_direct_download": true, "default_live_source": "HLS" }),
+        );
+        assert_eq!(hls.request.source_format, SourceFormat::Hls);
+        assert!(!hls.request.options.direct_download);
+        // 不是 FLV 优先的平台录 record_url（HLS）。
+        let huya = LiveInfo {
+            platform: Platform::Huya,
+            ..info
+        };
+        let plan = plan_with(&huya, json!({ "flv_use_direct_download": true }));
+        assert_eq!(plan.request.source_format, SourceFormat::Hls);
+        assert!(!plan.request.options.direct_download);
+    }
+
+    #[test]
+    fn direct_download_uses_socks_proxies_without_a_warning() {
+        let info = crate::scheduler::tests::live_info("https://live.douyin.com/1", true);
+        let proxied = json!({
+            "proxy_address": "socks5://127.0.0.1:1080",
+            "default_platform_with_proxy": "douyin",
+        });
+        let ffmpeg = plan_with(&info, proxied.clone());
+        assert_eq!(ffmpeg.request.options.proxy, None);
+        assert!(ffmpeg.warning.is_some());
+        let mut direct_settings = proxied;
+        direct_settings["flv_use_direct_download"] = json!(true);
+        let direct = plan_with(&info, direct_settings);
+        assert!(direct.request.options.direct_download);
+        assert_eq!(
+            direct.request.options.proxy.as_deref(),
+            Some("socks5://127.0.0.1:1080")
+        );
+        assert_eq!(direct.warning, None);
+    }
+
+    #[test]
+    fn flv_recordings_are_converted_like_ts() {
+        let temp = tempfile::tempdir().unwrap();
+        let files: Vec<PathBuf> = ["a.ts", "b.FLV", "c.mp4", "d.srt", "missing.flv"]
+            .iter()
+            .map(|name| temp.path().join(name))
+            .collect();
+        for file in &files[..4] {
+            std::fs::write(file, b"x").unwrap();
+        }
+        assert_eq!(convertible_files(&files), files[..2].to_vec());
     }
 }

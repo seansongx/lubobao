@@ -14,6 +14,7 @@
 //! - 录制结束后按设置把 TS 交给 [`PostProcessor`] 转 MP4（逐个排队）。因磁盘不足结束的
 //!   不转换，避免把磁盘写满；StreamCap 只要 ffmpeg 正常退出就转换。没有转换的（磁盘
 //!   不足、正在退出、FFmpeg 不可用）记一条提醒。启动时删除上次留下的 `.mp4.part`。
+//! - 转换都有结果后按设置执行录后脚本，见 [`script`]。
 //!
 //! 平台请求和录制引擎都通过 [`LiveSource`]、[`RecordEngine`] 接入，测试中替换为假实现。
 //!
@@ -52,6 +53,7 @@ use crate::tasks::{
 
 mod engine;
 pub mod policy;
+pub mod script;
 
 #[cfg(test)]
 mod tests;
@@ -156,6 +158,8 @@ struct Core {
     status_listener: StatusListener,
     /// 录后转 MP4 的队列。
     post: PostProcessor,
+    /// 录后脚本的队列。
+    script: script::ScriptRunner,
 }
 
 pub struct Scheduler {
@@ -179,6 +183,7 @@ impl Scheduler {
             slots_changed: Notify::new(),
             status_listener,
             post: PostProcessor::default(),
+            script: script::ScriptRunner::default(),
         });
         let weak: Weak<Core> = Arc::downgrade(&core);
         let hook: Weak<dyn SchedulerHook> = weak;
@@ -772,7 +777,18 @@ impl Core {
             if let Err(error) = result {
                 log::error!("写入录制结束状态失败（任务 {id}）：{error}");
             }
-            self.convert_recording(&task, outcome);
+            // 录后脚本等这次录制的转换都有结果后再执行。
+            let after = script::AfterRecording::for_recording(
+                &self.script,
+                &self.tasks,
+                &task,
+                &outcome.files,
+                cause,
+            );
+            self.convert_recording(&task, outcome, after.as_ref());
+            if let Some(after) = after {
+                after.release();
+            }
         }
 
         let interval = policy::interval(&self.tasks.settings());
@@ -802,7 +818,12 @@ impl Core {
     }
 
     /// 按设置把这次录制的 TS 排进转 MP4 队列。退出期间、因磁盘不足结束的不转换。
-    fn convert_recording(&self, task: &TaskSnapshot, outcome: &RecordingOutcome) {
+    fn convert_recording(
+        &self,
+        task: &TaskSnapshot,
+        outcome: &RecordingOutcome,
+        after: Option<&script::AfterRecording>,
+    ) {
         let files = policy::convertible_files(&outcome.files);
         if files.is_empty() {
             return;
@@ -815,7 +836,7 @@ impl Core {
             self.record_conversion(
                 task,
                 ActivityKind::Warning,
-                format!("{message}，原 TS 文件已保留"),
+                format!("{message}，原文件已保留"),
                 serde_json::json!({ "filePath": files[0], "files": files, "kind": "convert" }),
             );
         };
@@ -833,6 +854,10 @@ impl Core {
         };
         let tasks = Arc::clone(&self.tasks);
         let (task_id, anchor_name) = (task.id, task.config.anchor_name.clone());
+        if let Some(after) = after {
+            after.converting(&files);
+        }
+        let after = after.cloned();
         let listener: ConvertListener = Arc::new(move |event: &ConvertEvent| {
             let (kind, message, detail) = describe_conversion(event);
             let entry = NewActivity {
@@ -844,6 +869,9 @@ impl Core {
             };
             if let Err(error) = tasks.record_activity(entry) {
                 log::error!("写入转换动态失败（任务 {task_id}）：{error}");
+            }
+            if let Some(after) = &after {
+                after.observe(event);
             }
         });
         if !self.post.enqueue(files.clone(), options, listener) {
@@ -892,12 +920,18 @@ impl Core {
     async fn shutdown(&self) {
         // 总时限从这里算起，包括 stop_all 本身。转 MP4 队列同时关闭：排队的放弃，
         // 正在转换的中止（最多等 postprocess::SHUTDOWN_TIMEOUT，小于总时限）。
+        // 录后脚本队列在调用 shutdown 时立即关闭：排队的丢弃，正在运行的结束，
+        // 之后才结束的录制不再执行脚本。
         let deadline = Instant::now() + SHUTDOWN_TIMEOUT;
+        let scripts = self.script.shutdown(script::SHUTDOWN_TIMEOUT);
         let post = self.post.shutdown(postprocess::SHUTDOWN_TIMEOUT);
         let recordings = self.stop_recordings(deadline);
-        let (post_done, ()) = tokio::join!(post, recordings);
+        let (scripts_done, post_done, ()) = tokio::join!(scripts, post, recordings);
         if !post_done {
             log::warn!("退出时中止转 MP4 超时");
+        }
+        if !scripts_done {
+            log::warn!("退出时结束录后脚本超时");
         }
     }
 
@@ -1046,8 +1080,8 @@ fn describe_conversion(event: &ConvertEvent) -> (ActivityKind, String, serde_jso
             delete_error,
         } => {
             let message = match (original_deleted, delete_error) {
-                (true, _) => "已转为 MP4，已删除原 TS 文件".to_string(),
-                (false, Some(error)) => format!("已转为 MP4，但删除原 TS 文件失败：{error}"),
+                (true, _) => "已转为 MP4，已删除原文件".to_string(),
+                (false, Some(error)) => format!("已转为 MP4，但删除原文件失败：{error}"),
                 (false, None) => "已转为 MP4".to_string(),
             };
             (
@@ -1068,7 +1102,7 @@ fn describe_conversion(event: &ConvertEvent) -> (ActivityKind, String, serde_jso
         } => (
             ActivityKind::Failure,
             if *original_kept {
-                format!("转为 MP4 失败：{message}。原 TS 文件已保留")
+                format!("转为 MP4 失败：{message}。原文件已保留")
             } else {
                 format!("转为 MP4 失败：{message}")
             },
@@ -1077,9 +1111,9 @@ fn describe_conversion(event: &ConvertEvent) -> (ActivityKind, String, serde_jso
         ConvertEvent::Cancelled { source, started } => (
             ActivityKind::Warning,
             if *started {
-                "应用退出，转为 MP4 已中止，原 TS 文件已保留".to_string()
+                "应用退出，转为 MP4 已中止，原文件已保留".to_string()
             } else {
-                "应用退出，未转为 MP4，原 TS 文件已保留".to_string()
+                "应用退出，未转为 MP4，原文件已保留".to_string()
             },
             json!({ "filePath": source, "kind": "convert" }),
         ),

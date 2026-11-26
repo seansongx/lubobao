@@ -166,6 +166,7 @@ async fn live_room_records_thirty_seconds() {
         output_dir,
         anchor_name: info.anchor_name.clone(),
         platform: "CHZZK".to_string(),
+        title: None,
         options: RecordOptions {
             segment_enabled: false,
             relaxed_hls_extension: Platform::Chzzk.relaxed_hls_extension(),

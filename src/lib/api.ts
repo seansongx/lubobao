@@ -179,7 +179,9 @@ export type ActivityKind =
   | "warning"
   | "user_action"
   /** 录后转 MP4 的开始和完成。转换失败记为 failure、未转换或中止记为 warning，二者 detail.kind 为 "convert"；按 convert 筛选时一并返回。 */
-  | "convert";
+  | "convert"
+  /** 录后脚本执行成功。失败和退出时中止记为 warning，detail.kind 为 "script"；按 script 筛选时一并返回。 */
+  | "script";
 
 export interface ActivityEntry {
   id: number;

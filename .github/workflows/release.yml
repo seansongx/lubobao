@@ -111,7 +111,7 @@ jobs:
             missing="${missing:+${missing}、}tauri.conf.json 的 plugins.updater.pubkey（仍是占位符）"
           fi
           if [ -n "$missing" ]; then
-            echo "::error::正式版需要应用内更新签名，缺少：${missing}。见 docs/release.md。"
+            echo "::error::正式版需要应用内更新签名，缺少：${missing}。见 docs/specs/release.md。"
             exit 1
           fi
           echo "updater=true" >> "$GITHUB_OUTPUT"

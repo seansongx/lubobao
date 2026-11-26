@@ -15,6 +15,7 @@ import {
   NetworkSection,
   NotifySection,
   RecordSection,
+  ScriptSection,
 } from "@/pages/settings/setting-sections";
 import { useSettings, type SettingsController } from "@/pages/settings/use-settings";
 
@@ -25,6 +26,7 @@ const groups: { id: GroupId; label: string }[] = [
   { id: "check", label: "检测" },
   { id: "network", label: "网络" },
   { id: "accounts", label: "平台账号" },
+  { id: "script", label: "录后脚本" },
   { id: "notify", label: "托盘与通知" },
   { id: "components", label: "组件" },
   { id: "about", label: "关于" },
@@ -73,6 +75,8 @@ function SettingsGroup({ group, ctx }: { group: FormGroupId; ctx: SettingsContro
       return <NetworkSection ctx={ctx} />;
     case "accounts":
       return <AccountsSection ctx={ctx} />;
+    case "script":
+      return <ScriptSection ctx={ctx} />;
     case "notify":
       return <NotifySection ctx={ctx} />;
   }

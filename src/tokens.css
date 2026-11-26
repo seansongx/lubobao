@@ -1,5 +1,5 @@
 /*
- * 录播宝桌面主题。说明见 docs/design/native-ui.md。
+ * 录播宝桌面主题。说明见 docs/specs/native-ui.md。
  *
  * 内容区三个平台统一（2026-11-23 起统一为原 macOS 的样子），外壳和行为随平台：
  * - 控件一律用 shadcn/ui Nova 默认实现（src/components/ui/ 不改），这里只设 shadcn 语义变量（--radius、

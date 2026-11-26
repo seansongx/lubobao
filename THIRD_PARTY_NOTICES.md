@@ -58,7 +58,7 @@ SOFTWARE.
 
 - Project: https://github.com/ihmily/StreamCap
 - License: Apache License 2.0
-- Used as: the behaviour reference for LuBoBao's features, defaults and FFmpeg options. LuBoBao reimplements this behaviour in Rust and TypeScript; deliberate differences are recorded in [docs/feature-map.md](docs/feature-map.md).
+- Used as: the behaviour reference for LuBoBao's features, defaults and FFmpeg options. LuBoBao reimplements this behaviour in Rust and TypeScript; deliberate differences are recorded in [docs/specs/feature-map.md](docs/specs/feature-map.md).
 
 ## yt-dlp and Deno (YouTube)
 

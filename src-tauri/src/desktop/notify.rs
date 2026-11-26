@@ -1,6 +1,6 @@
 //! 系统通知：什么情况发、发什么（纯逻辑，配单元测试），以及发送和授权。
 //!
-//! 规则与 StreamCap 对齐（见 `docs/feature-map.md` 的有意差异）：
+//! 规则与 StreamCap 对齐（见 `docs/specs/feature-map.md` 的有意差异）：
 //! - 总开关 `system_notification_enabled`；
 //! - 开播（`stream_start_notification_enabled`，默认开）、下播（`stream_end_notification_enabled`，
 //!   默认关）：普通任务只在主窗口隐藏或最小化时发；

@@ -167,6 +167,7 @@ async fn live_room_records_thirty_seconds() {
         output_dir,
         anchor_name: info.anchor_name.clone(),
         platform: "哔哩哔哩".to_string(),
+        title: None,
         options: RecordOptions {
             segment_enabled: false,
             ..RecordOptions::default()

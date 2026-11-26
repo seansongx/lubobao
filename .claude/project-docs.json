@@ -1,0 +1,10 @@
+{
+  "allow": [
+    "docs/release-notes/*.md",
+    "docs/cli.md",
+    "THIRD_PARTY_NOTICES.md",
+    "docs/brand/**"
+  ],
+  "ignore": [],
+  "planStaleDays": 30
+}

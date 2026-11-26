@@ -1,4 +1,4 @@
-//! 录后处理：把录好的 TS 逐个转成同名 MP4（只换封装，不重新编码）。
+//! 录后处理：把录好的 TS（或直接下载的 FLV）逐个转成同名 MP4（只换封装，不重新编码）。
 //!
 //! 调用 [`PostProcessor::enqueue`] 把一次录制的文件排进队列，转换在后台按顺序进行，
 //! 结果通过 [`ConvertListener`] 回调发出。应用退出时调用 [`PostProcessor::shutdown`]：
@@ -50,8 +50,9 @@ const BYTES_PER_TIMEOUT_SEC: u64 = 10 * 1024 * 1024;
 const PROBE_TIMEOUT: Duration = Duration::from_secs(30);
 /// 磁盘余量：除了与原件同样大小的 MP4，再多留这么多。
 const SPACE_MARGIN_BYTES: u64 = 64 * 1024 * 1024;
-/// 启动时清理残留临时文件时向下查找的目录层数（录像根目录/平台/主播）。
-pub const CLEANUP_DEPTH: usize = 3;
+/// 启动时清理残留临时文件时向下查找的目录层数（录像根目录/平台/主播/日期/标题_主播名，
+/// 最多四层）。
+pub const CLEANUP_DEPTH: usize = 4;
 /// 保留的 stderr 字节数，用于失败说明。
 const STDERR_LIMIT: usize = 16 * 1024;
 
