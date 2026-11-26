@@ -170,6 +170,7 @@ async fn live_room_records_thirty_seconds() {
         output_dir,
         anchor_name: info.anchor_name.clone(),
         platform: "TwitCasting".to_string(),
+        title: None,
         options: RecordOptions {
             segment_enabled: false,
             proxy: relay.as_ref().map(|relay| relay.url.clone()),

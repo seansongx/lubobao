@@ -155,6 +155,15 @@ pub fn record_options(settings: &Map<String, Value>) -> RecordOptions {
             defaults.folder_by_platform,
         ),
         folder_by_anchor: flag(settings, "folder_name_author", defaults.folder_by_anchor),
+        folder_by_date: flag(settings, "folder_name_time", defaults.folder_by_date),
+        folder_by_title: flag(settings, "folder_name_title", defaults.folder_by_title),
+        filename_includes_title: flag(
+            settings,
+            "filename_includes_title",
+            defaults.filename_includes_title,
+        ),
+        remove_emojis: flag(settings, "remove_emojis", defaults.remove_emojis),
+        time_subtitle: flag(settings, "generate_time_subtitle_file", defaults.time_subtitle),
         ..defaults
     }
 }
@@ -242,6 +251,7 @@ pub fn recording_request(
             headers: info.stream_headers.clone(),
             output_dir,
             anchor_name,
+            title: info.title.clone(),
             platform: info.platform.display_name().to_string(),
             options: RecordOptions {
                 proxy,
@@ -427,5 +437,64 @@ mod tests {
             record_options(&settings(json!({}))).disk_threshold_bytes,
             2 << 30
         );
+    }
+
+    #[test]
+    fn naming_options_default_to_the_current_behavior() {
+        let options = record_options(&settings(json!({})));
+        assert!(options.folder_by_platform && options.folder_by_anchor);
+        assert!(!options.folder_by_date);
+        assert!(!options.folder_by_title);
+        assert!(!options.filename_includes_title);
+        assert!(!options.time_subtitle);
+        // 与 StreamCap 默认值不同：保持一直以来去掉 emoji 的目录名。
+        assert!(options.remove_emojis);
+    }
+
+    #[test]
+    fn maps_naming_and_subtitle_settings_to_record_options() {
+        let options = record_options(&settings(json!({
+            "folder_name_time": true,
+            "folder_name_title": true,
+            "filename_includes_title": true,
+            "remove_emojis": false,
+            "generate_time_subtitle_file": true,
+        })));
+        assert!(options.folder_by_date);
+        assert!(options.folder_by_title);
+        assert!(options.filename_includes_title);
+        assert!(!options.remove_emojis);
+        assert!(options.time_subtitle);
+    }
+
+    #[test]
+    fn recording_request_carries_the_detected_title_and_naming_options() {
+        let info = crate::scheduler::tests::live_info("https://live.douyin.com/1", true);
+        let task = crate::scheduler::tests::snapshot_for(&info);
+        let map = settings(json!({ "filename_includes_title": true }));
+        let plan = recording_request(
+            &task,
+            &info,
+            &map,
+            PathBuf::from("ffmpeg"),
+            Path::new("C:/Videos"),
+        )
+        .unwrap();
+        assert_eq!(plan.request.title.as_deref(), Some("标题"));
+        assert!(plan.request.options.filename_includes_title);
+        // 检测结果没有标题时不带标题。
+        let untitled = LiveInfo {
+            title: None,
+            ..info
+        };
+        let plan = recording_request(
+            &task,
+            &untitled,
+            &map,
+            PathBuf::from("ffmpeg"),
+            Path::new("C:/Videos"),
+        )
+        .unwrap();
+        assert_eq!(plan.request.title, None);
     }
 }

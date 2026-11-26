@@ -8,7 +8,7 @@
 import type { TaskId } from "@/lib/api";
 import type { PageId } from "@/pages/pages";
 
-export type SettingsGroupId = "record" | "check" | "network" | "accounts" | "notify" | "components" | "about";
+export type SettingsGroupId = "record" | "check" | "network" | "accounts" | "script" | "notify" | "components" | "about";
 
 export interface NavigateOptions {
   /** 跳到直播间并选中该任务。 */

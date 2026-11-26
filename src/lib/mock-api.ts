@@ -615,7 +615,7 @@ const defaultSettings: Settings = {
   generate_time_subtitle_file: false,
   only_notify_no_record: false,
   filename_includes_title: false,
-  remove_emojis: false,
+  remove_emojis: true,
   folder_name_platform: true,
   folder_name_author: true,
   folder_name_time: false,

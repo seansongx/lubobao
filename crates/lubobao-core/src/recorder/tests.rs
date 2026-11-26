@@ -12,6 +12,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use chrono::TimeZone;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::Notify;
@@ -273,6 +274,7 @@ fn request(ffmpeg: &Path, url: &str, root: &Path, options: RecordOptions) -> Rec
         output_dir: root.join("录像 测试"),
         anchor_name: "测试主播：小明".to_string(),
         platform: "抖音".to_string(),
+        title: None,
         options,
     }
 }
@@ -1027,6 +1029,118 @@ async fn missing_ffmpeg_reports_launch_failure() {
     assert!(outcome.files.is_empty());
 }
 
+fn naming_options() -> RecordOptions {
+    RecordOptions {
+        folder_by_date: true,
+        folder_by_title: true,
+        filename_includes_title: true,
+        time_subtitle: true,
+        ..unsegmented()
+    }
+}
+
+#[tokio::test]
+async fn recording_dir_gets_date_and_title_layers_and_failed_launch_leaves_no_subtitle() {
+    let temp = tempfile::tempdir().unwrap();
+    let missing = temp.path().join("no-ffmpeg.exe");
+    let handle = start(
+        RecordingRequest {
+            title: Some("今晚 唱歌：100%".to_string()),
+            ..request(
+                &missing,
+                "http://127.0.0.1:1/x.flv",
+                temp.path(),
+                naming_options(),
+            )
+        },
+        quiet_listener(),
+    )
+    .await;
+    let outcome = handle.wait().await;
+    assert_eq!(outcome.reason, EndReason::FfmpegFailed);
+    let started = Local
+        .timestamp_millis_opt(outcome.started_at_ms)
+        .unwrap()
+        .format("%Y-%m-%d")
+        .to_string();
+    let dir = outcome.output_dir.unwrap();
+    assert_eq!(
+        dir,
+        temp.path()
+            .join("录像 测试")
+            .join("抖音")
+            .join("测试主播_小明")
+            .join(started)
+            .join("今晚_唱歌_100_测试主播_小明")
+    );
+    assert!(dir.is_dir());
+    // 启动失败：目录里没有任何文件，尤其没有空的 .srt。
+    assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
+}
+
+#[tokio::test]
+async fn time_subtitle_is_written_next_to_the_unsegmented_recording() {
+    let Some(ffmpeg) = test_ffmpeg() else { return };
+    let temp = tempfile::tempdir().unwrap();
+    let sample = make_sample(&ffmpeg, temp.path());
+    let server = start_server(&sample, ServeMode::Live).await;
+    let handle = start(
+        RecordingRequest {
+            title: Some("今晚唱歌".to_string()),
+            ..request(&ffmpeg, &server.url, temp.path(), naming_options())
+        },
+        quiet_listener(),
+    )
+    .await;
+    wait_for_duration(&handle, 3.0).await;
+    let video = handle.snapshot().output_path.unwrap();
+    let srt = video.with_extension("srt");
+    // 录制进行中就能读到已写入的字幕。
+    let live_text = std::fs::read_to_string(&srt).expect("srt exists while recording");
+    assert!(
+        live_text.starts_with("1\n00:00:00,000 --> 00:00:01,000\n20"),
+        "{live_text}"
+    );
+    let outcome = handle.stop_and_wait().await;
+
+    assert_eq!(outcome.files, vec![video.clone()]);
+    let name = video.file_name().unwrap().to_str().unwrap();
+    assert!(name.starts_with("测试主播_小明_今晚唱歌_"), "{name}");
+    let text = std::fs::read_to_string(&srt).unwrap();
+    assert!(text.contains("\n2\n00:00:01,000 --> 00:00:02,000\n"), "{text}");
+    assert!(text.contains("\n3\n00:00:02,000 --> 00:00:03,000\n"), "{text}");
+    assert_playable(&ffmpeg, &video);
+}
+
+#[tokio::test]
+async fn segmented_recording_does_not_write_a_time_subtitle() {
+    let Some(ffmpeg) = test_ffmpeg() else { return };
+    let temp = tempfile::tempdir().unwrap();
+    let sample = make_sample(&ffmpeg, temp.path());
+    let server = start_server(&sample, ServeMode::CutAfter(5)).await;
+    let options = RecordOptions {
+        segment_enabled: true,
+        segment_secs: 3,
+        time_subtitle: true,
+        disk_threshold_bytes: 0,
+        ..RecordOptions::default()
+    };
+    let handle = start(
+        request(&ffmpeg, &server.url, temp.path(), options),
+        quiet_listener(),
+    )
+    .await;
+    let outcome = wait_outcome(&handle, 40).await;
+    assert!(!outcome.files.is_empty(), "{outcome:?}");
+    let dir = outcome.output_dir.unwrap();
+    let srt_files = std::fs::read_dir(&dir)
+        .unwrap()
+        .flatten()
+        .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "srt"))
+        .count();
+    assert_eq!(srt_files, 0);
+}
+
 #[tokio::test]
 async fn socks_proxy_is_rejected_before_launch() {
     let temp = tempfile::tempdir().unwrap();
@@ -1207,6 +1321,7 @@ async fn live_douyin_recording() {
             output_dir: root,
             anchor_name: info.anchor_name.clone(),
             platform: info.platform.display_name().to_string(),
+            title: info.title.clone(),
             options: RecordOptions::default(),
         },
         quiet_listener(),

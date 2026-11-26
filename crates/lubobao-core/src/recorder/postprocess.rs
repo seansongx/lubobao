@@ -50,8 +50,9 @@ const BYTES_PER_TIMEOUT_SEC: u64 = 10 * 1024 * 1024;
 const PROBE_TIMEOUT: Duration = Duration::from_secs(30);
 /// 磁盘余量：除了与原件同样大小的 MP4，再多留这么多。
 const SPACE_MARGIN_BYTES: u64 = 64 * 1024 * 1024;
-/// 启动时清理残留临时文件时向下查找的目录层数（录像根目录/平台/主播）。
-pub const CLEANUP_DEPTH: usize = 3;
+/// 启动时清理残留临时文件时向下查找的目录层数（录像根目录/平台/主播/日期/标题_主播名，
+/// 最多四层）。
+pub const CLEANUP_DEPTH: usize = 4;
 /// 保留的 stderr 字节数，用于失败说明。
 const STDERR_LIMIT: usize = 16 * 1024;
 

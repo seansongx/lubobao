@@ -198,8 +198,12 @@ fn startup_cleanup_removes_only_partial_mp4_files() {
     let root = temp.path();
     let anchor = root.join("抖音").join("主播 甲");
     std::fs::create_dir_all(&anchor).unwrap();
-    let too_deep = anchor.join("a").join("b");
+    let too_deep = anchor.join("a").join("b").join("c");
     std::fs::create_dir_all(&too_deep).unwrap();
+    // 日期和标题两层都开时，目录有四层：平台/主播/日期/标题_主播。
+    let titled = anchor.join("2026-11-22").join("标题_主播 甲");
+    std::fs::create_dir_all(&titled).unwrap();
+    std::fs::write(titled.join("titled.mp4.part"), b"x").unwrap();
     for name in [
         "rec.mp4.part",
         "upper.MP4.PART",
@@ -212,13 +216,14 @@ fn startup_cleanup_removes_only_partial_mp4_files() {
     std::fs::write(root.join("top.mp4.part"), b"x").unwrap();
     std::fs::write(too_deep.join("deep.mp4.part"), b"x").unwrap();
 
-    assert_eq!(clean_partial_files(root), 3);
+    assert_eq!(clean_partial_files(root), 4);
     let mut left: Vec<String> = std::fs::read_dir(&anchor)
         .unwrap()
         .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
         .collect();
     left.sort();
-    assert_eq!(left, ["a", "other.part", "rec.mp4", "rec.ts"]);
+    assert_eq!(left, ["2026-11-22", "a", "other.part", "rec.mp4", "rec.ts"]);
+    assert!(!titled.join("titled.mp4.part").exists());
     assert!(!root.join("top.mp4.part").exists());
     assert!(
         too_deep.join("deep.mp4.part").exists(),
