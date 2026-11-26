@@ -175,7 +175,10 @@ pub struct ScriptJob {
 #[derive(Default)]
 struct State {
     queue: VecDeque<ScriptJob>,
+    /// 工作协程在运行。
     running: bool,
+    /// 有脚本已从队列取出、还没写完结果。
+    executing: bool,
     closed: bool,
 }
 
@@ -232,7 +235,7 @@ impl ScriptRunner {
     /// 排队中和正在执行的脚本数。
     pub fn pending(&self) -> usize {
         let state = lock(&self.inner.state);
-        state.queue.len() + usize::from(state.running)
+        state.queue.len() + usize::from(state.executing)
     }
 
     /// 停止接收新脚本，丢弃排队中的，结束正在运行的进程树，最多等 `wait`。超时返回
@@ -274,7 +277,10 @@ impl Inner {
         impl Drop for WorkerGuard {
             fn drop(&mut self) {
                 if self.armed {
-                    lock(&self.inner.state).running = false;
+                    let mut state = lock(&self.inner.state);
+                    state.running = false;
+                    state.executing = false;
+                    drop(state);
                     self.inner.idle.notify_waiters();
                 }
             }
@@ -286,7 +292,9 @@ impl Inner {
         loop {
             let job = {
                 let mut state = lock(&self.state);
-                match state.queue.pop_front() {
+                let job = state.queue.pop_front();
+                state.executing = job.is_some();
+                match job {
                     Some(job) => job,
                     None => {
                         state.running = false;
