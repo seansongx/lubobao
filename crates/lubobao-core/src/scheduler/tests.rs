@@ -912,6 +912,18 @@ async fn waits_for_ffmpeg_before_recording() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn direct_flv_download_starts_without_waiting_for_ffmpeg() {
+    let h = harness();
+    *h.engine.ffmpeg.lock().unwrap() = None;
+    h.update_settings(json!({ "flv_use_direct_download": true }));
+    let (id, _) = h.add("1014", Reply::Live, false);
+    h.start();
+    until(SHORT, "开始录制", || h.engine.starts() == 1).await;
+    assert!(h.engine.request(0).options.direct_download);
+    assert!(matches!(h.task(id).record, RecordState::Recording { .. }));
+}
+
+#[tokio::test(start_paused = true)]
 async fn shutdown_finishes_recordings_and_stops_polling() {
     let h = harness();
     let (first, first_url) = h.add("1014", Reply::Live, false);

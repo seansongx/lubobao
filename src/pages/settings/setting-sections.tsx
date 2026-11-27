@@ -431,7 +431,7 @@ export function NetworkSection({ ctx }: SectionProps) {
   return (
     <SettingsCard
       title="网络"
-      description="录制只支持 HTTP 代理；SOCKS 代理只对检测生效"
+      description="FFmpeg 录制只支持 HTTP 代理；SOCKS 代理只对检测和 FLV 直接下载生效"
       onReset={() => void ctx.reset(groupKeys.network)}
     >
       <SwitchField
@@ -445,7 +445,7 @@ export function NetworkSection({ ctx }: SectionProps) {
         label="代理地址"
         description={
           /^socks/i.test(settings.proxy_address ?? "")
-            ? "当前是 SOCKS 代理：只用于检测开播，录制时不走代理，TikTok、Twitch、YouTube、SOOP、CHZZK、ShowRoom 在中国大陆会录制失败。Clash 等代理软件的混合端口也支持 HTTP，可改填 http:// 地址"
+            ? "当前是 SOCKS 代理：只用于检测开播和 FLV 直接下载，FFmpeg 录制时不走代理，TikTok、Twitch、YouTube、SOOP、CHZZK、ShowRoom 在中国大陆会录制失败。Clash 等代理软件的混合端口也支持 HTTP，可改填 http:// 地址"
             : "例如 http://127.0.0.1:7890"
         }
         placeholder="http://127.0.0.1:7890"

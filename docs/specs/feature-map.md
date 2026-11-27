@@ -290,7 +290,7 @@ scope: 上线范围与验收状态、与 StreamCap 的有意差异、实现阶�
 - `filename_includes_title`：文件名为「主播名_标题_时间」，标题清理后截到 30 个字符；没有标题或清理后为空时不带标题。
 - `folder_name_time`、`folder_name_title`：目录顺序为保存目录 / 平台 / 主播 / 开始录制的日期（`YYYY-MM-DD`）/「标题_主播名」，各层独立开关，没有标题时不建标题层。启动时清理残留 `.mp4.part` 的查找深度相应加到四层。
 - `generate_time_subtitle_file`：只在未分段录制（含 FLV 直接下载）时生成同名 `.srt`，每秒一条，文字是当时的本地时间。随录制增量写入，没有录到文件时不留字幕。分段录制不生成。
-- `flv_use_direct_download`：开启且选中的源是 HTTP(S) 的 FLV 时不启动 FFmpeg，把响应体原样写成 `.flv`，不分段。确认响应开头是 FLV 后才创建文件，连不上、非 2xx 或内容不是 FLV 都不留文件。15 秒读不到数据记为网络错误。HTTP、HTTPS 和 SOCKS 代理都能用于录制（FFmpeg 录制只支持 HTTP 代理），没有配置代理时不用系统代理。跨域名重定向时 Cookie 等敏感请求头会被去掉。写文件失败记为需要处理。录后转 MP4 同样处理 `.flv`。调度仍要等 FFmpeg 就绪后才开始录制。
+- `flv_use_direct_download`：开启且选中的源是 HTTP(S) 的 FLV 时不启动 FFmpeg，把响应体原样写成 `.flv`，不分段。确认响应开头是 FLV 后才创建文件，连不上、非 2xx 或内容不是 FLV 都不留文件。15 秒读不到数据记为网络错误。HTTP、HTTPS 和 SOCKS 代理都能用于录制（FFmpeg 录制只支持 HTTP 代理），没有配置代理时不用系统代理。跨域名重定向时 Cookie 等敏感请求头会被去掉。写文件失败记为需要处理。录后转 MP4 同样处理 `.flv`。FFmpeg 还没装好时直接下载也能开始录制，录后转 MP4 则要等 FFmpeg 可用，否则保留 `.flv` 并在动态里说明。
 - `execute_custom_script`、`custom_script_command`：每次录制执行一次，等这次录制的转 MP4 全部有结果之后；没有产出文件、因应用退出而结束、转换被退出中止的录制不执行。Windows 用 `cmd /S /C "命令"`（不弹窗口），其他系统用 `/bin/sh -c`，工作目录是录像所在目录。环境变量：`LUBOBAO_FILE`（第一个最终文件）、`LUBOBAO_FILES`（全部最终文件，每行一个）、`LUBOBAO_DIR`、`LUBOBAO_ANCHOR`、`LUBOBAO_PLATFORM`、`LUBOBAO_TITLE`、`LUBOBAO_ROOM_URL`；转出了 MP4 的文件只列 MP4。脚本串行执行，超过 10 分钟结束整个进程树。应用退出时丢弃排队中的脚本、结束正在运行的，最多等 5 秒。结果写入动态（类型「录后脚本」）：成功记一条，无法启动、非零退出、超时和中止记为提醒，带退出码和 stderr 最后一行；stdout 不保存。桌面端和命令行都生效。
 - 已知限制：开启标题目录和标题文件名后路径变长，Windows 上可能超过 260 个字符；转 MP4 遇到重名改为 `…_2.mp4` 时字幕文件名不再对应；Windows 上 `cmd` 自身的中文错误输出按 UTF-8 解码，动态里可能显示成乱码。
 

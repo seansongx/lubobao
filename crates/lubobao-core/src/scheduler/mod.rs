@@ -525,22 +525,26 @@ impl Core {
     }
 
     async fn start_recording(self: &Arc<Self>, id: TaskId, info: LiveInfo, interval: Duration) {
-        let Some(ffmpeg) = self.engine.ffmpeg_path() else {
-            // FFmpeg 还在下载或校验：保持已开播，稍后再检测。
-            self.reschedule(id, policy::FFMPEG_WAIT.min(interval));
-            return;
-        };
+        let ffmpeg = self.engine.ffmpeg_path();
         let Some(task) = self.tasks.get(id) else {
             return;
         };
         let settings = self.tasks.settings();
-        let plan = match policy::recording_request(
+        let plan = policy::recording_request(
             &task,
             &info,
             &settings,
-            ffmpeg,
+            ffmpeg.clone().unwrap_or_default(),
             &self.default_save_dir(),
-        ) {
+        );
+        // FFmpeg 还在下载或校验：保持已开播，稍后再检测。FLV 直接下载不用 FFmpeg，照常开始
+        // （录后转 MP4 到时再看 FFmpeg 是否可用）。
+        let needs_ffmpeg = !matches!(&plan, Ok(plan) if plan.request.options.direct_download);
+        if ffmpeg.is_none() && needs_ffmpeg {
+            self.reschedule(id, policy::FFMPEG_WAIT.min(interval));
+            return;
+        }
+        let plan = match plan {
             Ok(plan) => plan,
             Err(error) => {
                 let delay = self.record_check_failure(id, &error, interval);
