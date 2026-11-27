@@ -246,11 +246,14 @@ jobs:
           echo "uid=$uid"
           [ -n "$uid" ] && [ "$uid" != "0" ] && [ "$uid" != "root" ] || { echo "::error::容器以 root 运行"; exit 1; }
           docker stop -t 45 lubobao
-          docker logs lubobao
+          # 先把日志存下来再查：`docker logs | grep -q` 在 pipefail 下，grep 找到后提前退出会让
+          # docker logs 被管道中断，整条管道算失败，时过时不过。
+          logs="$(docker logs lubobao 2>&1)"
+          printf '%s\n' "$logs"
           code="$(docker inspect -f '{{.State.ExitCode}}' lubobao)"
           [ "$code" = "0" ] || { echo "::error::退出码 $code"; exit 1; }
-          docker logs lubobao 2>&1 | grep -q '收到 SIGTERM' || { echo "::error::没有收到 SIGTERM"; exit 1; }
-          docker logs lubobao 2>&1 | grep -q '已退出' || { echo "::error::没有正常退出"; exit 1; }
+          grep -q '收到 SIGTERM' <<<"$logs" || { echo "::error::没有收到 SIGTERM"; exit 1; }
+          grep -q '已退出' <<<"$logs" || { echo "::error::没有正常退出"; exit 1; }
           docker rm lubobao
 
   publish-image:
