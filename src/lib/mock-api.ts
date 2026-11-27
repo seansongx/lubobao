@@ -2143,6 +2143,9 @@ export function createMockBackend(): Backend {
     openUrl: async (url) => {
       window.open(url, "_blank", "noopener");
     },
+    revealLogFile: async () => {
+      console.info("[mock] 在文件夹中显示 lubobao.log");
+    },
 
     onFfmpegStatus: (handler) => ffmpegChannel.subscribe(handler),
     onTaskUpdated: (handler) => updatedChannel.subscribe(handler),

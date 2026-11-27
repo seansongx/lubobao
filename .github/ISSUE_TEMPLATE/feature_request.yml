@@ -1,0 +1,21 @@
+name: 功能建议
+description: 新平台、新功能或使用上的改进
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: need
+    attributes:
+      label: 想解决什么问题
+      description: 你在什么场景下遇到了什么不方便
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: 希望怎么做
+      description: 想要的功能或改法；建议支持新平台时请附上一个直播间链接
+  - type: input
+    id: version
+    attributes:
+      label: 录播宝版本
+      placeholder: 例如 0.2.0

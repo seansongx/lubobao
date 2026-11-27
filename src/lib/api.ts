@@ -324,6 +324,9 @@ export interface QuitState {
 
 /** 官网，手动下载新版本用。 */
 export const WEBSITE_URL = "https://lubobao.xiaofany.com";
+export const REPO_URL = "https://github.com/seansongx/lubobao";
+/** 提 issue 的入口：GitHub 在这里列出 .github/ISSUE_TEMPLATE/ 里的模板。 */
+export const FEEDBACK_URL = `${REPO_URL}/issues/new/choose`;
 
 /**
  * not_configured：这个构建没有更新公钥（开发构建）；network：连不上更新服务器或下载中断；
@@ -518,6 +521,8 @@ export interface Backend {
   pickDirectory(options?: { title?: string; defaultPath?: string }): Promise<string | null>;
   /** 用系统浏览器打开链接。 */
   openUrl(url: string): Promise<void>;
+  /** 在系统文件管理器中选中应用日志 lubobao.log（还没有时打开日志目录）。 */
+  revealLogFile(): Promise<void>;
 
   onFfmpegStatus(handler: (status: FfmpegStatus) => void): Promise<UnlistenFn>;
   onTaskUpdated(handler: (task: TaskSnapshot) => void): Promise<UnlistenFn>;
@@ -574,6 +579,7 @@ const tauriBackend: Backend = {
     return typeof picked === "string" ? picked : null;
   },
   openUrl: (url) => openerOpenUrl(url),
+  revealLogFile: () => invoke("reveal_log_file"),
 
   onFfmpegStatus: (handler) => on("ffmpeg-status", handler),
   onTaskUpdated: (handler) => on("task-updated", handler),

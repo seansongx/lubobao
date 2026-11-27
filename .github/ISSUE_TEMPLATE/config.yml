@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 官网与下载
+    url: https://lubobao.xiaofany.com
+    about: 下载安装包、首次打开的放行步骤
+  - name: 命令行版文档
+    url: https://github.com/seansongx/lubobao/blob/main/docs/cli.md
+    about: lubobao-cli 和 Docker 的用法与常见问题

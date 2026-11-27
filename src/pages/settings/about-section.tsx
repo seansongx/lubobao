@@ -1,18 +1,18 @@
-// 关于：应用名、版本号、检查更新、许可证、仓库链接和第三方声明。
+// 关于：应用名、版本号、检查更新、许可证、仓库链接、问题反馈和第三方声明。
 
 import { useEffect, useState } from "react";
-import { ExternalLink, Loader2Icon, RefreshCw } from "lucide-react";
+import { ExternalLink, FolderOpen, Loader2Icon, RefreshCw } from "lucide-react";
+import { toast } from "sonner";
 
 import { checkForUpdates, updateBusy, useUpdateFlow } from "@/components/update-dialog";
 import { Button } from "@/components/ui/button";
-import { api, WEBSITE_URL } from "@/lib/api";
+import { api, FEEDBACK_URL, REPO_URL, WEBSITE_URL } from "@/lib/api";
 import { FieldRow, SettingsCard, SwitchField } from "@/pages/settings/fields";
 import { Markdown } from "@/pages/settings/markdown";
 import type { SettingsController } from "@/pages/settings/use-settings";
 
 import notices from "../../../THIRD_PARTY_NOTICES.md?raw";
 
-const REPO_URL = "https://github.com/seansongx/lubobao";
 const LICENSE_URL = `${REPO_URL}/blob/main/LICENSE`;
 
 /** ctx 为 null 时设置还没读到，「自动检查更新」开关暂不可用。 */
@@ -30,6 +30,12 @@ export function AboutSection({ ctx }: { ctx: SettingsController | null }) {
       active = false;
     };
   }, []);
+
+  const revealLog = () => {
+    api.revealLogFile().catch((error: unknown) => {
+      toast.error("无法打开日志位置", { description: String(error) });
+    });
+  };
 
   return (
     <>
@@ -68,6 +74,20 @@ export function AboutSection({ ctx }: { ctx: SettingsController | null }) {
           <Button type="button" variant="link" onClick={() => void api.openUrl(REPO_URL)}>
             github.com/seansongx/lubobao
             <ExternalLink aria-hidden />
+          </Button>
+        </FieldRow>
+      </SettingsCard>
+      <SettingsCard title="问题反馈">
+        <FieldRow label="提交反馈" description="在 GitHub 上报告问题或提出建议，需要 GitHub 账号">
+          <Button type="button" variant="outline" size="sm" onClick={() => void api.openUrl(FEEDBACK_URL)}>
+            <ExternalLink aria-hidden />
+            提交反馈
+          </Button>
+        </FieldRow>
+        <FieldRow label="应用日志" description="报告问题时附上 lubobao.log，便于排查；日志里可能有直播间链接，上传前可自行检查">
+          <Button type="button" variant="outline" size="sm" onClick={revealLog}>
+            <FolderOpen aria-hidden />
+            打开日志位置
           </Button>
         </FieldRow>
       </SettingsCard>

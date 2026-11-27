@@ -104,6 +104,7 @@ pub fn run() {
             desktop::window::get_window_material,
             desktop::close::resolve_close,
             desktop::tray::confirm_pause_all,
+            desktop::logs::reveal_log_file,
             desktop::update::check_update,
             desktop::update::download_update,
             desktop::update::install_update,
