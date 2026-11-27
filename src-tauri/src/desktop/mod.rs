@@ -12,6 +12,7 @@
 
 pub mod close;
 mod hint;
+pub mod logs;
 pub mod notify;
 pub mod quit;
 pub mod tray;

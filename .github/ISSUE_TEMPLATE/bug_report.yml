@@ -1,0 +1,69 @@
+name: 问题报告
+description: 录制失败、检测出错、界面异常等问题
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈。提交前请先在 [已有 issue](https://github.com/seansongx/lubobao/issues?q=is%3Aissue) 里搜一下，可能已经有人报告过。
+  - type: input
+    id: version
+    attributes:
+      label: 录播宝版本
+      description: 设置 → 关于 里的版本号；命令行版运行 `lubobao-cli --version`
+      placeholder: 例如 0.2.0
+    validations:
+      required: true
+  - type: dropdown
+    id: edition
+    attributes:
+      label: 使用方式
+      options:
+        - 桌面版（Windows）
+        - 桌面版（macOS）
+        - 桌面版（Linux）
+        - 命令行版
+        - Docker
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: 系统版本
+      placeholder: 例如 Windows 11 24H2、macOS 15.1、Ubuntu 24.04
+  - type: input
+    id: room
+    attributes:
+      label: 直播平台和直播间链接
+      description: 和某个直播间有关时填写；不方便公开可以只写平台
+      placeholder: 例如 抖音 https://live.douyin.com/123456
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: 发生了什么
+      description: 你做了什么、看到了什么（界面上的提示文字可以直接复制），以及你期望的结果
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      placeholder: |
+        1. 添加直播间 …
+        2. 开播后 …
+        3. 看到 …
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志
+      description: |
+        桌面版在 设置 → 关于 →「打开日志位置」找到 `lubobao.log`，把出问题前后的几十行贴在这里，或者直接把文件拖进来；命令行版和 Docker 贴终端输出。
+        日志里可能有直播间链接，上传前可以检查一下。
+      render: text
+  - type: checkboxes
+    id: cookie
+    attributes:
+      label: 提交前
+      options:
+        - label: 我没有在这里贴出平台 Cookie、账号或代理密码
+          required: true
